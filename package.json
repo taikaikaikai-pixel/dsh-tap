@@ -1,0 +1,65 @@
+{
+  "name": "dsh-tap",
+  "version": "0.9.4",
+  "description": "CodeBuddy (copilot.tencent.com) provider bundle for DeepSeek Harness (dsh): 18 models (DeepSeek, GLM, Kimi, MiniMax, Hunyuan, auto) with adjustable reasoning efforts, CodeBuddy web search / web fetch backends for the stock dsh tools, and a settings card in the Web UI.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "local-scan.js",
+    "core/",
+    "providers/",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "scripts/",
+    "docs/rules/",
+    "docs/pitfalls.md",
+    "docs/diagnosis-cache-quota.md",
+    "docs/diagnosis-trae-3003.md",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "AGENTS.md"
+  ],
+  "scripts": {
+    "verify": "node scripts/verify-models.mjs",
+    "verify:bridge": "node scripts/verify-bridge.mjs",
+    "verify:core": "node scripts/verify-core-generic.mjs",
+    "verify:providers": "node scripts/verify-providers.mjs",
+    "verify:trae": "node scripts/verify-trae-model-catalog.mjs",
+    "verify:trae-provider": "node scripts/verify-trae-provider.mjs"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "codebuddy",
+    "llm",
+    "deepseek",
+    "glm",
+    "kimi",
+    "minimax",
+    "hunyuan"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/schemastery": "3.18.1",
+    "yaml": "2.8.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    }
+  }
+}

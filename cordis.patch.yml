@@ -1,0 +1,298 @@
+# dsh-tap — CodeBuddy provider bundle
+#
+# Overrides three rows from dsh-base:
+#
+# 1. `llm-pi-ai` — the codebuddy route: an OpenAI-compatible (Chat
+#    Completions, streaming-only) gateway behind the plugin's loopback
+#    stream bridge at 127.0.0.1:3901, serving 18 models.
+# 2. `agent-default-model` — select deepseek-v3 by default.
+# 3. `web` — pin dsh's stock web_search/web_fetch tools onto the codebuddy
+#    backends registered by index.js. Without the pin, multiple usable
+#    providers (e.g. the bundled web-fetch-http) make selection AMBIGUOUS.
+#
+# Credentials: the route points at the bridge and carries a SENTINEL
+# Authorization header, so no apiKeyEnv is named (a named-but-unset ref
+# fails requests with MISSING_CREDENTIAL; pi-ai only insists on "a key or
+# an Authorization header", and the OpenAI SDK's defaultHeaders override
+# its authHeaders, so the sentinel is what goes on the wire). The bridge
+# replaces the sentinel with the real credential per request — OAuth
+# tokens or the active API key, resolved by index.js (resolveCredential).
+# This file therefore carries no secrets, and OAuth login in the settings
+# card covers the main chat path too.
+#
+# NOTE: this patch REPLACES the whole `config` of each row, so every key the
+# row needs must be restated here.
+#
+# Model sources (checked 2026-08-16):
+# - Sizes and `input` follow the gateway's own catalog, GET /v3/config
+#   (auth via the `x-api-key` header; the UA must match the CLI shape,
+#   e.g. "CLI/unknown CodeBuddy/2.136.0" — the /v2 client UA is rejected
+#   with error 12403). dsh's built-in discovery cannot work here: the
+#   gateway has no OpenAI-style GET /models endpoint. Refresh with:
+#   node scripts/verify-models.mjs --sync
+# - Ids the catalog no longer lists (deepseek-v3 / v3.2 / r1, kimi-k3,
+#   hy3-preview, auto) still serve on /v2 as of 2026-08-16; their sizes
+#   keep each model's official spec. Unknown ids return error 11102.
+# - reasoningEfforts verified 2026-08-16 with `verify-models.mjs --efforts`:
+#   the gateway accepts off/low/medium/high/max spellings across GLM, Kimi,
+#   MiniMax and Hunyuan. Models that think even without the parameter
+#   (kimi-k2.7 / k3 / k3-1, minimax-m2.7) offer no `off`; the rest map
+#   `off` to omitting the parameter (verified: no reasoning_content).
+#   Reasoning length per level is adaptive, not strictly monotonic.
+
+# Insert this package into the profile's plugin entry list so cordis loads
+# index.js (the runtime layer registering the codebuddy web providers).
+- insert:
+    - id: dsh-tap
+      name: 'dsh-tap'
+
+- id: llm-pi-ai
+  config:
+    providers:
+      codebuddy:
+        displayName: CodeBuddy
+        api: openai-completions
+        # Main chat goes through the plugin's loopback stream bridge, which
+        # owns credential resolution (OAuth or API key, per the settings
+        # card). The port must match the bridge's (bridgePort, default
+        # 3901) — change both or chat breaks.
+        baseURL: http://127.0.0.1:3901/v2
+        # Identify as the CodeBuddy CLI client — the same marker set the
+        # official CLI sends (verified from its logs: ideType/ideName "CLI",
+        # X-IDE-* headers). Gateway-side logs and routing use these to show
+        # CodeBuddy traffic. Values copied from @tencent-ai/codebuddy-code.
+        # (User-Agent is replaced by dsh's own attribution UA on the way
+        # out; the /v2 chat endpoint does not enforce a client UA.)
+        headers:
+          # Sentinel: pi-ai refuses to send without a key or an
+          # Authorization header, and defaultHeaders beat the OpenAI SDK's
+          # authHeaders — the bridge replaces this value with the resolved
+          # credential, never forwarding it upstream.
+          Authorization: Bearer dsh-codebuddy-bridge
+          X-IDE-Type: CLI
+          X-IDE-Name: CLI
+          X-IDE-Version: 2.133.1
+          X-Product-Version: 2.133.1
+          X-Requested-With: XMLHttpRequest
+          X-Private-Data: "false"
+        # The endpoint speaks OpenAI-dialect reasoning (reasoning_effort),
+        # not DeepSeek-dialect `thinking`. Tell pi-ai explicitly, otherwise it
+        # guesses from the URL and sends `thinking`, which the gateway answers
+        # with finish_reason=content_filter.
+        # Session attribution (v0.5.5-A): dsh upstream already supplies the
+        # per-request sessionId (dsh-agent-loop sets sessionId: session.id);
+        # these switches let pi-ai emit it as the gateway's affinity headers
+        # (openai format: session_id / x-client-request-id / x-session-affinity).
+        compat:
+          thinkingFormat: openai
+          supportsReasoningEffort: true
+        models:
+          # DeepSeek
+          - id: deepseek-v3
+            name: DeepSeek V3
+            contextWindow: 131072
+            maxTokens: 32768
+          - id: deepseek-v3.2
+            name: DeepSeek V3.2
+            contextWindow: 131072
+            maxTokens: 32768
+          - id: deepseek-r1
+            name: DeepSeek R1
+            contextWindow: 131072
+            maxTokens: 32768
+            reasoningEfforts:
+              low: low
+              medium: medium
+              high: high
+              max: max
+          - id: deepseek-v4-pro
+            name: DeepSeek V4 Pro
+            contextWindow: 1000000
+            maxTokens: 50000
+            input: [text, image]
+            reasoningEfforts:
+              off:
+              low: low
+              medium: medium
+              high: high
+              max: max
+          - id: deepseek-v4-flash
+            name: DeepSeek V4 Flash
+            contextWindow: 1000000
+            maxTokens: 50000
+            input: [text, image]
+            reasoningEfforts:
+              off:
+              low: low
+              medium: medium
+              high: high
+              max: max
+          # Zhipu GLM
+          - id: glm-5.1
+            name: GLM 5.1
+            contextWindow: 200000
+            maxTokens: 48000
+            input: [text, image]
+            reasoningEfforts:
+              off:
+              low: low
+              medium: medium
+              high: high
+              max: max
+          - id: glm-5.2
+            name: GLM 5.2
+            contextWindow: 1000000
+            maxTokens: 48000
+            input: [text, image]
+            reasoningEfforts:
+              off:
+              low: low
+              medium: medium
+              high: high
+              max: max
+          - id: glm-5v-turbo
+            name: GLM 5V Turbo
+            contextWindow: 200000
+            maxTokens: 64000
+            input: [text, image]
+            reasoningEfforts:
+              off:
+              low: low
+              medium: medium
+              high: high
+              max: max
+          # Moonshot Kimi
+          - id: kimi-k2.5
+            name: Kimi K2.5
+            contextWindow: 164000
+            maxTokens: 32000
+            input: [text, image]
+            reasoningEfforts:
+              off:
+              low: low
+              medium: medium
+              high: high
+              max: max
+          - id: kimi-k2.6
+            name: Kimi K2.6
+            contextWindow: 256000
+            maxTokens: 32000
+            input: [text, image]
+            reasoningEfforts:
+              off:
+              low: low
+              medium: medium
+              high: high
+              max: max
+          - id: kimi-k2.7
+            name: Kimi K2.7
+            contextWindow: 256000
+            maxTokens: 32000
+            input: [text, image]
+            reasoningEfforts:
+              low: low
+              medium: medium
+              high: high
+              max: max
+          - id: kimi-k3
+            name: Kimi K3
+            contextWindow: 262144
+            maxTokens: 32768
+            reasoningEfforts:
+              low: low
+              medium: medium
+              high: high
+              max: max
+          - id: kimi-k3-1
+            name: Kimi K3.1
+            contextWindow: 1000000
+            maxTokens: 32000
+            input: [text, image]
+            reasoningEfforts:
+              low: low
+              medium: medium
+              high: high
+              max: max
+          # MiniMax
+          - id: minimax-m2.7
+            name: MiniMax M2.7
+            contextWindow: 200000
+            maxTokens: 48000
+            input: [text, image]
+            reasoningEfforts:
+              low: low
+              medium: medium
+              high: high
+              max: max
+          - id: minimax-m3
+            name: MiniMax M3
+            contextWindow: 512000
+            maxTokens: 128000
+            input: [text, image]
+            reasoningEfforts:
+              off:
+              low: low
+              medium: medium
+              high: high
+              max: max
+          # Tencent Hunyuan
+          - id: hy3
+            name: Hunyuan Hy3
+            contextWindow: 192000
+            maxTokens: 64000
+            input: [text, image]
+            reasoningEfforts:
+              off:
+              low: low
+              medium: medium
+              high: high
+              max: max
+          - id: hy3-preview
+            name: Hunyuan Hy3 Preview
+            contextWindow: 262144
+            maxTokens: 32768
+            reasoningEfforts:
+              off:
+              low: low
+              medium: medium
+              high: high
+              max: max
+          # Auto routing
+          - id: auto
+            name: Auto
+            contextWindow: 262144
+            maxTokens: 32768
+
+      # TraeWork CN channel (v0.8.x): OAuth subscription quota via the
+      # plugin's OpenAI<->Trae translation gateway at 127.0.0.1:3902
+      # (default; must match traeBridgePort).
+      #
+      # 0.8.7 NOTE — no static trae base here anymore (dsh 0.1.1-rc.2
+      # adaptation): llm-pi-ai now REJECTS a non-catalog route with an empty
+      # models list at apply time (throwing takes down the whole llm-pi-ai
+      # fiber), so the "empty-list shadowing" trick for disabling the channel
+      # no longer works. Route EXISTENCE is now the whole story, owned by the
+      # settings.yaml mirror index.js maintains (llm-pi-ai.providers.trae as a
+      # COMPLETE block): enabled+synced -> full block (displayName/api/
+      # baseURL/headers/models, baseURL following traeBridgePort);
+      # disabled/unsynced -> the block is DELETED (route gone, picker hides
+      # the channel, no restart). With no patch-layer base, deletion leaves
+      # no stale fallback to shadow. Same sentinel-Authorization mechanics
+      # as the codebuddy route: the gateway replaces the static header per
+      # request with the resolved OAuth credential (Cloud-IDE-JWT +
+      # x-cloudide-token). reasoning_effort dialect unverified against the
+      # Trae gateway — compat left off until the live probe pins it.
+      # UPGRADE NOTE: a settings.yaml trae block written by <=0.8.5 carries
+      # only the models path (it leaned on this base for the other fields);
+      # remove it before the first 0.1.1-rc.2 boot, or llm-pi-ai fails on
+      # the missing baseURL before this plugin can rewrite it.
+
+- id: agent-default-model
+  config:
+    provider: codebuddy
+    model: deepseek-v3
+
+- id: web
+  config:
+    searchProvider: codebuddy
+    fetchProvider: codebuddy
