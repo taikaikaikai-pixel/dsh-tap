@@ -38,6 +38,22 @@
  *      as well as POST, trae-model-sync dbPath is path/extension-checked,
  *      __proto__-family model ids are rejected, and plaintext http
  *      baseURLs outside loopback fail validation without persisting
+ *  14. cancellation propagation (design-debt fix): a client disconnect
+ *      aborts the upstream fetch/SSE read (stream + aggregate paths) and
+ *      frees the per-session slot; a waiter that disconnects while queued
+ *      is never sent upstream; >32MB bodies get a 413 JSON answer instead
+ *      of a bare socket reset; aggregated chat.completion carries the
+ *      captured usage; the outbound first-byte guard
+ *      (upstreamFirstByteTimeoutMs) turns a never-answering upstream into a
+ *      prompt 502 and hangs up on it
+ *  15. OAuth state machine (providers/codebuddy/oauth.js): logout()
+ *      terminates an in-flight login poll (a browser authorization that
+ *      completes afterwards never logs the user back in; no further polls
+ *      hit the upstream); a refused refresh (R-O4: 401 + 12153) surfaces
+ *      needsReauth + reason in oauthStatus() while signedIn stays true; an
+ *      expired refresh token (refreshExpiresAt) is detected without a
+ *      request; a later successful refresh clears the flag and records
+ *      refreshExpiresIn; logout clears it; the happy login path still works
  *
  * Usage: node scripts/verify-bridge.mjs   (no network, no credentials)
  */
@@ -60,6 +76,10 @@ process.env.CODEBUDDY_BRIDGE_LOG = join(process.env.DSH_HOME, 'bridge-log.jsonl'
 // ---------------------------------------------------------------- mock gateway
 
 const arrivals = [] // {path, stream, headers, at} in upstream-arrival order
+// [14] 取消传播用：mock 记录被桥中止的上游连接（model 决定 mock 行为——
+// m-drip 长流慢滴、m-hang 永不回头；请求体经桥原样转发，model 是唯一可
+// 从入站侧控制 mock 的字段）。
+const upstreamClosed = [] // {model, at, sentChunks}
 // [12] oauth-start 门禁用：auth/state 响应里的 authUrl（null → 回环默认值，
 // 即通过门禁的正例；置为投毒值即负例）。
 let oauthStateAuthUrl = null
@@ -94,6 +114,27 @@ const upstream = createServer((req, res) => {
       authorization: req.headers.authorization ?? null,
       at: Date.now(),
     })
+    if (parsed?.model === 'm-hang') {
+      // 连上却永不回头（首字节护栏的对象）；只记录桥是否把我们挂断。
+      res.on('close', () => upstreamClosed.push({ model: 'm-hang', at: Date.now(), sentChunks: 0 }))
+      return
+    }
+    if (parsed?.model === 'm-drip') {
+      // 长流慢滴：每 40ms 一个 chunk，最多 30s——只有桥主动中止才会提前结束。
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      let sent = 0
+      const timer = setInterval(() => {
+        if (res.destroyed) return clearInterval(timer)
+        sent++
+        res.write(`data: {"id":"drip","choices":[{"index":0,"delta":{"content":"tick ${sent} "}}],"usage":{"prompt_tokens":1,"completion_tokens":${sent},"total_tokens":${sent + 1},"credit":0}}\n\n`)
+        if (sent >= 750) { clearInterval(timer); res.end('data: [DONE]\n\n') }
+      }, 40)
+      res.on('close', () => {
+        clearInterval(timer)
+        if (!res.writableFinished) upstreamClosed.push({ model: 'm-drip', at: Date.now(), sentChunks: sent })
+      })
+      return
+    }
     setTimeout(() => {
       if (req.url.endsWith('/chat/completions')) {
         res.writeHead(200, { 'Content-Type': 'text/event-stream' })
@@ -654,6 +695,282 @@ async function main() {
     res = await callRoute(routes, null)
     check('rejected patches persisted nothing (baseURL unchanged)',
       res.json?.value?.baseURL === `http://127.0.0.1:${upstreamPort}`, res.json?.value?.baseURL)
+  }
+
+  // ------------------------------------------------ 14. cancellation propagation
+  // 设计债修复回归锁（core/bridge.js）：
+  //   a) 客户端断连 → 上游 fetch/SSE 读循环中止（流式与聚合两条路径）；
+  //   b) 断连后 SessionLimiter 槽位释放（同会话 limit=1 的下一请求立即通过）；
+  //   c) 排队中断连的 waiter 不再被唤醒发上游（上游零到达）；
+  //   d) 请求体 > 32MB → 413 JSON（此前 req.destroy() 无响应），桥继续服务；
+  //   e) 非流式聚合回传抓到的 usage（此前恒 {}）；
+  //   f) 出站首字节护栏：上游连上不回头 → 按 upstreamFirstByteTimeoutMs 502
+  //      并挂断上游（与 trae inline 侧对称）。
+  console.log('\n[14] cancellation propagation / 413 / aggregate usage / first-byte guard')
+  {
+    const waitFor = async (pred, ms = 3000) => {
+      const t0 = Date.now()
+      while (!pred() && Date.now() - t0 < ms) await sleep(25)
+      return pred()
+    }
+    const chatAbortable = (body, headers, ac) =>
+      fetch(`${bridge}/v2/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify(body),
+        signal: ac.signal,
+      })
+    const writeSettings = (obj) =>
+      writeFileSync(join(process.env.DSH_HOME, 'codebuddy-plugin.json'), JSON.stringify(obj) + '\n')
+
+    // 14a. 流式路径：读到首块后断连 → 上游连接被桥中止
+    writeSettings({ maxConcurrentPerSession: 1 })
+    {
+      upstreamClosed.length = 0
+      const ac = new AbortController()
+      const res = await chatAbortable({ model: 'm-drip', stream: true, messages: [] }, { 'X-Session-ID': 'sess-cancel' }, ac)
+      const reader = res.body.getReader()
+      const first = await reader.read()
+      check('14a stream: first chunk flowing before the disconnect', !first.done && first.value?.length > 0)
+      const tAbort = Date.now()
+      ac.abort()
+      const closed = await waitFor(() => upstreamClosed.some((c) => c.model === 'm-drip'), 3000)
+      const rec = upstreamClosed.find((c) => c.model === 'm-drip')
+      check('14a stream: client disconnect aborts the upstream connection',
+        closed, `upstreamClosed=${JSON.stringify(upstreamClosed)}`)
+      check('14a stream: upstream hung up promptly (<1.5s after abort), not after the 30s drip',
+        closed && rec.at - tAbort < 1500 && rec.sentChunks < 100, `${rec ? rec.at - tAbort : '?'}ms, chunks ${rec?.sentChunks}`)
+    }
+
+    // 14b. 槽位释放：同会话 limit=1，断连后的下一请求必须立刻通过
+    {
+      const t0 = Date.now()
+      const r = await withTimeout(chat({ model: 'm1', stream: true, messages: [] }, { 'X-Session-ID': 'sess-cancel' }).then((x) => x.text()), 3000)
+      check('14b slot released: next request on the same session completes (no stranded slot)',
+        r !== 'TIMEOUT' && r.includes('[DONE]') && Date.now() - t0 < UPSTREAM_LATENCY_MS * 3, r === 'TIMEOUT' ? 'TIMEOUT' : `${Date.now() - t0}ms`)
+    }
+
+    // 14c. 排队中断连：R1 长流占槽，R2 排队后断连，R1 再断 → R3 通过，R2 永不到上游
+    {
+      upstreamClosed.length = 0
+      arrivals.length = 0
+      const ac1 = new AbortController()
+      const r1 = await chatAbortable({ model: 'm-drip', stream: true, messages: [] }, { 'X-Session-ID': 'sess-queue' }, ac1)
+      await r1.body.getReader().read() // R1 holds the single slot
+      const ac2 = new AbortController()
+      const p2 = chatAbortable({ model: 'm-queued-victim', stream: true, messages: [] }, { 'X-Session-ID': 'sess-queue' }, ac2)
+        .then((x) => x.text()).catch((e) => e.name)
+      await sleep(150) // R2 is now queued behind R1
+      ac2.abort()
+      const r2 = await p2
+      check('14c queued waiter: client-side fetch rejected on abort', r2 === 'AbortError', String(r2))
+      await sleep(150)
+      ac1.abort() // free the slot → the limiter must NOT wake R2
+      await waitFor(() => upstreamClosed.some((c) => c.model === 'm-drip'), 3000)
+      const t0 = Date.now()
+      const r3 = await withTimeout(chat({ model: 'm1', stream: true, messages: [] }, { 'X-Session-ID': 'sess-queue' }).then((x) => x.text()), 3000)
+      check('14c queue not leaked: R3 completes after R1 abort', r3 !== 'TIMEOUT' && r3.includes('[DONE]'), r3 === 'TIMEOUT' ? 'TIMEOUT' : `${Date.now() - t0}ms`)
+      await sleep(UPSTREAM_LATENCY_MS + 200) // any wrongly-woken R2 would have arrived by now
+      const models = arrivals.map((a) => { try { return JSON.parse(a.raw).model } catch { return null } })
+      check('14c disconnected waiter never reached upstream',
+        !models.includes('m-queued-victim') && models.includes('m-drip') && models.includes('m1'), JSON.stringify(models))
+    }
+
+    // 14d. 聚合路径：非流式调用方断连 → 上游同样被中止 + 槽位释放
+    {
+      upstreamClosed.length = 0
+      const ac = new AbortController()
+      const p = chatAbortable({ model: 'm-drip', stream: false, messages: [] }, { 'X-Session-ID': 'sess-agg' }, ac).catch((e) => e.name)
+      await sleep(300)
+      ac.abort()
+      await p
+      const closed = await waitFor(() => upstreamClosed.some((c) => c.model === 'm-drip'), 3000)
+      check('14d aggregate: client disconnect aborts the upstream stream', closed, JSON.stringify(upstreamClosed))
+      const r = await withTimeout(chat({ model: 'm1', stream: false, messages: [] }, { 'X-Session-ID': 'sess-agg' }).then((x) => x.json()), 3000)
+      check('14d aggregate: slot released afterwards', r !== 'TIMEOUT' && r?.object === 'chat.completion')
+    }
+
+    // 14e. 413：>32MB 请求体得到 JSON 错误响应，不再是裸 socket 复位；桥继续服务
+    {
+      const before = arrivals.length
+      const big = Buffer.alloc(33 * 1024 * 1024, 0x41)
+      let status = null
+      let json = null
+      try {
+        const r = await fetch(`${bridge}/v2/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: big })
+        status = r.status
+        json = await r.json().catch(() => null)
+      } catch (e) {
+        status = `threw ${e?.cause?.code ?? e.message}`
+      }
+      check('14e oversize body answered 413 (was: connection reset, no response)', status === 413, String(status))
+      check('14e 413 body is a classic JSON error', json?.error?.type === 'payload_too_large' && /32/.test(json?.error?.message ?? ''), JSON.stringify(json))
+      await sleep(100)
+      check('14e oversize body never proxied upstream', arrivals.length === before)
+      const r = await withTimeout(chat({ model: 'm1', stream: true, messages: [] }).then((x) => x.text()), 3000)
+      check('14e bridge keeps serving after the 413', r !== 'TIMEOUT' && r.includes('[DONE]'))
+    }
+
+    // 14f. 聚合 usage 回传（此前恒 {}）
+    {
+      const json = await (await chat({ model: 'm1', stream: false, messages: [] })).json()
+      check('14f aggregated chat.completion carries the captured usage',
+        json?.usage?.total_tokens === 5 && json?.usage?.prompt_tokens === 3 && json?.usage?.credit === 0.01, JSON.stringify(json?.usage))
+    }
+
+    // 14g. 首字节护栏：上游连上不回头 → 按设置 502 并挂断上游
+    {
+      writeSettings({ maxConcurrentPerSession: 2, upstreamFirstByteTimeoutMs: 1000 })
+      upstreamClosed.length = 0
+      const t0 = Date.now()
+      const r = await withTimeout(chat({ model: 'm-hang', stream: true, messages: [] }), 6000)
+      const ms = Date.now() - t0
+      const body = r === 'TIMEOUT' ? null : await r.json().catch(() => null)
+      check('14g never-answering upstream → 502 within the guard window (1000ms setting)',
+        r !== 'TIMEOUT' && r.status === 502 && ms >= 900 && ms < 3000, r === 'TIMEOUT' ? 'TIMEOUT' : `HTTP ${r.status} after ${ms}ms`)
+      check('14g error text names the first-byte timeout', /first-byte timeout/.test(body?.error?.message ?? ''), JSON.stringify(body))
+      const closed = await waitFor(() => upstreamClosed.some((c) => c.model === 'm-hang'), 2000)
+      check('14g guard hangs up the stalled upstream connection', closed)
+      // 长流不受护栏影响：护栏只到响应头为止
+      upstreamClosed.length = 0
+      const ac = new AbortController()
+      const drip = await chatAbortable({ model: 'm-drip', stream: true, messages: [] }, {}, ac)
+      const reader = drip.body.getReader()
+      let ticks = 0
+      const tEnd = Date.now() + 1600
+      while (Date.now() < tEnd) { const { done } = await reader.read(); if (done) break; ticks++ }
+      check('14g guard covers headers only: SSE keeps flowing past the 1000ms window', ticks >= 20 && upstreamClosed.length === 0, `ticks ${ticks}`)
+      ac.abort()
+      writeSettings({ maxConcurrentPerSession: 2 })
+    }
+  }
+
+  // ------------------------------------------------ 15. OAuth state machine
+  // 设计债修复回归锁（providers/codebuddy/oauth.js）——直接驱动 createOAuth
+  // （内存 store + 专用 mock 上游），不依赖设置路由：
+  //   a) logout() 终止进行中的 poll：登出后浏览器完成授权不会被重新登进，
+  //      上游不再收到 auth/token 轮询；
+  //   b) refresh 被拒（401 + 12153）→ resolveOAuthCredential 回 null，
+  //      oauthStatus().needsReauth=true + reason，signedIn 仍 true（令牌文件在）；
+  //   c) refreshExpiresAt 已过期 → 不发请求直接判 needsReauth；
+  //   d) refresh 成功 → 标志清除、refreshExpiresIn 换算成 refreshExpiresAt；
+  //   e) logout 清标志；f) 正常登录路径仍然通；g) 设置路由视图带出新字段。
+  console.log('\n[15] OAuth state machine: logout kills poll / refresh failure → needsReauth')
+  {
+    const { createOAuth } = await import(new URL('../providers/codebuddy/oauth.js', import.meta.url).href)
+    const oauthHits = { token: 0, refresh: 0, state: 0, account: 0 }
+    const mock = { tokenResult: 'pending', refreshResult: 'refuse' }
+    const oauthUpstream = createServer((req, res) => {
+      const url = new URL(req.url, 'http://x')
+      const json = (code, body) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)) }
+      if (url.pathname === '/v2/plugin/auth/state') {
+        oauthHits.state++
+        return json(200, { code: 0, data: { state: 'st-15', authUrl: `http://127.0.0.1:${oauthUpstream.address().port}/authorize` } })
+      }
+      if (url.pathname === '/v2/plugin/auth/token') {
+        oauthHits.token++
+        if (mock.tokenResult === 'pending') return json(200, { code: 11217, msg: 'pending' })
+        return json(200, { code: 0, data: { accessToken: 'acc-' + mock.tokenResult, refreshToken: 'ref-' + mock.tokenResult, expiresIn: 3600, refreshExpiresIn: 86400, domain: 'd' } })
+      }
+      if (url.pathname === '/v2/plugin/login/account') {
+        oauthHits.account++
+        return json(200, { code: 0, data: { uid: 'u1', nickname: 'tester' } })
+      }
+      if (url.pathname === '/v2/plugin/auth/token/refresh') {
+        oauthHits.refresh++
+        if (mock.refreshResult === 'refuse') return json(401, { code: 12153, msg: 'refresh token failed:10000:token format error' })
+        return json(200, { code: 0, data: { accessToken: 'acc-refreshed', refreshToken: 'ref-refreshed', expiresIn: 5184000, refreshExpiresIn: 7776000, domain: 'd' } })
+      }
+      json(404, { code: 404 })
+    })
+    await new Promise((r) => oauthUpstream.listen(0, '127.0.0.1', r))
+    const oBase = `http://127.0.0.1:${oauthUpstream.address().port}`
+    let store = {}
+    const oauth = createOAuth({ readAuth: () => JSON.parse(JSON.stringify(store)), writeAuth: (v) => { store = JSON.parse(JSON.stringify(v)) } })
+
+    // 15a. 登出终止 poll：pending 期间 logout，然后上游"完成授权"
+    {
+      await oauth.startOAuth(oBase)
+      check('15a login pending after start', oauth.oauthStatus().pending === true && oauth.oauthStatus().authUrl.startsWith(oBase))
+      await sleep(1300) // at least one 11217 poll happened
+      const polledBefore = oauthHits.token
+      check('15a poll is running (auth/token hit)', polledBefore >= 1, `hits ${polledBefore}`)
+      oauth.logout()
+      mock.tokenResult = 'late' // 浏览器此刻完成授权
+      check('15a logout: pending cleared immediately', oauth.oauthStatus().pending === false && oauth.oauthStatus().signedIn === false)
+      await sleep(2600) // 旧循环若未终止，至少两次轮询会拿到 token 并写库
+      check('15a logout terminated the poll: no further auth/token polls after logout',
+        oauthHits.token === polledBefore, `hits ${polledBefore} → ${oauthHits.token}`)
+      check('15a late browser authorization does NOT log the user back in',
+        oauth.oauthStatus().signedIn === false && !store.auth, JSON.stringify(store))
+      check('15a no account fetch for the killed poll', oauthHits.account === 0)
+      mock.tokenResult = 'pending'
+    }
+
+    // 15b. refresh 被拒 → needsReauth，signedIn 仍 true，凭据解析 null
+    {
+      store = { auth: { accessToken: 'acc-old', refreshToken: 'ref-bad', expiresAt: Date.now() + 10_000, domain: 'd' }, account: { uid: 'u1', nickname: 'tester' } }
+      let st = oauth.oauthStatus()
+      check('15b before any refresh: signedIn, no reauth signal yet', st.signedIn === true && st.needsReauth === false)
+      const cred = await oauth.resolveOAuthCredential({ baseURL: oBase })
+      check('15b refused refresh → credential null (chat would 503)', cred === null && oauthHits.refresh === 1, `cred=${JSON.stringify(cred)} hits=${oauthHits.refresh}`)
+      st = oauth.oauthStatus()
+      check('15b oauthStatus exposes needsReauth + reason (was: signedIn only)',
+        st.signedIn === true && st.needsReauth === true && /12153/.test(st.reauthReason) && /重新登录/.test(st.reauthReason), JSON.stringify(st))
+      check('15b tokens never leave the host in the view', !JSON.stringify(st).includes('acc-old') && !JSON.stringify(st).includes('ref-bad'))
+    }
+
+    // 15c. refresh 成功 → 标志清除 + refreshExpiresIn 换算落盘
+    {
+      mock.refreshResult = 'ok'
+      const t0 = Date.now()
+      const cred = await oauth.resolveOAuthCredential({ baseURL: oBase })
+      check('15c successful refresh → credential resolves with the new token', cred?.authorization === 'Bearer acc-refreshed' && cred?.headers?.['X-User-Id'] === 'u1', JSON.stringify(cred))
+      const st = oauth.oauthStatus()
+      check('15c needsReauth cleared after a successful refresh', st.needsReauth === false && st.reauthReason === '')
+      check('15c refreshExpiresIn recorded as absolute refreshExpiresAt (R-O6 field-name finding)',
+        typeof store.auth?.refreshExpiresAt === 'number' && store.auth.refreshExpiresAt - t0 >= 7776000 * 1000 - 5000
+          && st.refreshTokenExpiresAt === store.auth.refreshExpiresAt, JSON.stringify(store.auth?.refreshExpiresAt))
+    }
+
+    // 15d. 刷新令牌本身过期 → 零请求直接判 needsReauth
+    {
+      const before = oauthHits.refresh
+      store = { auth: { accessToken: 'acc-dead', refreshToken: 'ref-dead', expiresAt: Date.now() - 1000, refreshExpiresAt: Date.now() - 1000, domain: 'd' } }
+      const st0 = oauth.oauthStatus()
+      check('15d expired refresh token is visible from the view alone (no request)', st0.signedIn === true && st0.needsReauth === true && /过期/.test(st0.reauthReason), JSON.stringify(st0))
+      const cred = await oauth.resolveOAuthCredential({ baseURL: oBase })
+      check('15d expired refresh token: no refresh request sent, credential null', cred === null && oauthHits.refresh === before, `hits ${before} → ${oauthHits.refresh}`)
+    }
+
+    // 15e. logout 清标志
+    {
+      oauth.logout()
+      const st = oauth.oauthStatus()
+      check('15e logout clears the reauth signal and the store', st.signedIn === false && st.needsReauth === false && !store.auth)
+    }
+
+    // 15f. 正常登录路径仍通（gen 机制不伤 happy path）
+    {
+      mock.tokenResult = 'pending'
+      await oauth.startOAuth(oBase)
+      await sleep(300)
+      mock.tokenResult = 'good'
+      let ok = false
+      for (let i = 0; i < 40 && !ok; i++) { await sleep(100); ok = oauth.oauthStatus().signedIn === true && oauth.oauthStatus().pending === false }
+      const st = oauth.oauthStatus()
+      check('15f happy path: login completes and persists', ok && store.auth?.accessToken === 'acc-good' && st.account?.nickname === 'tester', JSON.stringify(st))
+      check('15f fresh login has no reauth signal + refreshExpiresIn recorded', st.needsReauth === false && typeof st.refreshTokenExpiresAt === 'number')
+      oauth.logout()
+    }
+
+    // 15g. 设置路由视图带出新字段（前端登录区据此显示）
+    {
+      const res = await callRoute(routes, { action: 'oauth-status' })
+      check('15g oauth-status route ships needsReauth/reauthReason fields',
+        res.status === 200 && typeof res.json?.oauth?.needsReauth === 'boolean' && typeof res.json?.oauth?.reauthReason === 'string', JSON.stringify(res.json?.oauth))
+    }
+    await new Promise((r) => oauthUpstream.close(r))
   }
 
   console.log(failures === 0 ? '\nall bridge checks passed' : `\n${failures} check(s) FAILED`)

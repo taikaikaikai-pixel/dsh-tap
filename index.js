@@ -121,9 +121,10 @@ export const Config = z.object({
   // 不支持 tools，每请求起云端沙箱 agent，耗 work 额度池）。2026-08-24 探测
   // 定论见 providers/trae/remote.js 文件头。
   traeChatTransport: z.union([z.const('inline'), z.const('remote')]).default('inline'),
-  // inline 上游首字节护栏（毫秒）：边缘/本地代理"收下请求不回应"时快速失败，
+  // 出站首字节护栏（毫秒）：边缘/本地代理"收下请求不回应"时快速失败，
   // 避免用户请求无限挂死（2026-08-24 故障取证 docs/diagnosis-trae-3003.md §8）。
-  // 仅约束响应头到达前；SSE 长流在头到达后不受影响。
+  // 仅约束响应头到达前；SSE 长流在头到达后不受影响。Trae inline 网关与
+  // CodeBuddy 流式桥（core/bridge.js，通用取消机制）共用同一值。
   upstreamFirstByteTimeoutMs: z.number().step(1).min(1000).max(300_000).default(45_000),
 })
 
