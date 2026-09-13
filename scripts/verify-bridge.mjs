@@ -46,6 +46,14 @@
  *      captured usage; the outbound first-byte guard
  *      (upstreamFirstByteTimeoutMs) turns a never-answering upstream into a
  *      prompt 502 and hangs up on it
+ *  15. OAuth state machine (providers/codebuddy/oauth.js): logout()
+ *      terminates an in-flight login poll (a browser authorization that
+ *      completes afterwards never logs the user back in; no further polls
+ *      hit the upstream); a refused refresh (R-O4: 401 + 12153) surfaces
+ *      needsReauth + reason in oauthStatus() while signedIn stays true; an
+ *      expired refresh token (refreshExpiresAt) is detected without a
+ *      request; a later successful refresh clears the flag and records
+ *      refreshExpiresIn; logout clears it; the happy login path still works
  *
  * Usage: node scripts/verify-bridge.mjs   (no network, no credentials)
  */
@@ -835,6 +843,134 @@ async function main() {
       ac.abort()
       writeSettings({ maxConcurrentPerSession: 2 })
     }
+  }
+
+  // ------------------------------------------------ 15. OAuth state machine
+  // 设计债修复回归锁（providers/codebuddy/oauth.js）——直接驱动 createOAuth
+  // （内存 store + 专用 mock 上游），不依赖设置路由：
+  //   a) logout() 终止进行中的 poll：登出后浏览器完成授权不会被重新登进，
+  //      上游不再收到 auth/token 轮询；
+  //   b) refresh 被拒（401 + 12153）→ resolveOAuthCredential 回 null，
+  //      oauthStatus().needsReauth=true + reason，signedIn 仍 true（令牌文件在）；
+  //   c) refreshExpiresAt 已过期 → 不发请求直接判 needsReauth；
+  //   d) refresh 成功 → 标志清除、refreshExpiresIn 换算成 refreshExpiresAt；
+  //   e) logout 清标志；f) 正常登录路径仍然通；g) 设置路由视图带出新字段。
+  console.log('\n[15] OAuth state machine: logout kills poll / refresh failure → needsReauth')
+  {
+    const { createOAuth } = await import(new URL('../providers/codebuddy/oauth.js', import.meta.url).href)
+    const oauthHits = { token: 0, refresh: 0, state: 0, account: 0 }
+    const mock = { tokenResult: 'pending', refreshResult: 'refuse' }
+    const oauthUpstream = createServer((req, res) => {
+      const url = new URL(req.url, 'http://x')
+      const json = (code, body) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)) }
+      if (url.pathname === '/v2/plugin/auth/state') {
+        oauthHits.state++
+        return json(200, { code: 0, data: { state: 'st-15', authUrl: `http://127.0.0.1:${oauthUpstream.address().port}/authorize` } })
+      }
+      if (url.pathname === '/v2/plugin/auth/token') {
+        oauthHits.token++
+        if (mock.tokenResult === 'pending') return json(200, { code: 11217, msg: 'pending' })
+        return json(200, { code: 0, data: { accessToken: 'acc-' + mock.tokenResult, refreshToken: 'ref-' + mock.tokenResult, expiresIn: 3600, refreshExpiresIn: 86400, domain: 'd' } })
+      }
+      if (url.pathname === '/v2/plugin/login/account') {
+        oauthHits.account++
+        return json(200, { code: 0, data: { uid: 'u1', nickname: 'tester' } })
+      }
+      if (url.pathname === '/v2/plugin/auth/token/refresh') {
+        oauthHits.refresh++
+        if (mock.refreshResult === 'refuse') return json(401, { code: 12153, msg: 'refresh token failed:10000:token format error' })
+        return json(200, { code: 0, data: { accessToken: 'acc-refreshed', refreshToken: 'ref-refreshed', expiresIn: 5184000, refreshExpiresIn: 7776000, domain: 'd' } })
+      }
+      json(404, { code: 404 })
+    })
+    await new Promise((r) => oauthUpstream.listen(0, '127.0.0.1', r))
+    const oBase = `http://127.0.0.1:${oauthUpstream.address().port}`
+    let store = {}
+    const oauth = createOAuth({ readAuth: () => JSON.parse(JSON.stringify(store)), writeAuth: (v) => { store = JSON.parse(JSON.stringify(v)) } })
+
+    // 15a. 登出终止 poll：pending 期间 logout，然后上游"完成授权"
+    {
+      await oauth.startOAuth(oBase)
+      check('15a login pending after start', oauth.oauthStatus().pending === true && oauth.oauthStatus().authUrl.startsWith(oBase))
+      await sleep(1300) // at least one 11217 poll happened
+      const polledBefore = oauthHits.token
+      check('15a poll is running (auth/token hit)', polledBefore >= 1, `hits ${polledBefore}`)
+      oauth.logout()
+      mock.tokenResult = 'late' // 浏览器此刻完成授权
+      check('15a logout: pending cleared immediately', oauth.oauthStatus().pending === false && oauth.oauthStatus().signedIn === false)
+      await sleep(2600) // 旧循环若未终止，至少两次轮询会拿到 token 并写库
+      check('15a logout terminated the poll: no further auth/token polls after logout',
+        oauthHits.token === polledBefore, `hits ${polledBefore} → ${oauthHits.token}`)
+      check('15a late browser authorization does NOT log the user back in',
+        oauth.oauthStatus().signedIn === false && !store.auth, JSON.stringify(store))
+      check('15a no account fetch for the killed poll', oauthHits.account === 0)
+      mock.tokenResult = 'pending'
+    }
+
+    // 15b. refresh 被拒 → needsReauth，signedIn 仍 true，凭据解析 null
+    {
+      store = { auth: { accessToken: 'acc-old', refreshToken: 'ref-bad', expiresAt: Date.now() + 10_000, domain: 'd' }, account: { uid: 'u1', nickname: 'tester' } }
+      let st = oauth.oauthStatus()
+      check('15b before any refresh: signedIn, no reauth signal yet', st.signedIn === true && st.needsReauth === false)
+      const cred = await oauth.resolveOAuthCredential({ baseURL: oBase })
+      check('15b refused refresh → credential null (chat would 503)', cred === null && oauthHits.refresh === 1, `cred=${JSON.stringify(cred)} hits=${oauthHits.refresh}`)
+      st = oauth.oauthStatus()
+      check('15b oauthStatus exposes needsReauth + reason (was: signedIn only)',
+        st.signedIn === true && st.needsReauth === true && /12153/.test(st.reauthReason) && /重新登录/.test(st.reauthReason), JSON.stringify(st))
+      check('15b tokens never leave the host in the view', !JSON.stringify(st).includes('acc-old') && !JSON.stringify(st).includes('ref-bad'))
+    }
+
+    // 15c. refresh 成功 → 标志清除 + refreshExpiresIn 换算落盘
+    {
+      mock.refreshResult = 'ok'
+      const t0 = Date.now()
+      const cred = await oauth.resolveOAuthCredential({ baseURL: oBase })
+      check('15c successful refresh → credential resolves with the new token', cred?.authorization === 'Bearer acc-refreshed' && cred?.headers?.['X-User-Id'] === 'u1', JSON.stringify(cred))
+      const st = oauth.oauthStatus()
+      check('15c needsReauth cleared after a successful refresh', st.needsReauth === false && st.reauthReason === '')
+      check('15c refreshExpiresIn recorded as absolute refreshExpiresAt (R-O6 field-name finding)',
+        typeof store.auth?.refreshExpiresAt === 'number' && store.auth.refreshExpiresAt - t0 >= 7776000 * 1000 - 5000
+          && st.refreshTokenExpiresAt === store.auth.refreshExpiresAt, JSON.stringify(store.auth?.refreshExpiresAt))
+    }
+
+    // 15d. 刷新令牌本身过期 → 零请求直接判 needsReauth
+    {
+      const before = oauthHits.refresh
+      store = { auth: { accessToken: 'acc-dead', refreshToken: 'ref-dead', expiresAt: Date.now() - 1000, refreshExpiresAt: Date.now() - 1000, domain: 'd' } }
+      const st0 = oauth.oauthStatus()
+      check('15d expired refresh token is visible from the view alone (no request)', st0.signedIn === true && st0.needsReauth === true && /过期/.test(st0.reauthReason), JSON.stringify(st0))
+      const cred = await oauth.resolveOAuthCredential({ baseURL: oBase })
+      check('15d expired refresh token: no refresh request sent, credential null', cred === null && oauthHits.refresh === before, `hits ${before} → ${oauthHits.refresh}`)
+    }
+
+    // 15e. logout 清标志
+    {
+      oauth.logout()
+      const st = oauth.oauthStatus()
+      check('15e logout clears the reauth signal and the store', st.signedIn === false && st.needsReauth === false && !store.auth)
+    }
+
+    // 15f. 正常登录路径仍通（gen 机制不伤 happy path）
+    {
+      mock.tokenResult = 'pending'
+      await oauth.startOAuth(oBase)
+      await sleep(300)
+      mock.tokenResult = 'good'
+      let ok = false
+      for (let i = 0; i < 40 && !ok; i++) { await sleep(100); ok = oauth.oauthStatus().signedIn === true && oauth.oauthStatus().pending === false }
+      const st = oauth.oauthStatus()
+      check('15f happy path: login completes and persists', ok && store.auth?.accessToken === 'acc-good' && st.account?.nickname === 'tester', JSON.stringify(st))
+      check('15f fresh login has no reauth signal + refreshExpiresIn recorded', st.needsReauth === false && typeof st.refreshTokenExpiresAt === 'number')
+      oauth.logout()
+    }
+
+    // 15g. 设置路由视图带出新字段（前端登录区据此显示）
+    {
+      const res = await callRoute(routes, { action: 'oauth-status' })
+      check('15g oauth-status route ships needsReauth/reauthReason fields',
+        res.status === 200 && typeof res.json?.oauth?.needsReauth === 'boolean' && typeof res.json?.oauth?.reauthReason === 'string', JSON.stringify(res.json?.oauth))
+    }
+    await new Promise((r) => oauthUpstream.close(r))
   }
 
   console.log(failures === 0 ? '\nall bridge checks passed' : `\n${failures} check(s) FAILED`)

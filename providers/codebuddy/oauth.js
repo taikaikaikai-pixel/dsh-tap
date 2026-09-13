@@ -56,6 +56,40 @@ function assertSafeAuthUrl(authUrl, baseURL) {
 export function createOAuth({ readAuth, writeAuth }) {
   let refreshInFlight = null
   const oauthPending = { active: false, authUrl: '', error: '' }
+  // Poll generation: startOAuth() bumps it and hands the value to its poll
+  // loop; logout() bumps it again (and aborts the in-flight fetch). A loop
+  // whose generation is stale must stop without touching the store — the
+  // browser finishing the authorization after a logout must NOT log the
+  // user back in.
+  let pollGen = 0
+  let pollAbort = null
+  // "Signed-in but dead" signal: the access token is (about to be) expired
+  // and cannot be refreshed — refresh refused / failed, or the refresh
+  // token itself has expired (refreshExpiresAt). signedIn alone would keep
+  // showing 已登录 while every chat 503s. Cleared by a successful refresh,
+  // a fresh login, or logout.
+  const reauth = { needed: false, reason: '', at: null }
+
+  const flagReauth = (reason) => {
+    reauth.needed = true
+    reauth.reason = reason
+    reauth.at = Date.now()
+  }
+  const clearReauth = () => {
+    reauth.needed = false
+    reauth.reason = ''
+    reauth.at = null
+  }
+  /** True when the stored refresh token is past its own expiry. */
+  const refreshExpired = (auth) =>
+    typeof auth?.refreshExpiresAt === 'number' && auth.refreshExpiresAt <= Date.now()
+  /** Absolute refresh-token expiry from a token response (upstream sends
+   * relative seconds as `refreshExpiresIn`; `refreshExpiresAt` is accepted
+   * as the same relative shape for the older field name). */
+  const refreshExpiryFrom = (data, fallback) => {
+    const rel = data?.refreshExpiresIn ?? data?.refreshExpiresAt
+    return rel != null && Number.isFinite(Number(rel)) ? Date.now() + Number(rel) * 1000 : fallback
+  }
 
   /**
    * Exchange the refresh token for a fresh access token (single-flight).
@@ -78,22 +112,31 @@ export function createOAuth({ readAuth, writeAuth }) {
           method: 'POST',
           headers,
         })
-        if (!res.ok) return undefined
         const body = await res.json().catch(() => null)
-        if (!body || body.code !== 0 || !body.data?.accessToken) return undefined
+        if (!res.ok || !body || body.code !== 0 || !body.data?.accessToken) {
+          // Definitive refusal (R-O4: 401 + 12153 for a bad refresh token,
+          // any non-0 business code otherwise): the session is dead until
+          // the user logs in again.
+          const code = body?.code != null ? ` code ${body.code}` : ''
+          const msg = body?.msg ? ` ${body.msg}` : ''
+          flagReauth(`令牌刷新被拒（HTTP ${res.status}${code}${msg}）——需重新登录`)
+          return undefined
+        }
         const store = readAuth()
         store.auth = {
           accessToken: body.data.accessToken,
           expiresAt: Date.now() + (body.data.expiresIn ?? 3600) * 1000,
           refreshToken: body.data.refreshToken ?? auth.refreshToken,
-          refreshExpiresAt: body.data.refreshExpiresAt != null
-            ? Date.now() + body.data.refreshExpiresAt * 1000
-            : auth.refreshExpiresAt,
+          refreshExpiresAt: refreshExpiryFrom(body.data, auth.refreshExpiresAt),
           domain: body.data.domain ?? auth.domain,
         }
         writeAuth(store)
+        clearReauth()
         return store.auth
-      } catch {
+      } catch (err) {
+        // Network-layer failure: also surfaced (the user sees why chat
+        // 503s); a later successful refresh clears it again.
+        flagReauth(`令牌刷新失败（${err?.message ?? err}）——网络恢复后自动重试，持续失败需重新登录`)
         return undefined
       } finally {
         refreshInFlight = null
@@ -109,6 +152,11 @@ export function createOAuth({ readAuth, writeAuth }) {
     if (!auth?.accessToken) return null
     let current = auth
     if (auth.expiresAt && auth.expiresAt - Date.now() < 60_000) {
+      if (refreshExpired(auth)) {
+        // The refresh token is itself expired: no point asking upstream.
+        flagReauth('刷新令牌已过期——需重新登录')
+        return null
+      }
       const refreshed = await refreshOAuth(s.baseURL, auth)
       if (!refreshed) return null
       current = refreshed
@@ -146,20 +194,29 @@ export function createOAuth({ readAuth, writeAuth }) {
     oauthPending.active = true
     oauthPending.authUrl = authUrl
     oauthPending.error = ''
+    const gen = ++pollGen
+    const ctrl = new AbortController()
+    pollAbort = ctrl
 
     const poll = async () => {
       const deadline = Date.now() + LOGIN_TIMEOUT_MS
+      // Stale when logout() (or a newer startOAuth) superseded this loop:
+      // stop silently, never write the store, never clear the newer pending.
+      const stale = () => gen !== pollGen || ctrl.signal.aborted
       try {
-        while (Date.now() < deadline) {
+        while (Date.now() < deadline && !stale()) {
           await new Promise((r) => setTimeout(r, LOGIN_POLL_INTERVAL_MS))
+          if (stale()) return
           let response
           try {
             response = await fetch(`${baseURL}/v2/plugin/auth/token?state=${encodeURIComponent(state)}`, {
               headers: { Accept: 'application/json', 'X-No-Authorization': 'true' },
+              signal: ctrl.signal,
             })
           } catch {
             continue
           }
+          if (stale()) return
           if (!response.ok) continue
           const body = await response.json().catch(() => null)
           if (!body) continue
@@ -180,29 +237,36 @@ export function createOAuth({ readAuth, writeAuth }) {
                 'X-No-Enterprise-Id': 'true',
                 'X-Domain': token.domain ?? '',
               },
+              signal: ctrl.signal,
             })
             const accBody = await accRes.json().catch(() => null)
             if (accBody?.code === 0 && accBody.data) account = accBody.data
           } catch {
             // account facts are best-effort; tokens alone still work
           }
+          // Last gate before persisting: a logout that raced the account
+          // fetch wins — tokens minted for a session the user ended are
+          // dropped on the floor.
+          if (stale()) return
           writeAuth({
             auth: {
               accessToken: token.accessToken,
               expiresAt: Date.now() + (token.expiresIn ?? 3600) * 1000,
               refreshToken: token.refreshToken,
-              refreshExpiresAt: token.refreshExpiresAt != null
-                ? Date.now() + token.refreshExpiresAt * 1000
-                : undefined,
+              refreshExpiresAt: refreshExpiryFrom(token, undefined),
               domain: token.domain,
             },
             account,
           })
+          clearReauth()
           return
         }
-        oauthPending.error = '登录超时（10 分钟未完成）'
+        if (!stale()) oauthPending.error = '登录超时（10 分钟未完成）'
       } finally {
-        oauthPending.active = false
+        if (gen === pollGen) {
+          oauthPending.active = false
+          if (pollAbort === ctrl) pollAbort = null
+        }
       }
     }
     poll()
@@ -213,24 +277,47 @@ export function createOAuth({ readAuth, writeAuth }) {
   function oauthStatus() {
     const store = readAuth()
     const auth = store.auth
+    const signedIn = Boolean(auth?.accessToken)
+    // needsReauth: sticky flag from a refused/failed refresh, OR derivable
+    // right now from the stored expiries (access token dead + refresh token
+    // dead) — the latter needs no request to have happened yet.
+    const accessDead = typeof auth?.expiresAt === 'number' && auth.expiresAt - Date.now() < 60_000
+    const derived = signedIn && accessDead && refreshExpired(auth)
+    const needsReauth = signedIn && (reauth.needed || derived)
     return {
       pending: oauthPending.active,
       authUrl: oauthPending.active ? oauthPending.authUrl : '',
       error: oauthPending.error,
-      signedIn: Boolean(auth?.accessToken),
+      signedIn,
+      needsReauth,
+      reauthReason: needsReauth ? (reauth.needed ? reauth.reason : '刷新令牌已过期——需重新登录') : '',
       account: store.account?.nickname ? {
         nickname: store.account.nickname,
         uid: store.account.uid,
         enterpriseName: store.account.enterpriseName ?? '',
       } : null,
       accessTokenExpiresAt: auth?.expiresAt ?? null,
+      refreshTokenExpiresAt: typeof auth?.refreshExpiresAt === 'number' ? auth.refreshExpiresAt : null,
     }
   }
 
+  /**
+   * Terminates the session AND any in-flight login poll: the generation is
+   * bumped (a stale loop exits at its next checkpoint without writing) and
+   * the pending fetch is aborted, so an authorization completed in the
+   * browser after this call can never log the user back in.
+   */
   function logout() {
+    pollGen++
+    if (pollAbort) {
+      pollAbort.abort()
+      pollAbort = null
+    }
     writeAuth({})
     oauthPending.active = false
+    oauthPending.authUrl = ''
     oauthPending.error = ''
+    clearReauth()
   }
 
   return { resolveOAuthCredential, startOAuth, oauthStatus, logout }
