@@ -38,6 +38,14 @@
  *      as well as POST, trae-model-sync dbPath is path/extension-checked,
  *      __proto__-family model ids are rejected, and plaintext http
  *      baseURLs outside loopback fail validation without persisting
+ *  14. cancellation propagation (design-debt fix): a client disconnect
+ *      aborts the upstream fetch/SSE read (stream + aggregate paths) and
+ *      frees the per-session slot; a waiter that disconnects while queued
+ *      is never sent upstream; >32MB bodies get a 413 JSON answer instead
+ *      of a bare socket reset; aggregated chat.completion carries the
+ *      captured usage; the outbound first-byte guard
+ *      (upstreamFirstByteTimeoutMs) turns a never-answering upstream into a
+ *      prompt 502 and hangs up on it
  *
  * Usage: node scripts/verify-bridge.mjs   (no network, no credentials)
  */
@@ -60,6 +68,10 @@ process.env.CODEBUDDY_BRIDGE_LOG = join(process.env.DSH_HOME, 'bridge-log.jsonl'
 // ---------------------------------------------------------------- mock gateway
 
 const arrivals = [] // {path, stream, headers, at} in upstream-arrival order
+// [14] 取消传播用：mock 记录被桥中止的上游连接（model 决定 mock 行为——
+// m-drip 长流慢滴、m-hang 永不回头；请求体经桥原样转发，model 是唯一可
+// 从入站侧控制 mock 的字段）。
+const upstreamClosed = [] // {model, at, sentChunks}
 // [12] oauth-start 门禁用：auth/state 响应里的 authUrl（null → 回环默认值，
 // 即通过门禁的正例；置为投毒值即负例）。
 let oauthStateAuthUrl = null
@@ -94,6 +106,27 @@ const upstream = createServer((req, res) => {
       authorization: req.headers.authorization ?? null,
       at: Date.now(),
     })
+    if (parsed?.model === 'm-hang') {
+      // 连上却永不回头（首字节护栏的对象）；只记录桥是否把我们挂断。
+      res.on('close', () => upstreamClosed.push({ model: 'm-hang', at: Date.now(), sentChunks: 0 }))
+      return
+    }
+    if (parsed?.model === 'm-drip') {
+      // 长流慢滴：每 40ms 一个 chunk，最多 30s——只有桥主动中止才会提前结束。
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      let sent = 0
+      const timer = setInterval(() => {
+        if (res.destroyed) return clearInterval(timer)
+        sent++
+        res.write(`data: {"id":"drip","choices":[{"index":0,"delta":{"content":"tick ${sent} "}}],"usage":{"prompt_tokens":1,"completion_tokens":${sent},"total_tokens":${sent + 1},"credit":0}}\n\n`)
+        if (sent >= 750) { clearInterval(timer); res.end('data: [DONE]\n\n') }
+      }, 40)
+      res.on('close', () => {
+        clearInterval(timer)
+        if (!res.writableFinished) upstreamClosed.push({ model: 'm-drip', at: Date.now(), sentChunks: sent })
+      })
+      return
+    }
     setTimeout(() => {
       if (req.url.endsWith('/chat/completions')) {
         res.writeHead(200, { 'Content-Type': 'text/event-stream' })
@@ -654,6 +687,154 @@ async function main() {
     res = await callRoute(routes, null)
     check('rejected patches persisted nothing (baseURL unchanged)',
       res.json?.value?.baseURL === `http://127.0.0.1:${upstreamPort}`, res.json?.value?.baseURL)
+  }
+
+  // ------------------------------------------------ 14. cancellation propagation
+  // 设计债修复回归锁（core/bridge.js）：
+  //   a) 客户端断连 → 上游 fetch/SSE 读循环中止（流式与聚合两条路径）；
+  //   b) 断连后 SessionLimiter 槽位释放（同会话 limit=1 的下一请求立即通过）；
+  //   c) 排队中断连的 waiter 不再被唤醒发上游（上游零到达）；
+  //   d) 请求体 > 32MB → 413 JSON（此前 req.destroy() 无响应），桥继续服务；
+  //   e) 非流式聚合回传抓到的 usage（此前恒 {}）；
+  //   f) 出站首字节护栏：上游连上不回头 → 按 upstreamFirstByteTimeoutMs 502
+  //      并挂断上游（与 trae inline 侧对称）。
+  console.log('\n[14] cancellation propagation / 413 / aggregate usage / first-byte guard')
+  {
+    const waitFor = async (pred, ms = 3000) => {
+      const t0 = Date.now()
+      while (!pred() && Date.now() - t0 < ms) await sleep(25)
+      return pred()
+    }
+    const chatAbortable = (body, headers, ac) =>
+      fetch(`${bridge}/v2/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify(body),
+        signal: ac.signal,
+      })
+    const writeSettings = (obj) =>
+      writeFileSync(join(process.env.DSH_HOME, 'codebuddy-plugin.json'), JSON.stringify(obj) + '\n')
+
+    // 14a. 流式路径：读到首块后断连 → 上游连接被桥中止
+    writeSettings({ maxConcurrentPerSession: 1 })
+    {
+      upstreamClosed.length = 0
+      const ac = new AbortController()
+      const res = await chatAbortable({ model: 'm-drip', stream: true, messages: [] }, { 'X-Session-ID': 'sess-cancel' }, ac)
+      const reader = res.body.getReader()
+      const first = await reader.read()
+      check('14a stream: first chunk flowing before the disconnect', !first.done && first.value?.length > 0)
+      const tAbort = Date.now()
+      ac.abort()
+      const closed = await waitFor(() => upstreamClosed.some((c) => c.model === 'm-drip'), 3000)
+      const rec = upstreamClosed.find((c) => c.model === 'm-drip')
+      check('14a stream: client disconnect aborts the upstream connection',
+        closed, `upstreamClosed=${JSON.stringify(upstreamClosed)}`)
+      check('14a stream: upstream hung up promptly (<1.5s after abort), not after the 30s drip',
+        closed && rec.at - tAbort < 1500 && rec.sentChunks < 100, `${rec ? rec.at - tAbort : '?'}ms, chunks ${rec?.sentChunks}`)
+    }
+
+    // 14b. 槽位释放：同会话 limit=1，断连后的下一请求必须立刻通过
+    {
+      const t0 = Date.now()
+      const r = await withTimeout(chat({ model: 'm1', stream: true, messages: [] }, { 'X-Session-ID': 'sess-cancel' }).then((x) => x.text()), 3000)
+      check('14b slot released: next request on the same session completes (no stranded slot)',
+        r !== 'TIMEOUT' && r.includes('[DONE]') && Date.now() - t0 < UPSTREAM_LATENCY_MS * 3, r === 'TIMEOUT' ? 'TIMEOUT' : `${Date.now() - t0}ms`)
+    }
+
+    // 14c. 排队中断连：R1 长流占槽，R2 排队后断连，R1 再断 → R3 通过，R2 永不到上游
+    {
+      upstreamClosed.length = 0
+      arrivals.length = 0
+      const ac1 = new AbortController()
+      const r1 = await chatAbortable({ model: 'm-drip', stream: true, messages: [] }, { 'X-Session-ID': 'sess-queue' }, ac1)
+      await r1.body.getReader().read() // R1 holds the single slot
+      const ac2 = new AbortController()
+      const p2 = chatAbortable({ model: 'm-queued-victim', stream: true, messages: [] }, { 'X-Session-ID': 'sess-queue' }, ac2)
+        .then((x) => x.text()).catch((e) => e.name)
+      await sleep(150) // R2 is now queued behind R1
+      ac2.abort()
+      const r2 = await p2
+      check('14c queued waiter: client-side fetch rejected on abort', r2 === 'AbortError', String(r2))
+      await sleep(150)
+      ac1.abort() // free the slot → the limiter must NOT wake R2
+      await waitFor(() => upstreamClosed.some((c) => c.model === 'm-drip'), 3000)
+      const t0 = Date.now()
+      const r3 = await withTimeout(chat({ model: 'm1', stream: true, messages: [] }, { 'X-Session-ID': 'sess-queue' }).then((x) => x.text()), 3000)
+      check('14c queue not leaked: R3 completes after R1 abort', r3 !== 'TIMEOUT' && r3.includes('[DONE]'), r3 === 'TIMEOUT' ? 'TIMEOUT' : `${Date.now() - t0}ms`)
+      await sleep(UPSTREAM_LATENCY_MS + 200) // any wrongly-woken R2 would have arrived by now
+      const models = arrivals.map((a) => { try { return JSON.parse(a.raw).model } catch { return null } })
+      check('14c disconnected waiter never reached upstream',
+        !models.includes('m-queued-victim') && models.includes('m-drip') && models.includes('m1'), JSON.stringify(models))
+    }
+
+    // 14d. 聚合路径：非流式调用方断连 → 上游同样被中止 + 槽位释放
+    {
+      upstreamClosed.length = 0
+      const ac = new AbortController()
+      const p = chatAbortable({ model: 'm-drip', stream: false, messages: [] }, { 'X-Session-ID': 'sess-agg' }, ac).catch((e) => e.name)
+      await sleep(300)
+      ac.abort()
+      await p
+      const closed = await waitFor(() => upstreamClosed.some((c) => c.model === 'm-drip'), 3000)
+      check('14d aggregate: client disconnect aborts the upstream stream', closed, JSON.stringify(upstreamClosed))
+      const r = await withTimeout(chat({ model: 'm1', stream: false, messages: [] }, { 'X-Session-ID': 'sess-agg' }).then((x) => x.json()), 3000)
+      check('14d aggregate: slot released afterwards', r !== 'TIMEOUT' && r?.object === 'chat.completion')
+    }
+
+    // 14e. 413：>32MB 请求体得到 JSON 错误响应，不再是裸 socket 复位；桥继续服务
+    {
+      const before = arrivals.length
+      const big = Buffer.alloc(33 * 1024 * 1024, 0x41)
+      let status = null
+      let json = null
+      try {
+        const r = await fetch(`${bridge}/v2/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: big })
+        status = r.status
+        json = await r.json().catch(() => null)
+      } catch (e) {
+        status = `threw ${e?.cause?.code ?? e.message}`
+      }
+      check('14e oversize body answered 413 (was: connection reset, no response)', status === 413, String(status))
+      check('14e 413 body is a classic JSON error', json?.error?.type === 'payload_too_large' && /32/.test(json?.error?.message ?? ''), JSON.stringify(json))
+      await sleep(100)
+      check('14e oversize body never proxied upstream', arrivals.length === before)
+      const r = await withTimeout(chat({ model: 'm1', stream: true, messages: [] }).then((x) => x.text()), 3000)
+      check('14e bridge keeps serving after the 413', r !== 'TIMEOUT' && r.includes('[DONE]'))
+    }
+
+    // 14f. 聚合 usage 回传（此前恒 {}）
+    {
+      const json = await (await chat({ model: 'm1', stream: false, messages: [] })).json()
+      check('14f aggregated chat.completion carries the captured usage',
+        json?.usage?.total_tokens === 5 && json?.usage?.prompt_tokens === 3 && json?.usage?.credit === 0.01, JSON.stringify(json?.usage))
+    }
+
+    // 14g. 首字节护栏：上游连上不回头 → 按设置 502 并挂断上游
+    {
+      writeSettings({ maxConcurrentPerSession: 2, upstreamFirstByteTimeoutMs: 1000 })
+      upstreamClosed.length = 0
+      const t0 = Date.now()
+      const r = await withTimeout(chat({ model: 'm-hang', stream: true, messages: [] }), 6000)
+      const ms = Date.now() - t0
+      const body = r === 'TIMEOUT' ? null : await r.json().catch(() => null)
+      check('14g never-answering upstream → 502 within the guard window (1000ms setting)',
+        r !== 'TIMEOUT' && r.status === 502 && ms >= 900 && ms < 3000, r === 'TIMEOUT' ? 'TIMEOUT' : `HTTP ${r.status} after ${ms}ms`)
+      check('14g error text names the first-byte timeout', /first-byte timeout/.test(body?.error?.message ?? ''), JSON.stringify(body))
+      const closed = await waitFor(() => upstreamClosed.some((c) => c.model === 'm-hang'), 2000)
+      check('14g guard hangs up the stalled upstream connection', closed)
+      // 长流不受护栏影响：护栏只到响应头为止
+      upstreamClosed.length = 0
+      const ac = new AbortController()
+      const drip = await chatAbortable({ model: 'm-drip', stream: true, messages: [] }, {}, ac)
+      const reader = drip.body.getReader()
+      let ticks = 0
+      const tEnd = Date.now() + 1600
+      while (Date.now() < tEnd) { const { done } = await reader.read(); if (done) break; ticks++ }
+      check('14g guard covers headers only: SSE keeps flowing past the 1000ms window', ticks >= 20 && upstreamClosed.length === 0, `ticks ${ticks}`)
+      ac.abort()
+      writeSettings({ maxConcurrentPerSession: 2 })
+    }
   }
 
   console.log(failures === 0 ? '\nall bridge checks passed' : `\n${failures} check(s) FAILED`)
