@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **设置卡「本机凭据」行只渲染可导入项**（纯 `lib/client.js` 渲染过滤，扫描器与 `credential-scan`/`credential-import` 路由保留）：此前行内罗列全部命中，而探测器里 4/5 结构性不可导入（登录态在 keyring/内存、凭据不可见、方言未接入——永远不会有按钮），唯一可导入的 Qwen OAuth 免费额度 2026-04-15 已停服——不可导入命中是无操作的纯解释文案，罗列即噪音。过滤后无可导入项时整行自动隐藏，将来新增可导入探测器自动出现。回归面：`card-accordion.js` 的 credential-scan mock 恒为 `findings: []`（[F1]/[F4] 只统计扫描调用次数与时机），断言零改动
 - **docs：AGENTS.md 膨胀治理**（docs-only，零代码改动；新坑 **#52**）——184 行 / 34,323 B → **82 行 / 8,234 B**（预算 ≤150 行 / ≤12KB），任务态知识迁入项目 skill，体积与引用完整性由 linter 在 CI 锁死：
   - **分流瘦身**：项目定位压 3 行（沿革本就在 CHANGELOG）；三层架构表每格压成「文件 + 一句话职责 + 裁判文档链接」（host-config.js 职责补入 wiki/02——此前全仓只有 STATE.md 覆盖，两处 ≤0.1.6 时代的 settings.yaml 写路径口径同批修正）；网关事实速查 40 行压成 5 条通则 + gateway-facts.md 指针；踩坑速查 51 条长句压成「编号 + 标签」超短表（全本仍在 docs/pitfalls.md，纪律改为动手前 grep 编号）；常用命令留 top 12 无注释，probe 脚本用法注释迁 wiki/09（补 8 个 Qoder/CodeBuddy probe 行）
   - **任务态知识 skill 化**：浏览器回归大段落整体迁入 `.agents/skills/dsh-ui-regression/`（agentskills.io 规范 frontmatter，description 含触发词）；wiki/09 同名节改为指针，顺带消除 wiki 停留 129 而实际 197 的断言口径漂移
