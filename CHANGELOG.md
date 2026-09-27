@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.14.0 (2026-09-27)
 
 - **设置卡四族收敛：命中面 / 状态行可读性 / 保存播报 / Trae·Qoder 同构行抽组件**（纯 `lib/client.js` 前端 + 回归套件 +1 断言；新坑 **#53**）：
   - **命中面（WCAG 2.2 SC 2.5.8）**：区块头启用开关 16×16 → `label.cbc-checkhit` 包裹（`display:inline-flex;padding:4px;margin:-4px`），命中实测 31×30、开关 x 与行高逐像素不变（负 margin 对冲 padding，flex 里仍按 16px 占位）；input 自身 padding 被 Chrome `appearance:checkbox` 忽略且把框挪 7px（tmp-geom-probe.js padOnInput 证伪）。label 不对落在控件自身的 click 二次转发 ⇒ 不引入 #27 双 change（[C3]「恰 1 次 POST」在跑）。`card-accordion.js` 补命中面锁 1 条（退回裸 checkbox 即红；坐标锁锁不住这条——裸框与包裹态坐标逐像素相同）
