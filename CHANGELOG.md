@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **设置卡四族收敛：命中面 / 状态行可读性 / 保存播报 / Trae·Qoder 同构行抽组件**（纯 `lib/client.js` 前端 + 回归套件 +1 断言；新坑 **#53**）：
+  - **命中面（WCAG 2.2 SC 2.5.8）**：区块头启用开关 16×16 → `label.cbc-checkhit` 包裹（`display:inline-flex;padding:4px;margin:-4px`），命中实测 31×30、开关 x 与行高逐像素不变（负 margin 对冲 padding，flex 里仍按 16px 占位）；input 自身 padding 被 Chrome `appearance:checkbox` 忽略且把框挪 7px（tmp-geom-probe.js padOnInput 证伪）。label 不对落在控件自身的 click 二次转发 ⇒ 不引入 #27 双 change（[C3]「恰 1 次 POST」在跑）。`card-accordion.js` 补命中面锁 1 条（退回裸 checkbox 即红；坐标锁锁不住这条——裸框与包裹态坐标逐像素相同）
+  - **状态行可读性**：三段拼接此前整行灰、只出一个最差色点；warn/err 段现在自带色（`.cbc-seg-warn/err`，token 与 `.cbc-dot` 同名同值，深色主题自动跟随），点仍取最差（worstTone 不变）；分隔符是裸文本节点 " · "，`textContent` 与 `join(" · ")` 逐字全等——[B2] 预言机逐字全等断言不受影响
+  - **保存播报（族3 收尾）**：「已保存 ✓」可见占位仍走 visibility 切换（宽度恒定契约是 P3-7 的依赖，不动），播报职责移到流外 sr-only `role=status`（`.cbc-srlive`，absolute 1px clip）：文本 "" ⇄ "已保存 ✓" 进出 DOM 才会被 live region 播报，且不参与 flex 布局——宽度契约零风险
+  - **同构行抽组件**：`SyncBar`（三家模型组操作条）/ `SubModelRow`（Trae·Qoder 模型行外壳；Qoder 思考强度/上下文 select 走 Fragment extra）/ `ChannelLoginRow`（登录行外壳；Qoder 重开登录页/测一下走 extra），全部模块级定义（组件身份稳定防失焦纪律）；DOM 树与抽取前逐字节同形，套件按 .cbc-* 结构断言零改动
+  - **验证**：`node --check`；`tmp-geom-probe.js` 两击 Δx=0、跨行 Δ=0、命中 31×30、cbX/行高不变；`card-accordion.js` 199 → **200 断言全绿**；`qoder-tab-phase2` 11 / `qoder-slot-check` 13 / `qoder-prefs-check` 37 复跑全绿。零真实写入：`~/.dsh/codebuddy-plugin.json` md5 跑前跑后恒为 `7127964e…`
 - **设置卡「本机凭据」行只渲染可导入项**（纯 `lib/client.js` 渲染过滤，扫描器与 `credential-scan`/`credential-import` 路由保留）：此前行内罗列全部命中，而探测器里 4/5 结构性不可导入（登录态在 keyring/内存、凭据不可见、方言未接入——永远不会有按钮），唯一可导入的 Qwen OAuth 免费额度 2026-04-15 已停服——不可导入命中是无操作的纯解释文案，罗列即噪音。过滤后无可导入项时整行自动隐藏，将来新增可导入探测器自动出现。回归面：`card-accordion.js` 的 credential-scan mock 恒为 `findings: []`（[F1]/[F4] 只统计扫描调用次数与时机），断言零改动
 - **docs：AGENTS.md 膨胀治理**（docs-only，零代码改动；新坑 **#52**）——184 行 / 34,323 B → **82 行 / 8,234 B**（预算 ≤150 行 / ≤12KB），任务态知识迁入项目 skill，体积与引用完整性由 linter 在 CI 锁死：
   - **分流瘦身**：项目定位压 3 行（沿革本就在 CHANGELOG）；三层架构表每格压成「文件 + 一句话职责 + 裁判文档链接」（host-config.js 职责补入 wiki/02——此前全仓只有 STATE.md 覆盖，两处 ≤0.1.6 时代的 settings.yaml 写路径口径同批修正）；网关事实速查 40 行压成 5 条通则 + gateway-facts.md 指针；踩坑速查 51 条长句压成「编号 + 标签」超短表（全本仍在 docs/pitfalls.md，纪律改为动手前 grep 编号）；常用命令留 top 12 无注释，probe 脚本用法注释迁 wiki/09（补 8 个 Qoder/CodeBuddy probe 行）
