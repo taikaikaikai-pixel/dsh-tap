@@ -103,6 +103,10 @@ function parseExchangeResult(body) {
  */
 export function createTraeOAuth({ readAuth, writeAuth }) {
   let refreshInFlight = null
+  // 令牌存储代际号：logout 令其失效。refresh 落盘是读-改-写（writeAuth
+  // ({...readAuth(), auth: next})）——与 logout 的整体覆写竞态时，在飞刷新
+  // 会把已登出的令牌写回（登出失效）。落盘前比对代际，过期即丢弃结果。
+  let storeGeneration = 0
   const pending = { active: false, authUrl: '', error: '' , closeServer: null }
 
   /** 首次使用时生成并持久化设备身份 + P-256 密钥对（幂等）。 */
@@ -159,6 +163,7 @@ export function createTraeOAuth({ readAuth, writeAuth }) {
   /** RefreshToken 模式换新 token（单飞；失败返回 undefined 不抛）。 */
   async function refreshOAuth(s, auth) {
     if (refreshInFlight) return refreshInFlight
+    const generation = storeGeneration
     refreshInFlight = (async () => {
       try {
         const store = readAuth()
@@ -184,6 +189,8 @@ export function createTraeOAuth({ readAuth, writeAuth }) {
         })
         const parsed = parseExchangeResult(await res.json().catch(() => null))
         if (parsed.error) return undefined
+        // logout 竞态守卫：代际在飞期间已变（用户点了退出）→ 丢弃刷新结果
+        if (generation !== storeGeneration) return undefined
         const next = {
           accessToken: parsed.token,
           expiresAt: parsed.expiresAt ?? (Date.now() + 3600_000),
@@ -201,13 +208,16 @@ export function createTraeOAuth({ readAuth, writeAuth }) {
     return refreshInFlight
   }
 
-  /** 每次出站共用的凭据分支：临期自动刷新，双头形态（Cloud-IDE-JWT + x-cloudide-token）。 */
+  /** 每次出站共用的凭据分支：临期自动刷新，双头形态（Cloud-IDE-JWT + x-cloudide-token）。
+   *  expiresAt 缺失视为临期而非永不过期——拿着未知新鲜度的凭据出门，上游 401
+   *  远不如本地一次清晰刷新（有 refreshToken 时）。 */
   async function resolveTraeCredential(s) {
     const store = readAuth()
     const auth = store.auth
     if (!auth?.accessToken) return null
     let current = auth
-    if (auth.refreshToken && auth.expiresAt && auth.expiresAt - Date.now() < 60_000) {
+    const stale = !auth.expiresAt || auth.expiresAt - Date.now() < 60_000
+    if (auth.refreshToken && stale) {
       const refreshed = await refreshOAuth(s, auth)
       if (!refreshed) return null
       current = refreshed
@@ -411,6 +421,7 @@ export function createTraeOAuth({ readAuth, writeAuth }) {
     if (pending.closeServer) { pending.closeServer(); }
     pending.active = false
     pending.error = ''
+    storeGeneration++ // 终止在飞 refresh：其落盘前的代际校验必然失败
     // 设备身份保留（clientId/密钥对与该账号的设备注册绑定，重登录可复用；
     // 只清令牌与账号）。
     const store = readAuth()

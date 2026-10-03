@@ -83,7 +83,12 @@ export class KeyRotator {
         res = await attempt(cred)
       } catch (err) {
         // Caller-side aborts are not the key's fault: no cooldown, no failover.
-        if (err?.name === 'AbortError') return { cred, res: null, err }
+        // The bridge marks a client hangup with err.clientDisconnected; an
+        // upstream first-byte timeout (peer connects but never sends headers)
+        // is also an AbortError but is NOT caller-side — it must cool the key
+        // and fail over, or every key burns its timeout budget in sequence
+        // against a wedged edge. Only clientDisconnected aborts are exempt.
+        if (err?.name === 'AbortError' && err?.clientDisconnected === true) return { cred, res: null, err }
         // Network-layer failure: cool the key and fail over (unless last).
         if (cred.keyName) this.markCooling(cred.keyName, cooldownMs)
         lastErr = err

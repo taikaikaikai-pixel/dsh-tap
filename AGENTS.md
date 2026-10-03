@@ -43,6 +43,13 @@
 `#54` 桌面组合不合并bundle的codebuddy块·接入手放完整块
 `#55` cordis传apply的entry恒含schema默认·显式判定须比对默认
 `#56` 壳转发剥Origin头·curl模拟≠壳内真实请求·同源门须留无-Origin语义
+`#57` wasm retptr-first栈槽错一位静默全废·兜底分支须断言被走过
+`#58` wasm堆对象不受GC管·__wbg_*_free不调即无界泄漏·free须幂等
+`#59` 并发闸release只在finally一处·分支顺手释放即击穿上限
+`#60` SSE重试判据是用户可见内容·writeHead与角色chunk分步
+`#61` 回环网关须Host+Origin双门·无-Origin放行（壳转发/非浏览器）
+`#62` 令牌刷新读-改-写与logout竞态·存储代际守卫落盘前校验
+`#63` 同类防护跨子面成对审计·单侧覆盖断点即缺陷
 
 ## 常用命令（probe/联调/取证脚本的用法注释见 wiki/09-run-and-test.md）
 

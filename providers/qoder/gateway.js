@@ -62,6 +62,22 @@ function isLoopbackHost(hostHeader) {
 }
 
 /**
+ * Origin 门（与 Host 门互补，index.js localGuardFailure 同口径）：浏览器
+ * 跨站请求（含 navigator.sendBeacon）恒带 Origin——host:port 必须与 Host
+ * 完全一致才放行，否则即借浏览器烧额度的 CSRF。无 Origin 放行：本机
+ * fetch/curl 与剥 Origin 的壳转发均不带该头，Host 门仍把守回环。
+ */
+function isLoopbackOrigin(req) {
+  const origin = req.headers.origin
+  if (origin === undefined) return true
+  try {
+    return new URL(origin).host === req.headers.host
+  } catch {
+    return false
+  }
+}
+
+/**
  * Qoder SSE 信封解析器：吃原始 data 文本行，产出翻译事件
  * { chunk?, usage?, done?, error? }。inner chunk 是标准 OpenAI 形态，
  * 透传前只在需要计量时把 usage.credits 归一为 usage.credit。
@@ -382,47 +398,60 @@ export function createQoderGateway(deps) {
       const decoder = new TextDecoder()
       let buf = ''
       let lastEvent = null
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        let nl
-        while ((nl = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, nl).trim()
-          buf = buf.slice(nl + 1)
-          if (!line) { lastEvent = null; continue }
-          if (line.startsWith('event:')) { lastEvent = line.slice(6).trim(); continue }
-          if (!line.startsWith('data:')) continue
-          const ev = parser.handle(lastEvent, line.slice(5).trim())
-          if (ev.error) {
-            gwLog({ dir: 'err', model, ms: Date.now() - t0, note: 'stream-error-frame', repaired: repairedNote })
-            report('error', null)
-            if (wantStream) {
-              emitError(`qoder upstream error: ${ev.error}`)
-            } else {
-              res.writeHead(502, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ error: { message: `qoder upstream error: ${ev.error}`, code: 'qoder_upstream_error' } }))
+      // 客户端断连传播：res 关闭（且未正常结束）时取消上游流，不白烧配额。
+      let clientGone = false
+      const onClose = () => {
+        if (res.writableEnded) return
+        clientGone = true
+        reader.cancel().catch(() => {})
+      }
+      res.on('close', onClose)
+      try {
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          let nl
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, nl).trim()
+            buf = buf.slice(nl + 1)
+            if (!line) { lastEvent = null; continue }
+            if (line.startsWith('event:')) { lastEvent = line.slice(6).trim(); continue }
+            if (!line.startsWith('data:')) continue
+            const ev = parser.handle(lastEvent, line.slice(5).trim())
+            if (ev.error) {
+              gwLog({ dir: 'err', model, ms: Date.now() - t0, note: 'stream-error-frame', repaired: repairedNote })
+              report('error', null)
+              if (wantStream) {
+                emitError(`qoder upstream error: ${ev.error}`)
+              } else {
+                res.writeHead(502, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ error: { message: `qoder upstream error: ${ev.error}`, code: 'qoder_upstream_error' } }))
+              }
+              return
             }
-            release()
-            return
+            if (!ev.chunk) continue
+            const chunk = ev.chunk
+            const choice = chunk.choices?.[0]
+            if (choice?.delta?.content) content += choice.delta.content
+            if (choice?.delta?.reasoning_content) reasoning += choice.delta.reasoning_content
+            for (const tc of choice?.delta?.tool_calls ?? []) {
+              const idx = Number.isInteger(tc?.index) ? tc.index : 0
+              if (!toolOrder.includes(idx)) toolOrder.push(idx)
+              const slot = toolSlots.get(idx) ?? { id: '', name: '', arguments: '' }
+              if (tc.id) slot.id = tc.id
+              if (tc.function?.name) slot.name = tc.function.name
+              if (typeof tc.function?.arguments === 'string') slot.arguments += tc.function.arguments
+              toolSlots.set(idx, slot)
+            }
+            if (choice?.finish_reason) finishReason = choice.finish_reason
+            if (wantStream) res.write(`data: ${JSON.stringify(chunk)}\n\n`)
           }
-          if (!ev.chunk) continue
-          const chunk = ev.chunk
-          const choice = chunk.choices?.[0]
-          if (choice?.delta?.content) content += choice.delta.content
-          if (choice?.delta?.reasoning_content) reasoning += choice.delta.reasoning_content
-          for (const tc of choice?.delta?.tool_calls ?? []) {
-            const idx = Number.isInteger(tc?.index) ? tc.index : 0
-            if (!toolOrder.includes(idx)) toolOrder.push(idx)
-            const slot = toolSlots.get(idx) ?? { id: '', name: '', arguments: '' }
-            if (tc.id) slot.id = tc.id
-            if (tc.function?.name) slot.name = tc.function.name
-            if (typeof tc.function?.arguments === 'string') slot.arguments += tc.function.arguments
-            toolSlots.set(idx, slot)
-          }
-          if (choice?.finish_reason) finishReason = choice.finish_reason
-          if (wantStream) res.write(`data: ${JSON.stringify(chunk)}\n\n`)
         }
+      } finally {
+        res.off('close', onClose)
+        // 正常跑完时流已 EOF，cancel 是 no-op；提前 return 时取消残留 undici 连接。
+        if (!clientGone) reader.cancel().catch(() => {})
       }
 
       const usage = parser.usage()
@@ -464,22 +493,32 @@ export function createQoderGateway(deps) {
 
   function listen(port) {
     const server = createServer((req, res) => {
-      // Host 门（审计 [9]，同 trae gateway）：先 resume 丢体再 403。
-      if (!isLoopbackHost(req.headers.host)) {
+      // Host 门 + Origin 门：Host 必须回环（防 DNS rebinding / LAN 直连），
+      // 带 Origin 时其 host:port 必须与 Host 一致（防跨站借浏览器烧额度）。
+      if (!isLoopbackHost(req.headers.host) || !isLoopbackOrigin(req)) {
         req.resume()
         res.writeHead(403, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: { message: 'forbidden: loopback host required' } }))
+        res.end(JSON.stringify({ error: { message: 'forbidden: loopback host + same-origin required' } }))
         return
       }
-      // Buffer 收集 + 一次解码（踩坑 #28）
+      // Buffer 收集 + 一次解码（踩坑 #28）；超 32MB 答 413（同 core/bridge.js），
+      // 不静默 reset——调用方能拿到真实状态码。
       const chunks = []
       let received = 0
+      let oversize = false
       req.on('data', (c) => {
+        if (oversize) return
         chunks.push(c)
         received += c.length
-        if (received > 32 * 1024 * 1024) req.destroy()
+        if (received > 32 * 1024 * 1024) {
+          oversize = true
+          chunks.length = 0
+          res.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' })
+          res.end(JSON.stringify({ error: { message: 'request body too large (limit 32MiB)' } }))
+        }
       })
       req.on('end', () => {
+        if (oversize) return
         const rawBody = Buffer.concat(chunks).toString('utf8')
         const path = req.url?.split('?')[0] ?? ''
         try {

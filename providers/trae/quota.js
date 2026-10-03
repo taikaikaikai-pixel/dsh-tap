@@ -16,6 +16,8 @@ import { traeOutboundHeaders } from './gateway.js'
 
 export function createTraeQuota({ settings, readAuth, oauth }) {
   let cache = { at: 0, value: null }
+  // 单飞：并发 snapshot 共享同一在飞请求，不重复打上游。
+  let inFlight = null
 
   async function fetchSnapshot() {
     const s = settings()
@@ -25,7 +27,7 @@ export function createTraeQuota({ settings, readAuth, oauth }) {
     const store = readAuth()
     const uid = store?.account?.uid
     const headers = {
-      ...traeOutboundHeaders(store?.device ?? null, uid ? Number(uid) : undefined, crypto.randomUUID()),
+      ...traeOutboundHeaders(store?.device ?? null, uid, crypto.randomUUID()),
       Authorization: `Cloud-IDE-JWT ${token}`,
       'X-Cloudide-Token': token,
       'x-ide-token': token,
@@ -58,12 +60,15 @@ export function createTraeQuota({ settings, readAuth, oauth }) {
 
   function snapshot() {
     if (cache.value && Date.now() - cache.at < 60_000) return Promise.resolve(cache.value)
-    return fetchSnapshot()
+    if (inFlight) return inFlight
+    inFlight = fetchSnapshot()
       .catch((err) => ({ error: err?.message ?? String(err), fetchedAt: Date.now() }))
       .then((value) => {
         cache = { at: Date.now(), value }
         return value
       })
+      .finally(() => { inFlight = null })
+    return inFlight
   }
 
   return { snapshot }

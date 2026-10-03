@@ -191,12 +191,25 @@ export async function createRemoteSession(baseURL, token, model, messages, { tim
   return { sessionId, messageId }
 }
 
-/** 拉取事件流（调用方负责读 response.body 到 EOF）。 */
-export async function openRemoteEvents(baseURL, token, sessionId, messageId) {
+/** 拉取事件流（调用方负责读 response.body 到 EOF）。边缘「收下不回应」时
+ *  不能永久挂起——与 inline 面（gateway.js 首字节护栏）同口径：护栏只约束
+ *  「连上却不出响应头」的窗口，响应头到达即解绑（AbortController + 手动计时，
+ *  而非 AbortSignal.timeout——后者会约束整条 SSE 长流，把正常长会话误杀）。
+ *  测试可用 opts.timeoutMs 调短。 */
+const OPEN_EVENTS_TIMEOUT_MS = 20_000
+
+export async function openRemoteEvents(baseURL, token, sessionId, messageId, { timeoutMs } = {}) {
+  const limit = Number(timeoutMs) > 0 ? Number(timeoutMs) : OPEN_EVENTS_TIMEOUT_MS
+  const inbound = new AbortController()
+  const timer = setTimeout(() => {
+    const err = new Error(`trae remote events 超时（${limit}ms 无首字节）——边缘/WAF 拦截或本地代理异常；可稍后重试或改用 inline 通道`)
+    err.name = 'TimeoutError'
+    inbound.abort(err)
+  }, limit)
   const resp = await fetch(
     `${baseURL}/api/remote/v1/chat_sessions/${sessionId}/events?reply_to_message_id=${messageId}`,
-    { headers: remoteWebHeaders(token) },
-  )
+    { headers: remoteWebHeaders(token), signal: inbound.signal },
+  ).finally(() => clearTimeout(timer))
   if (resp.status >= 400) {
     const text = await resp.text().catch(() => '')
     const err = new Error(`trae remote events [${resp.status}]: ${text.slice(0, 300)}`)

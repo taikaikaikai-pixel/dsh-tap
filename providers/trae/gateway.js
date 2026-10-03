@@ -85,7 +85,9 @@ export function traeOutboundHeaders(device, uid, requestId) {
   if (device?.deviceId) h['x-device-id'] = device.deviceId
   if (device?.machineId) h['x-machine-id'] = device.machineId
   if (device?.deviceBrand) h['x-device-brand'] = device.deviceBrand
-  if (uid) h['x-uid'] = String(uid)
+  // uid 原样透传（账号 uid 是字符串语义，不必可数字化）；只挡 NaN/Infinity 这类
+  // 下游 String() 后会变成字面污染头的值。
+  if (uid !== undefined && uid !== null && !(typeof uid === 'number' && !Number.isFinite(uid))) h['x-uid'] = String(uid)
   return h
 }
 
@@ -217,8 +219,10 @@ function mapUsage(u) {
 
 /**
  * 有状态流解析器：吃 (eventName, dataObj)，产出翻译事件
- * {text?, reasoning?, toolCall?, usage?, queue?, finish?, error?}。
+ * {text?, reasoning?, toolCalls?, usage?, queue?, finish?, error?}。
  * 文本累计差分、工具调用按 id 去重累积、done/stop_reason 终结语义均在此。
+ * toolCalls 是数组——单事件可携带多个并行调用（parallel_tool_calls），
+ * 每个元素 {index, id?, name?, argsDelta}。
  */
 export function createTraeStreamParser() {
   const state = {
@@ -286,6 +290,9 @@ export function createTraeStreamParser() {
           function_call: { name: info.name, arguments: typeof info.params === 'string' ? info.params : JSON.stringify(info.params ?? {}) },
         })
       }
+      // 单事件可能带多个 tool_calls（parallel_tool_calls 出站白名单允许）——
+      // 逐个产出，绝不覆盖（旧实现循环内反复赋 out.toolCall 只下发最后一个）。
+      const emitted = []
       for (const c of rawCalls) {
         if (!c || typeof c !== 'object') continue
         const fn = (c.function_call && typeof c.function_call === 'object') ? c.function_call
@@ -308,14 +315,15 @@ export function createTraeStreamParser() {
           }
         }
         state.toolSlots.set(idx, slot)
-        out.toolCall = {
+        emitted.push({
           index: idx,
           // id/name 只在本事件实际携带时下发（OpenAI 流式约定：续片不重复）
           id: typeof c.id === 'string' && c.id ? slot.id : undefined,
           name: typeof fn.name === 'string' && fn.name ? slot.name : undefined,
           argsDelta,
-        }
+        })
       }
+      if (emitted.length) out.toolCalls = emitted
       if (obj.usage) {
         const u = mapUsage(obj.usage)
         if (u) state.usage = u
@@ -397,6 +405,20 @@ function isLoopbackHost(hostHeader) {
     return false
   }
   return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1' || hostname === '[::1]'
+}
+
+/** Origin 门（index.js localGuardFailure 同口径）：浏览器跨站请求（含
+ *  navigator.sendBeacon 的 text/plain 免预检形态）恒带 Origin——host:port
+ *  必须与 Host 完全一致才放行；无 Origin 放行（本机 fetch/curl 与剥 Origin
+ *  的壳转发均不带该头，Host 门仍把守回环）。 */
+function isLoopbackOrigin(req) {
+  const origin = req.headers.origin
+  if (origin === undefined) return true
+  try {
+    return new URL(origin).host === req.headers.host
+  } catch {
+    return false
+  }
 }
 
 /** SSE 单行值清洗（审计 [20]）：客户端/上游提供的字符串可能含 \r\n，直插
@@ -552,7 +574,7 @@ export function createTraeGateway(deps) {
     const hasTools = (Array.isArray(payload.tools) && payload.tools.length > 0) || payload.tool_choice != null
     let fallbackUsed = false
 
-    async function attemptInline(fnValue) {
+    async function attemptInline(fnValue, streamStarted) {
       const { body, requestId } = buildChatRequest(payload, sessionId)
       body.function = fnValue
       // 首字节护栏（2026-08-24 故障取证：本地代理/边缘对 POST 偶发"收下请求不
@@ -602,20 +624,36 @@ export function createTraeGateway(deps) {
       let finishReason = null
       let rerouteNotified = false
       const parser = createTraeStreamParser()
-      // 3003 降级重试发生在同一 HTTP 响应上——首 attempt 已发头时不再重复 writeHead
+      // 3003 降级重试发生在同一 HTTP 响应上——但只在**尚未下发任何可见内容**时
+      // 才允许（角色 chunk/排队提示/文本/工具帧一旦离手，重试会把它们原样重复
+      // 一遍，用户可见答案出现重复段落）。streamStarted 由调用方跨 attempt 维护；
+      // 首个可见帧离手后置真，此后 3003 按终局错误下发而不再换 chat_v3。
+      // 角色 chunk 不在 attempt 开头无条件预发——那会让 streamStarted 立即为真、
+      // 3003 回退永远走不到；延迟到首个可见帧时随头发出（OpenAI 流式允许首帧
+      // 即携带内容，role 帧非强制）。
+      // 响应头在进入 SSE 循环前就 writeHead（不算可见内容，3003 回退仍可走）——
+      // 否则下方 reroute 注释行的 res.write 会先把头发出去，ensureStreamHead
+      // 再 writeHead 即 "Cannot write headers after they are sent"。
       if (wantStream && !res.headersSent) {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' })
+      }
+      const ensureStreamHead = () => {
+        if (!wantStream || streamStarted.v) return
         res.write(`data: ${JSON.stringify(oaiChunk(id, model, { role: 'assistant' }))}\n\n`)
+        streamStarted.v = true
       }
       const send = (chunk) => {
-        if (wantStream) res.write(`data: ${JSON.stringify(chunk)}\n\n`)
+        if (wantStream) {
+          ensureStreamHead()
+          res.write(`data: ${JSON.stringify(chunk)}\n\n`)
+        }
       }
 
       let queueEmitted = false
       const outcome = await forEachSseEvent(upstream.body, parser, (ev) => {
         if (ev.error) {
-          // 3003 且尚未降级且无 tools → 换 chat_v3 重试（见上方回退说明）
-          if (ev.error.code === 3003 && !fallbackUsed && !hasTools) return 'fallback'
+          // 3003 且尚未降级且无 tools 且未下发任何可见内容 → 换 chat_v3 重试
+          if (ev.error.code === 3003 && !fallbackUsed && !hasTools && !streamStarted.v) return 'fallback'
           const msg = formatTraeErrorMessage(ev.error.code, ev.error.message)
           if (!res.headersSent) {
             res.writeHead(502, { 'Content-Type': 'application/json' })
@@ -647,12 +685,13 @@ export function createTraeGateway(deps) {
           content += ev.text
           send(oaiChunk(id, model, { content: ev.text }))
         }
-        if (ev.toolCall) {
+        // 单事件可带多个 tool_calls——逐个下发各自的增量帧，绝不合并覆盖
+        for (const tc of ev.toolCalls ?? []) {
           // OpenAI 流式约定：首片带 id/type/name，续片只带 index+arguments 增量
-          const tc = { index: ev.toolCall.index, function: { arguments: ev.toolCall.argsDelta } }
-          if (ev.toolCall.id) { tc.id = ev.toolCall.id; tc.type = 'function' }
-          if (ev.toolCall.name) tc.function.name = ev.toolCall.name
-          send(oaiChunk(id, model, { tool_calls: [tc] }))
+          const frame = { index: tc.index, function: { arguments: tc.argsDelta } }
+          if (tc.id) { frame.id = tc.id; frame.type = 'function' }
+          if (tc.name) frame.function.name = tc.name
+          send(oaiChunk(id, model, { tool_calls: [frame] }))
         }
       })
       if (outcome) return outcome
@@ -686,9 +725,10 @@ export function createTraeGateway(deps) {
     }
 
     try {
+      const streamStarted = { v: false }
       let fnValue = 'inline_chat'
       for (;;) {
-        const outcome = await attemptInline(fnValue)
+        const outcome = await attemptInline(fnValue, streamStarted)
         if (outcome === 'fallback') {
           fallbackUsed = true
           fnValue = 'chat_v3'
@@ -707,24 +747,34 @@ export function createTraeGateway(deps) {
 
   function listen(port) {
     const server = createServer((req, res) => {
-      // Host 门（审计 [9]，listen 目标恒为 127.0.0.1）：非回环 Host → 403。
+      // Host 门 + Origin 门：Host 必须回环（防 DNS rebinding / LAN 直连），
+      // 带 Origin 时其 host:port 必须与 Host 一致（防跨站借浏览器烧额度）。
       // 先 resume 丢弃未读请求体再应答，保证 403 完整送达后连接正常收尾。
-      if (!isLoopbackHost(req.headers.host)) {
+      if (!isLoopbackHost(req.headers.host) || !isLoopbackOrigin(req)) {
         req.resume()
         res.writeHead(403, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: { message: 'forbidden: loopback host required' } }))
+        res.end(JSON.stringify({ error: { message: 'forbidden: loopback host + same-origin required' } }))
         return
       }
       // Buffer 收集 + 一次解码（踩坑 #28，同 core/bridge.js）：逐分片隐式
       // utf8 解码会把跨分片多字节字符损坏成 3×U+FFFD，译文上行带乱码。
+      // 超 32MB 答 413（同 core/bridge.js），不静默 reset。
       const chunks = []
       let received = 0
+      let oversize = false
       req.on('data', (c) => {
+        if (oversize) return
         chunks.push(c)
         received += c.length
-        if (received > 32 * 1024 * 1024) req.destroy()
+        if (received > 32 * 1024 * 1024) {
+          oversize = true
+          chunks.length = 0
+          res.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' })
+          res.end(JSON.stringify({ error: { message: 'request body too large (limit 32MiB)' } }))
+        }
       })
       req.on('end', () => {
+        if (oversize) return
         const rawBody = Buffer.concat(chunks).toString('utf8')
         const path = req.url?.split('?')[0] ?? ''
         try {

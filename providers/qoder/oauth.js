@@ -136,6 +136,10 @@ function tokenFrom(body, now = Date.now()) {
 export function createQoderOAuth({ readAuth, writeAuth }) {
   let refreshInFlight = null
   let pollGeneration = 0
+  // 令牌存储代际号：logout 令其失效。refresh 落盘是读-改-写（writeAuth
+  // ({...readAuth(), auth: {...}})）——与 logout 的整体覆写竞态时，在飞刷新
+  // 会把已登出的令牌写回（登出失效）。落盘前比对代际，过期即丢弃结果。
+  let storeGeneration = 0
   let reloginNeeded = false
   const pending = { active: false, authUrl: '', error: '' }
 
@@ -154,6 +158,7 @@ export function createQoderOAuth({ readAuth, writeAuth }) {
   /** 刷新（单飞；失败返回 undefined 不抛，并置 reloginNeeded）。 */
   async function refreshOAuth(s) {
     if (refreshInFlight) return refreshInFlight
+    const generation = storeGeneration
     refreshInFlight = (async () => {
       try {
         const store = readAuth()
@@ -168,6 +173,8 @@ export function createQoderOAuth({ readAuth, writeAuth }) {
         const body = await res.json().catch(() => null)
         const next = tokenFrom(body)
         if (!next) { reloginNeeded = true; return undefined }
+        // logout 竞态守卫：代际在飞期间已变（用户点了退出）→ 丢弃刷新结果
+        if (generation !== storeGeneration) return undefined
         // 缺字段一律沿用旧值（refresh 响应常只轮换 access token）。
         const merged = {
           ...readAuth(),
@@ -192,13 +199,16 @@ export function createQoderOAuth({ readAuth, writeAuth }) {
     return refreshInFlight
   }
 
-  /** 每次出站共用：临期自动刷新；返回 {authorization, machineId, uid} 或 null。 */
+  /** 每次出站共用：临期自动刷新；返回 {authorization, machineId, uid} 或 null。
+   *  expiresAt 缺失视为临期而非永不过期——拿着未知新鲜度的凭据出门，上游 401
+   *  远不如本地一次清晰刷新（有 refreshToken 时）。 */
   async function resolveQoderCredential(s) {
     const store = readAuth()
     const auth = store.auth
     if (!auth?.accessToken) return null
     let current = auth
-    if (auth.refreshToken && auth.expiresAt && auth.expiresAt - Date.now() < REFRESH_LEAD_MS) {
+    const stale = !auth.expiresAt || auth.expiresAt - Date.now() < REFRESH_LEAD_MS
+    if (auth.refreshToken && stale) {
       const refreshed = await refreshOAuth(s)
       if (!refreshed) return null
       current = refreshed
@@ -335,6 +345,7 @@ export function createQoderOAuth({ readAuth, writeAuth }) {
 
   function logout() {
     pollGeneration++ // 令在飞 poll 失效：logout 后才完成的授权不落盘
+    storeGeneration++ // 令在飞 refresh 失效：其落盘前的代际校验必然失败
     pending.active = false
     pending.error = ''
     reloginNeeded = false

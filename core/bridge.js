@@ -70,6 +70,25 @@ export function hostIsLoopback(host) {
   }
 }
 
+/**
+ * Origin gate: a browser cross-site request (including a no-preflight
+ * `navigator.sendBeacon` with a text/plain body) always carries Origin — its
+ * host:port must equal the Host header or the request is a drive-by CSRF that
+ * would burn the user's upstream quota. A missing Origin passes: same-machine
+ * fetch/curl and shell-forwarded in-app requests carry no Origin; the Host
+ * gate above still confines those to loopback. Non-browser clients can forge
+ * any Origin anyway, so this gate adds no constraint for them.
+ */
+export function originMatchesHost(req) {
+  const origin = req.headers.origin
+  if (origin === undefined) return true
+  try {
+    return new URL(origin).host === req.headers.host
+  } catch {
+    return false
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Session attribution
 // ---------------------------------------------------------------------------
@@ -611,10 +630,18 @@ export function createBridge({ settings, provider, withCredentials, meter, foren
       // Host gate ([8]+[26]): the bind is loopback-only, but the Host header
       // is still caller-controlled — a rebinding DNS name or a spoofed Host
       // must not reach the credential-bearing proxy. Refuse before reading
-      // the body or dispatching anywhere.
+      // the body or dispatching anywhere. The Origin gate complements it: a
+      // browser cross-site drive-by (sendBeacon/text-plain, no preflight)
+      // reaches the loopback bind with a browser-correct Host, and would
+      // silently burn upstream quota unless its Origin is rejected here.
       if (!hostIsLoopback(req.headers.host)) {
         res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' })
         res.end('bridge: loopback-only (Host must be 127.0.0.1/localhost/::1)')
+        return
+      }
+      if (!originMatchesHost(req)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' })
+        res.end('bridge: cross-origin refused (Origin must match Host)')
         return
       }
       // Bytes must be collected and decoded ONCE (踩坑 #28): implicit

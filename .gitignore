@@ -15,3 +15,6 @@ codebuddy-plugin*.json
 .workbuddy-ai/
 .audit-*.md
 .extract-audit.py
+
+# Mimosa security-scan tool local state
+.mimosa/

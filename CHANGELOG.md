@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.17.0 (2026-10-03)
+
+- **风险清单全量核实与修复**（8 项高/中危 + 9 项低危逐条实锤后修复；新坑 **#57–#63**；离线九套件全绿）：
+  - **高危 1 — Qoder COSY `decrypt()` ABI 调用错误**（cosy.js）：wasm 类型段实报 `decrypt_server_response` 为 retptr-first 三参（`(i32,i32,i32)→()`，与同文件 `generate_runtime_auth_fields` 同型），旧胶水只传 2 参——wasm 把结果槽写进输入串线性内存、ret 恒 `undefined`，`catch{}` 吞掉 ⇒ `rt.decrypt(任意输入)` 恒原样返回，catalog.js 的「Encode=1 密文兜底」实为死路（上游回密文即 `JSON.parse` SyntaxError，目录同步静默失败）。修复 = 栈槽协议：`sp=__wbindgen_add_to_stack_pointer(-16); decrypt_server_response(sp,ptr,len)`，读槽 `[rptr,rlen,eptr,elen]`，errLen 非零抛 `takeObject(eptr)`，成功 `getString` 后 `__wbindgen_export4` 还内存。实测修复后 plaintext 正确 round-trip、3 参栈槽调用能取到 wasm 真实输出槽。
+  - **高危 2 — Qoder WASM 对象从不释放**（cosy.js）：导出表确有 `__wbg_requestresult_free`/`__wbg_qodercontext_free` 但胶水全文未调——每次 `prepareChat/Get/Signed` 泄漏一个 RequestResult（≈3KB/次，8 万次签名 +245MB），凭据轮换还泄漏旧 QoderContext，`global.gc()` 不回收（字节在 wasm 线性内存，V8 GC 管不着）。修复 = 双 free 纪律：RequestResult/QoderContext 加幂等 `free()`（`if(ptr) __wbg_*_free(ptr); ptr=0`），三个签名出口统一经 `drain()` 消费即释，`ensureContext` 轮换时先建后 free 旧上下文（失败保留旧上下文）。
+  - **中危 3 — Qoder 网关双重 release**（qoder/gateway.js）：流内错误帧路径先显式 `release()` 再 `return`，finally 又 release 一次——并发上限被击穿（limit=4 实际变 6）。修复 = 删分支内显式 release，统一由 finally 兜。
+  - **中危 4 — Trae 3003 回退内容重发**（trae/gateway.js）：遇 3003 换 chat_v3 在同一 HTTP 响应上从头再发，旧代码只挡 writeHead 重不挡内容重——首 attempt 的角色/排队/文本帧全部重复下发。修复 = 跨 attempt 维护「可见内容离手」信号 `streamStarted`，首个可见帧离手后置真，此后 3003 按终局错误下发不再回退；角色 chunk 延迟到首个可见帧随头发出（不能 attempt 开头预发，否则回退永远走不到）；响应头在进入 SSE 循环前先 writeHead（不算可见内容），避免 reroute 注释行抢在 writeHead 前落地炸「Cannot write headers after they are sent」。
+  - **中危 5 — Trae 单事件多 tool_calls 只下发最后一个**（trae/gateway.js）：`out.toolCall` 在循环内被反复覆盖，`parallel_tool_calls` 在出站白名单里但并行调用静默丢帧。修复 = 改数组 `out.toolCalls` 逐个产出，消费端逐帧下发；verify-trae-provider 补「单事件多 tool_calls 全量下发」断言。
+  - **中危 6 — Trae remote 传输无首字节护栏**（remote.js）：`openRemoteEvents` 的 fetch 无 signal（createSession 有 20s、stop 有 10s，唯独它没有），边缘「收下不回应」时请求永久挂起、并发槽不释放。修复 = 首字节护栏只约束「连上却不出响应头」窗口（AbortController + 手动计时，非 `AbortSignal.timeout`——后者会约束整条 SSE 长流把正常长会话误杀），响应头到达即解绑。
+  - **中危 7 — 三本地网关无 Origin 校验**（qoder/gateway.js + trae/gateway.js + core/bridge.js）：只验 Host 头回环——恶意网页 `navigator.sendBeacon`（text/plain 免 CORS 预检、浏览器自动带正确 Host）即可驱动网关烧用户 Trae/Qoder/CodeBuddy 额度，响应读不到但副作用已发生。修复 = 补 Origin 门（index.js `localGuardFailure` 同口径）：浏览器跨站请求恒带 Origin，其 host:port 必须与 Host 完全一致才放行；**无 Origin 放行**（本机 fetch/curl 与剥 Origin 的壳转发均不带该头，Host 门仍把守回环，与 #56 同语义）。bridge.js 导出 `originMatchesHost` 供三处复用。
+  - **中危 8 — 登出/刷新竞态复活已登出令牌**（trae/qoder/codebuddy 三 oauth 模块）：刷新落盘是 `writeAuth({...readAuth(), auth: next})` 读-改-写，与 logout 的整体覆写竞态——刷新在飞时点登出，刷新完成把令牌写回。修复 = 存储代际守卫：模块级 `storeGeneration`，logout 递增，refresh 启动记代际、落盘前比对，过期即丢弃结果（内存模型实测：守卫后 refresh 返 undefined、logout 后 store 保持空）。
+  - **低危一批**：rotation.js 首字节超时被当「调用方取消」不冷却不故障转移——改用 bridge 的 `clientDisconnected` 标记区分，仅真客户端断开豁免冷却；qoder/trae 网关错误路径不取消上游 reader + 全文无 `res.on('close')` 客户端断开传播——qoder 网关补 reader cancel + close 传播（trae 经 `forEachSseEvent` 循环退出自然收尾）；qoder/trae 网关超 32MB 静默 `req.destroy()` 改答 413（与 core/bridge.js 同口径）；trae quota memoize 补单飞（并发 snapshot 共享在飞请求）+ `x-uid` 只在值非有限数字时丢弃（账号 uid 是字符串语义，不再误拦 `u-001` 这类合法值）；qoder `syncCatalog` 补单飞（并发共享在飞 Promise，与 codebuddy 侧口径对齐）；trae/qoder `resolveCredential` 的 expiresAt 缺失视为临期而非永不过期（有 refreshToken 时强制刷新，不再拿未知新鲜度凭据出门）。
+  - **client.js 设置卡四项**：登出/删 Key 等 4 处 mutating POST 不查 `res.ok`（4xx/5xx 静默刷新用户误以为已退出/已删）——补齐 HTTP 错误分支；toggleModel 重建本地状态丢 `unroutable` 字段——拷贝清单补回，「不可路由」徽标与「可路由 M 个」计数不再失真；OAuth 弹窗被拦完全静默——`window.open` 返回 null 时 `setErr` 提示用户允许弹窗。
+  - **回归**：`verify-models`（23 模型）/ `verify-bridge` / `verify-rotation` / `verify-core-generic` / `verify-providers` / `verify-trae-provider`（90 断言，含新增多 tool_calls）/ `verify-qoder-provider`（154 断言）/ `verify-host-config`（36）/ `verify-desktop-acceptance`（12 ok）/ `verify-agents-md` 全 PASS。
+
 ## 0.16.0 (2026-10-03)
 
 - **桥端口按运行时宿主 profile 分流——desktop Qoder/Trae 独立监听 3913/3912，web 线 3902/3903 逐位不变**（goal `docs/goals/bridge-port-host-split.md` G3–G7 一轮落地；功能换代：端口按宿主分流；新坑 **#55**；机制证据 `docs/probes/port-split-2026-10-03.json`、共存端到端证据 `docs/probes/coexist-e2e-port-split-2026-10-03.json`）：

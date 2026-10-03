@@ -915,7 +915,7 @@ try {
   const pq2 = p.handle('request_wait_in_queue', { position: 2 })
   check('流解析：排队位置变化才报', pq1.queue === 2 && Object.keys(pq2).length === 0)
   const pt = p.handle('output', { response: '你好，世界', tool_call_info: { id: 't1', name: 'fn', params: { a: 1 } } })
-  check('流解析：tool_call_info 归一为 OpenAI 工具调用', pt.toolCall?.id === 't1' && pt.toolCall.name === 'fn' && pt.toolCall.argsDelta === '{"a":1}')
+  check('流解析：tool_call_info 归一为 OpenAI 工具调用', pt.toolCalls?.[0]?.id === 't1' && pt.toolCalls[0].name === 'fn' && pt.toolCalls[0].argsDelta === '{"a":1}')
   const p2 = createTraeStreamParser()
   const frag1 = { index: 0, id: 'w_0', type: 'function', function_call: { name: 'get_current_weather', arguments: '{"city' } }
   const frag2 = { index: 0, id: '', type: '', function_call: { name: '', arguments: '": "北京"}' } }
@@ -923,9 +923,19 @@ try {
   const pc2 = p2.handle('output', { tool_calls: [frag2] })
   p2.handle('done', { finish_reason: 'stop' })
   check('流解析：tool_calls 增量片段按 index 拼接（续片空 id 不重复下发）',
-    pc2.toolCall?.argsDelta === '": "北京"}' && pc2.toolCall.id === undefined
+    pc2.toolCalls?.[0]?.argsDelta === '": "北京"}' && pc2.toolCalls[0].id === undefined
     && p2.toolCalls()[0].id === 'w_0' && p2.toolCalls()[0].function.arguments === '{"city": "北京"}'
     && p2.finish() === 'tool_calls')
+  // 单事件多 tool_calls：并行调用必须全部下发，绝不覆盖（旧实现只发最后一个）
+  const pm = createTraeStreamParser()
+  const pmOut = pm.handle('output', {
+    tool_calls: [
+      { index: 0, id: 'c0', function_call: { name: 'f0', arguments: '{}' } },
+      { index: 1, id: 'c1', function_call: { name: 'f1', arguments: '{}' } },
+    ],
+  })
+  check('流解析：单事件多 tool_calls 全量下发（并行调用不丢帧）',
+    pmOut.toolCalls?.length === 2 && pmOut.toolCalls[0].id === 'c0' && pmOut.toolCalls[1].id === 'c1')
   const pd = createTraeStreamParser()
   const pdOut = pd.handle('done', { finish_reason: 'stop' })
   check('流解析：done 终结语义', pdOut.finish === 'stop' && pd.isDone() === true && pd.finish() === 'stop')

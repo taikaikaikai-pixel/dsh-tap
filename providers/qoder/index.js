@@ -42,6 +42,9 @@ export function createQoderProvider(deps) {
 
   // 目录实例状态（模块作用域每插件实例一份，踩坑 #20 纪律）。
   let catalogState = null // { profiles, sources, variants, fetchedAt }
+  // 单飞：并发 syncCatalog 共享同一在飞请求——并发时互相完整覆盖 catalogState
+  // 不损坏但浪费上游请求；codebuddy 侧在组合根单飞（index.js），口径对齐于此。
+  let syncInFlight = null
 
   const provider = {
     id: QODER_PROVIDER_ID,
@@ -49,25 +52,34 @@ export function createQoderProvider(deps) {
     cosy,
 
     /**
-     * 从网关同步目录（单飞在调用侧不强制——syncCatalog 幂等可重入）。
-     * 返回 {ok, count|error, kept}；未登录时报 ok:false 且不清旧目录。
+     * 从网关同步目录（单飞：并发调用共享同一在飞 Promise）。返回
+     * {ok, count|error, kept}；未登录时报 ok:false 且不清旧目录。
      */
     async syncCatalog() {
-      const s = deps.settings()
-      let cred
+      if (syncInFlight) return syncInFlight
+      const run = (async () => {
+        const s = deps.settings()
+        let cred
+        try {
+          cred = await oauth.resolveQoderCredential(s)
+        } catch (err) {
+          return { ok: false, error: err?.message ?? String(err), kept: catalogState != null }
+        }
+        if (!cred) return { ok: false, error: '未登录（先完成 Qoder 浏览器授权）', kept: catalogState != null }
+        try {
+          const accessToken = String(cred.authorization).replace(/^Bearer\s+/, '')
+          const result = await fetchQoderCatalog(cosy, { accessToken, machineId: cred.machineId, uid: cred.uid }, s.qoderInferBaseURL)
+          catalogState = { profiles: result.profiles, sources: result.sources, variants: result.variants, entries: result.entries, fetchedAt: Date.now() }
+          return { ok: true, count: result.profiles.length, fetchedAt: catalogState.fetchedAt }
+        } catch (err) {
+          return { ok: false, error: err?.message ?? String(err), kept: catalogState != null }
+        }
+      })()
+      syncInFlight = run
       try {
-        cred = await oauth.resolveQoderCredential(s)
-      } catch (err) {
-        return { ok: false, error: err?.message ?? String(err), kept: catalogState != null }
-      }
-      if (!cred) return { ok: false, error: '未登录（先完成 Qoder 浏览器授权）', kept: catalogState != null }
-      try {
-        const accessToken = String(cred.authorization).replace(/^Bearer\s+/, '')
-        const result = await fetchQoderCatalog(cosy, { accessToken, machineId: cred.machineId, uid: cred.uid }, s.qoderInferBaseURL)
-        catalogState = { profiles: result.profiles, sources: result.sources, variants: result.variants, entries: result.entries, fetchedAt: Date.now() }
-        return { ok: true, count: result.profiles.length, fetchedAt: catalogState.fetchedAt }
-      } catch (err) {
-        return { ok: false, error: err?.message ?? String(err), kept: catalogState != null }
+        return await run
+      } finally {
+        if (syncInFlight === run) syncInFlight = null
       }
     },
 

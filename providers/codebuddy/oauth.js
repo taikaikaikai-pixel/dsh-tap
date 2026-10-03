@@ -61,6 +61,10 @@ export function createOAuth({ readAuth, writeAuth }) {
   // 浏览器才完成的授权不再被写回——旧实现 while 只看 deadline，logout 后
   // 10 分钟内授权仍会被重新登进。
   let pollGeneration = 0
+  // 令牌存储代际号：logout 令其失效。refresh 的落盘是读-改-写（拿到新令牌后
+  // writeAuth({...readAuth(), auth})——与 logout 的整体覆写竞态时，在飞刷新
+  // 会把已登出的令牌写回（登出失效）。刷新落盘前比对代际，过期即丢弃结果。
+  let storeGeneration = 0
   // refresh 实败（refreshOAuth 返回 undefined）的粘性信号：accessToken 还在
   // 但聊天已全 503 时，oauthStatus 必须暴露"需重新登录"而不是只报已登录。
   // 下次 refresh 成功自愈；logout 清除。
@@ -74,6 +78,7 @@ export function createOAuth({ readAuth, writeAuth }) {
    */
   async function refreshOAuth(baseURL, auth) {
     if (refreshInFlight) return refreshInFlight
+    const generation = storeGeneration
     refreshInFlight = (async () => {
       try {
         const headers = {
@@ -91,6 +96,8 @@ export function createOAuth({ readAuth, writeAuth }) {
         if (!res.ok) { reloginNeeded = true; return undefined }
         const body = await res.json().catch(() => null)
         if (!body || body.code !== 0 || !body.data?.accessToken) { reloginNeeded = true; return undefined }
+        // logout 竞态守卫：代际在飞期间已变（用户点了退出）→ 丢弃刷新结果
+        if (generation !== storeGeneration) return undefined
         const store = readAuth()
         store.auth = {
           accessToken: body.data.accessToken,
@@ -261,6 +268,7 @@ export function createOAuth({ readAuth, writeAuth }) {
 
   function logout() {
     pollGeneration++ // 终止进行中的 poll：代际失效，授权晚到也不落盘
+    storeGeneration++ // 终止在飞 refresh：其落盘前的代际校验必然失败
     writeAuth({})
     reloginNeeded = false
     oauthPending.active = false

@@ -149,6 +149,11 @@ class RequestResult {
     o.__wbg_ptr = ptr
     return o
   }
+  /** 释放 wasm 侧对象（幂等）。wasm 堆对象不受 JS GC 管理，不释放即泄漏。 */
+  free() {
+    if (this.__wbg_ptr) wasm.__wbg_requestresult_free(this.__wbg_ptr)
+    this.__wbg_ptr = 0
+  }
   /** 可能返回 undefined（无 body 的签名结果）。 */
   get body() {
     const sp = wasm.__wbindgen_add_to_stack_pointer(-16)
@@ -228,6 +233,11 @@ class QoderContext {
       wasm.__wbindgen_add_to_stack_pointer(16)
     }
   }
+  /** 释放 wasm 侧上下文（凭据轮换时旧上下文必 free）。 */
+  free() {
+    if (this.__wbg_ptr) wasm.__wbg_qodercontext_free(this.__wbg_ptr)
+    this.__wbg_ptr = 0
+  }
   /** /algo 面签名（目录等管理端点）：path 会被重写为 /algo 前缀 + Encode=1。 */
   prepareRequest(endpoint, path, method, mode, bodyJson, headersJson) {
     const sp = wasm.__wbindgen_add_to_stack_pointer(-16)
@@ -278,12 +288,30 @@ function runtimeFields(userInfoJson) {
   }
 }
 
-/** Encode=1 响应体解密；失败原样返回（部分端点本就回明文）。 */
+/** Encode=1 响应体解密；失败原样返回（部分端点本就回明文）。
+ * ABI：retptr-first 三参（与同文件 generate_runtime_auth_fields 同型）——
+ * 栈槽布局 [resultPtr, resultLen, errPtr, errLen]；错用 2 参会让 wasm 把
+ * 结果槽写进输入串的线性内存且 ret 为 undefined（2026-10-03 实测）。 */
 function decrypt(text) {
+  let p
+  let l
+  const sp = wasm.__wbindgen_add_to_stack_pointer(-16)
   try {
-    return wasm.decrypt_server_response(passString(text), WASM_VECTOR_LEN)
+    const ptr = passString(text)
+    wasm.decrypt_server_response(sp, ptr, WASM_VECTOR_LEN)
+    const rp = dv().getInt32(sp + 0, true)
+    const rl = dv().getInt32(sp + 4, true)
+    const ep = dv().getInt32(sp + 8, true)
+    const el = dv().getInt32(sp + 12, true)
+    if (el) throw takeObject(ep)
+    p = rp
+    l = rl
+    return getString(rp, rl)
   } catch {
     return text
+  } finally {
+    wasm.__wbindgen_add_to_stack_pointer(16)
+    if (p) wasm.__wbindgen_export4(p, l, 1)
   }
 }
 
@@ -342,14 +370,27 @@ export function createCosyRuntime({ wasmPath }) {
       ...(cred.extraUser && typeof cred.extraUser === 'object' ? cred.extraUser : {}),
     }
     const rf = JSON.parse(runtimeFields(JSON.stringify(baseUser)))
-    context = new QoderContext(cred.machineId, QODER_COSY_VERSION, JSON.stringify({
+    const next = new QoderContext(cred.machineId, QODER_COSY_VERSION, JSON.stringify({
       ...baseUser,
       access_token: cred.accessToken,
       encrypt_user_info: rf.encrypt_user_info,
       key: rf.key,
     }), JSON.stringify({ client_type: 5 }))
+    // 旧上下文在其 wasm 实例上占内存；轮换成功后才释放，失败则保留旧上下文。
+    if (context) context.free()
+    context = next
     contextKey = key
     return context
+  }
+
+  /** 取签名结果后即释放 RequestResult——它的 url/headers/body 已快照到纯 JS。 */
+  function drain(req) {
+    try {
+      const headers = req.headers instanceof Map ? Object.fromEntries(req.headers) : req.headers
+      return { url: req.url, headers, body: req.body }
+    } finally {
+      req.free()
+    }
   }
 
   return {
@@ -357,16 +398,12 @@ export function createCosyRuntime({ wasmPath }) {
     /** 聊天请求签名 → { url, headers（已转 record）, body（密文） }。 */
     async prepareChat(cred, { endpoint, body, modelKey, modelSource }) {
       const ctx = await ensureContext(cred)
-      const req = ctx.prepareInferRequest(endpoint, body, modelKey ?? null, modelSource ?? null)
-      const headers = req.headers instanceof Map ? Object.fromEntries(req.headers) : req.headers
-      return { url: req.url, headers, body: req.body }
+      return drain(ctx.prepareInferRequest(endpoint, body, modelKey ?? null, modelSource ?? null))
     },
     /** /algo 面 GET 签名（目录/区域发现等）。 */
     async prepareGet(cred, { endpoint, path }) {
       const ctx = await ensureContext(cred)
-      const req = ctx.prepareRequest(endpoint, path, 'GET', 'auth', undefined, undefined)
-      const headers = req.headers instanceof Map ? Object.fromEntries(req.headers) : req.headers
-      return { url: req.url, headers }
+      return drain(ctx.prepareRequest(endpoint, path, 'GET', 'auth', undefined, undefined))
     },
     /**
      * prepareRequest 直通（上报/管理面 POST）：mode 'auth'（/algo 重写 + 加密）
@@ -375,9 +412,7 @@ export function createCosyRuntime({ wasmPath }) {
      */
     async prepareSigned(cred, { endpoint, path, method = 'POST', mode = 'auth', body }) {
       const ctx = await ensureContext(cred)
-      const req = ctx.prepareRequest(endpoint, path, method, mode, body ?? undefined, undefined)
-      const headers = req.headers instanceof Map ? Object.fromEntries(req.headers) : req.headers
-      return { url: req.url, headers, body: req.body }
+      return drain(ctx.prepareRequest(endpoint, path, method, mode, body ?? undefined, undefined))
     },
     decrypt,
   }
