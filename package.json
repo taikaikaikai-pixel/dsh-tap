@@ -1,6 +1,6 @@
 {
   "name": "dsh-tap",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "Unofficial upstream bundle for DeepSeek Harness (dsh): CodeBuddy (copilot.tencent.com) with a runtime-synced model catalogue, web search/fetch, image generation and a streaming bridge; TraeWork CN and Qoder CN subscription channels via local OpenAI translation gateways; plus a key-type OpenAI-compatible provider registry - all managed from a 4-block accordion settings card.",
   "type": "module",
   "main": "index.js",
@@ -38,7 +38,8 @@
     "verify:trae": "node scripts/verify-trae-model-catalog.mjs",
     "verify:trae-provider": "node scripts/verify-trae-provider.mjs",
     "verify:qoder": "node scripts/verify-qoder-provider.mjs",
-    "verify:host-config": "node scripts/verify-host-config.mjs"
+    "verify:host-config": "node scripts/verify-host-config.mjs",
+    "verify:desktop-acceptance": "node scripts/verify-desktop-acceptance.mjs"
   },
   "keywords": [
     "dsh-plugin",

@@ -59,7 +59,19 @@
 - 探测纪律：1.5s+ 间隔、单账号、只读优先；证据落 `docs/probes/<课题>-<日期>.jsonl`，预测须预注册（脚本内 expect 字段）。
 - 工作区注意：**2026-09-21 起正本在 Windows** `C:\Users\21613\dev\dsh-tap`（git 历史已通过本地 fetch 从 WSL 并入，v0.8.3 分支连续）；WSL 侧 `/root/dev/dsh-tap` 已退役留作备份，别再往那边改（见上「分支拓扑」节与下「上次会话 2026-09-21」）。
 
+## desktop 适配 goal（2026-10-03，G3–G7 一轮落地，docs/goals/desktop-adaptation.md）
+
+1. **接入（G3）**：desktop CLI（`resources/runtime/cli/bin/dsh.cmd`，ELECTRON_RUN_AS_NODE shim）`plugin --profile desktop add <repo>` 一次到位——`dependencies.dsh-tap=link:` 与 `dsh.profile.bundles` **两落点均由 CLI 自动写好**，link 实落 `profiles/desktop/node_modules/dsh-tap`（symlink）。操作前托盘/优雅退出应用（`CloseMainWindow` → tasklist 计 0），首启前备份 `cordis.patch.yml`。
+2. **活体（G4）**：0.2.0-rc.2（asar 内嵌，recon 推翻 goal 文档初判的 0.1.7-rc.2 共享 hoist）settings seam 与 0.1.7 同代——`?probe=host-config` = `mode=forms`/`formsWritable=true`/`legacySettingsPath=%USERPROFILE%\.dsh\settings.yaml`（**DSH_HOME 未漂移**）/`allNamespaces` 含 llm-pi-ai ⇒ **host-config.js 零改动**（能力探测选路自动命中，未写任何版本号分支）。
+3. **新坑 #54（本轮最大发现）**：首启 `providerIds=[volces,qoder]` + `lastError=…provider "codebuddy" model "default" needs an api`——桌面组合树里 **bundle patch 的 codebuddy 块未生效**（web 侧用户层 patch 历史手放了完整块，一直免疫），镜像只 set `providers.codebuddy.models` 子路径 ⇒ 路由无 api ⇒ 0.2.0 llm-pi-ai 校验拒、mutate 回滚。修复 = 手放完整块到 desktop patch（web 同构），重启后 `lastError=null`、`providerIds=[volces,qoder,codebuddy]`、§1c FAIL→ok（**9 ok / 0 FAIL**）。
+4. **Origin 门（方案风险 3 实测命中）**：`Origin: dsh-app://app` 的 GET → **403**（同源/无 Origin 对照 200）。index.js 新增通用 `localAllowedOrigins` 字段（默认空 = 行为不变，零 desktop 字样，§4a/§4b 静态守卫保持 ok）+ `localGuardFailure`/`sameOrigin` 消费（精确匹配，Host 回环门不变）；desktop 文件层写入 `["dsh-app://app"]` 后三连 = 200/200/403。HEAD 版 schema 实验证实未知键不抛错 ⇒ 对共享文件层写入对旧内存版 web 实例无害。
+5. **端到端（G5）**：CodeBuddy 桥 `glm-5.3-flash` 真实聊天 `content:"成功"`+`finish_reason:"stop"`；Qoder `:3903` 流式正文在途；Trae 按用户设置禁用未测。共存：web（:3090，PID 10132）先占 3901/3903，桌面实例桥 EADDRINUSE 落 lastError 不炸、聊天路由先占方桥——方案共存纪律 ② 预言形态。
+6. **回归（G6）**：离线九套件全绿（desktop-acceptance **9 ok / 0 FAIL**、host-config 36、trae 89、qoder 154…）；`dsh-ui-test/` card-accordion **200** + qoder-slot-check **13** + qoder-tab-phase2 **11** 全绿，md5 跑前跑后恒 `c5cff30c…`。`codebuddy-plugin.json` 全程唯一预期内写入 = `localAllowedOrigins`（字段级 diff 归因），三手写块逐行原样。
+7. **未验证项（诚实标注）**：壳内页面是否真的透传 `dsh-app://app` Origin（需壳内 DevTools；不透传则 allowlist 冗余无害）；桌面 UI 壳内设置卡 §3 回归（验收脚本 C 组诚实 SKIP，dsh-ui-test 驱动的是 web 宿主）；OAuth 壳内 `window.open` 行为（当前已登录无握手需求）；qoder-prefs-check（真实写盘级，本轮无 qoder 改动未跑）；release tag 推送见下。
+
 ## 本次会话（2026-09-23，dsh 0.1.6-alpha.2 → 0.1.7-alpha.2 升级 + 插件配置层迁移）
+
+
 
 1. **升级目标与依据**：上游当天连发三版（`0.1.5-rc.3` 05:55 / `0.1.7-alpha.1` 06:23 / `0.1.7-alpha.2` 16:08）；dist-tags = latest `0.1.5-rc.2` / next `0.1.5-rc.3` / alpha `0.1.7-alpha.2`。用户选 **0.1.7-alpha.2 + 完整适配**（不走 0.1.5 rc 线，避免丢 0.1.6 的 Plugin Manager 卡片位）。升级前用 `npm pack` 逐包 diff **17 个接触面子包**判定破坏面，而不是读 release note。
 2. **破坏性变化 = 配置持久化整体改向**（踩坑 #43）：`@deepseek-ai/dsh-settings-file` **被删除**（0.1.7-alpha.2 在 npm 上 404），`settings` 服务改由 `dsh-settings` 提供；`~/.dsh/settings.yaml` 降级为 legacy——首启由 Loader 稳定后**一次性导入** profile 的 `cordis.patch.yml`，随即改名 `settings.yaml.imported`；`ctx.settings.register(ns, schema)` **消失**（调用即 TypeError），改为 `configure({auto}, fiber)` + `describe/update/replace/mutate(ns=profile entry id, …, expectedRevision)`，只有 `.volatile()` 字段可表单编辑。新增 `dsh-config-editor`（`ctx.configEditor.edit()`，写 `profileContext.patchPath`）。`dsh-llm-pi-ai` 的 `providers` 恰好改成 `.volatile()` ⇒ 本插件的镜像/路由存在性管理能平移。**零破坏面**：`dsh-client-ui-slots`（`plugins.item` 仍在，另加 `plugins.detail.*`/`plugins.bundle.activation`）、`dsh-launch-environment`（哨兵 Authorization 机制不动）、`dsh-credentials(-local)`（`.credentials.yaml` 写路径不动）、`dsh-base` 三个 patch 行 id 不变；`dsh-package-manifest` 纯增量（`icon`、本地化 `title/description`、`bundle.patch` 可为数组）。

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.0 (2026-10-03)
+
+- **desktop profile 接入落地**（goal `docs/goals/desktop-adaptation.md` G3–G7 一轮完成；实施实录见 goal 文档「实施实测」节与 STATE.md 同日节）：
+  - **装载**：desktop 自带 CLI `plugin --profile desktop add <repo>` 一次到位——`dependencies.dsh-tap=link:` 与 `dsh.profile.bundles` 两落点自动写好，link 实落 `profiles/desktop/node_modules/`；`verify-desktop-acceptance.mjs` §1c FAIL→ok（**9 ok / 0 FAIL**），三手写块（volces / agent-default-model / ui-settings-account）与 2026-10-01 注释逐行原样（diff 备份实证）
+  - **活体（0.2.0-rc.2 asar 内嵌宿主）**：`?probe=host-config` = `mode=forms` / `formsWritable=true` / `legacySettingsPath` 指向 `%USERPROFILE%\.dsh`（DSH_HOME 未漂移）⇒ **host-config.js 零改动**（能力探测选路自动命中，未写版本号分支）；凭据/桥端口与 web profile 全共享，web（:3090）与桌面实例并存、桥端口先占方持有（EADDRINUSE 落 lastError 不炸，聊天路由先占方桥）
+  - **新坑 #54**：桌面组合树不合并 bundle patch 的 codebuddy 块，镜像只写 `providers.codebuddy.models` 子路径被 0.2.0 llm-pi-ai 校验拒（`needs an api` ⇒ mutate 回滚）——接入 = 往 desktop patch 手放完整 provider 块（web 用户层同构先例）；修复后 `lastError=null`、`providerIds=[volces,qoder,codebuddy]`
+  - **Origin 门兜底**：`Origin: dsh-app://app` 的本地特权面请求实测 403（方案风险 3 命中）⇒ index.js 新增通用 `localAllowedOrigins` 配置字段（**默认空 = 行为不变**，零 desktop 字样，§4a/§4b 静态守卫保持绿）+ `localGuardFailure`/`sameOrigin` 两门消费（完整串精确匹配，Host 回环门不变）；desktop 侧文件层建议值 `["dsh-app://app"]`，落地后三连实测 200 / 200 / 陌生 Origin 403
+  - **端到端**：CodeBuddy 桥 `glm-5.3-flash` 真实聊天 `content:"成功"` + `finish_reason:"stop"`；Qoder :3903 流式正文在途；Trae 按用户设置禁用未测
+  - **回归**：离线九套件全绿（models 23 / host-config 36 / trae 89 / qoder 154 / desktop-acceptance / agents-md 预算…）+ `dsh-ui-test/` card-accordion **200** + qoder-slot-check **13** + qoder-tab-phase2 **11**，零真实写入 md5 对账一致；desktop patch 首启镜像写回前已备份（`cordis.patch.yml.pre-dsh-tap-20261003.bak`）
+
 ## 0.14.0 (2026-09-27)
 
 - **设置卡四族收敛：命中面 / 状态行可读性 / 保存播报 / Trae·Qoder 同构行抽组件**（纯 `lib/client.js` 前端 + 回归套件 +1 断言；新坑 **#53**）：

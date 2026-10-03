@@ -109,6 +109,11 @@ export const Config = z.object({
   sessionHeadersEnabled: z.boolean().default(true),
   sessionHeaderFormat: z.union([z.const('openai'), z.const('openrouter')]).default('openai'),
   maxConcurrentPerSession: z.number().step(1).min(1).max(100).default(4),
+  // 本地特权面（/dsh-tap/settings）的额外放行 Origin 完整串清单（精确匹配，
+  // 非前缀/通配）。宿主壳的页面经壳转发本地请求时，Origin 是壳自己的自定义
+  // scheme（host 不等于回环 Host），默认按跨站拒；需要壳内设置卡写入的宿主
+  // 把该 scheme 完整串（如壳协议://页面 host）填进来。默认空 = 行为不变。
+  localAllowedOrigins: z.array(z.string()).default([]),
   imageGenEnabled: z.boolean().default(true),
   imageGenModel: z.string().default('hunyuan-image-v3.0-art'),
   keyCooldownMs: z.number().step(100).min(100).default(60000),
@@ -1132,10 +1137,15 @@ function sendJSON(res, status, payload) {
 }
 
 /** Only same-origin writes: POST mutates settings or credentials. */
-function sameOrigin(req) {
+/** Only same-origin writes: POST mutates settings or credentials.
+ * allowedOrigins：额外放行的 Origin 完整串（精确匹配，非前缀/通配）——
+ * 壳内页面经壳转发本地请求时，其自定义 scheme 的 Origin host 不等于回环
+ * Host，按跨站拒掉会堵死设置卡写入；Host 门（回环强制）不受影响。 */
+function sameOrigin(req, allowedOrigins = []) {
   const origin = req.headers.origin
   const host = req.headers.host
   if (origin === undefined || host === undefined) return false
+  if (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin)) return true
   try {
     return new URL(origin).host === host
   } catch {
@@ -1153,14 +1163,14 @@ function sameOrigin(req) {
  *    请求必带 Origin，不一致即跨站伪造。
  * Returns null to proceed, else the refusal reason (送 403 响应体).
  */
-function localGuardFailure(req) {
+function localGuardFailure(req, allowedOrigins = []) {
   const host = req.headers.host
   const hostname = typeof host === 'string' ? hostHeaderHostname(host) : null
   if (!hostname || !isLoopbackHostname(hostname)) {
     return `本接口仅限本机访问：Host 必须是回环地址（127.0.0.1/localhost/::1），收到 ${host ?? '(缺失)'}`
   }
   const origin = req.headers.origin
-  if (origin !== undefined) {
+  if (origin !== undefined && !(Array.isArray(allowedOrigins) && allowedOrigins.includes(origin))) {
     let originMatches = false
     try {
       originMatches = new URL(origin).host === host
@@ -1389,8 +1399,10 @@ function registerSettingsRoute(ctx, entryConfig, resolveNow, applyLive, retryGat
       kind: 'exact',
       path: '/dsh-tap/settings',
       handler: (request, response) => {
-        // 安全审计 [6]+[7]：GET 与 POST 都先过本地门（回环 Host + Origin 一致）。
-        const guardFail = localGuardFailure(request)
+        // 安全审计 [6]+[7]：GET 与 POST 都先过本地门（回环 Host + Origin 一致；
+        // localAllowedOrigins 是壳内自定义 scheme Origin 的例外登记，精确匹配）。
+        const allowedOrigins = resolveNow().localAllowedOrigins ?? []
+        const guardFail = localGuardFailure(request, allowedOrigins)
         if (guardFail) {
           sendJSON(response, 403, { ok: false, error: guardFail })
           return
@@ -1408,7 +1420,7 @@ function registerSettingsRoute(ctx, entryConfig, resolveNow, applyLive, retryGat
           sendJSON(response, 200, { ...settingsView(resolveNow), host: hostReconcileView(() => ctx.web) })
           return
         }
-        if (request.method !== 'POST' || !sameOrigin(request)) {
+        if (request.method !== 'POST' || !sameOrigin(request, allowedOrigins)) {
           sendJSON(response, request.method === 'POST' ? 403 : 405, { ok: false })
           return
         }

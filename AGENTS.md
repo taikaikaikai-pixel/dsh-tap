@@ -40,6 +40,7 @@
 `#33` 异步生命周期 · `#34` 0.1.6拆槽 · `#35` curl中文GBK · `#36` wasm头是Map · `#37` 未知key改派 · `#38` fixture禁绝对日期 · `#39` 孤儿tool消息 · `#40` 计数器分辨率
 `#41` content:null不可见 · `#42` 能力声明≠线值 · `#43` 0.1.7配置换代 · `#44` 写入即重载 · `#45` 写完≠生效完 · `#46` 可信按键 · `#47` 主题属性驱动 · `#48` fullPage空操作
 `#49` 模块改名静默跳过 · `#50` 预言机覆盖率 · `#51` 剪贴板权限 · `#52` 本文无锁增长 · `#53` checkbox命中面走label
+`#54` 桌面组合不合并bundle的codebuddy块·接入手放完整块
 
 ## 常用命令（probe/联调/取证脚本的用法注释见 wiki/09-run-and-test.md）
 
@@ -53,6 +54,7 @@ node scripts/verify-providers.mjs
 node scripts/verify-trae-provider.mjs
 node scripts/verify-qoder-provider.mjs
 node scripts/verify-host-config.mjs
+node scripts/verify-desktop-acceptance.mjs
 node scripts/verify-agents-md.mjs
 npm run verify
 CODEBUDDY_BRIDGE_LOG=/tmp/bridge.jsonl dsh web
