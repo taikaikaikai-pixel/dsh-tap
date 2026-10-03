@@ -19,12 +19,12 @@
 2. 每次 `chore(release)` 提交**当场**打 annotated tag `vX.Y.Z` 并随分支一起 push；**永不 rebase 已推送历史**——CHANGELOG 引用提交 SHA，且 0.8.x 的 tag 就是因历史被改写而无法补。
 3. 新增离线验证脚本时同步加进 `.github/workflows/node.js.yml`（CI 只跑离线套件；带真实凭据的 probe-* 与不带 `--list` 的 verify-models 永不进 CI）。
 
-## 桥端口宿主分流 goal（2026-10-03 立项，docs/goals/bridge-port-host-split.md）
+## 桥端口宿主分流 goal（2026-10-03 立项并一轮落地，docs/goals/bridge-port-host-split.md）
 
-> 状态：**已立项、待启动**。驱动：用户要求"window 版本适配，版本控制分 web ui 还有 Gui"；当日用户确认「做分流」。0.15.1 已修诊断口径（借桥报成故障 → 「另一实例代管」，提交 4007c8b，card-accordion [B6] 正向锁 204/0），本 goal 消除借桥本身。
-> 范围：Qoder/Trae 网关 desktop 3902/3903→3912/3913 独立监听，web 线不变；**CodeBuddy 桥 3901 暂不动**。
-> 核心难点（写进 goal）：配置文件共享 ⇒ 端口须按"运行时宿主"解析而非写死配置；"我是谁"的可靠信号 = 第一未知数 U1（候选：profile 目录/宿主环境变量/进程命令行/运行时 Origin，G1 实测选定，勿凭记忆）。
-> 验收：desktop Qoder/Trae 监听 3912/3913（netstat 实证两进程各持各端口）、零借桥零 EADDRINUSE、关 web 后 desktop 通道仍可用、Origin 白名单 + 镜像 baseURL 跟随新端口、web 线零回归、index.js 无 desktop 特化分支（§4a 延续）。
+> 状态：**已落地（G3–G7 一轮完成，0.16.0）**。驱动：用户要求"window 版本适配，版本控制分 web ui 还有 Gui"；当日用户确认「做分流」。0.15.1 已修诊断口径（借桥报成故障 → 「另一实例代管」，提交 4007c8b，card-accordion [B6] 正向锁 204/0），本 goal 消除借桥本身，已随 0.16.0 收尾。
+> 范围：Qoder/Trae 网关 desktop 3902/3903→3912/3913 独立监听，web 线不变；**CodeBuddy 桥 3901 本期未动**（goal 边界，主聊天入口，desktop 仍借 web 先占的 3901——既有共存纪律，与分流无关）。
+> 落地机制（写进 goal 的核心难点已解）：配置文件共享 ⇒ 端口按"运行时宿主"现读现算不持久化——归一函数 `resolveBridgePorts`（三端口唯一出处）+ 信号 `currentProfileDirName`（现读 `hostConfig.probe().documentPath` profile 目录名，永不缓存防启动竞态烙死）；默认 profile（`web`）/信号不可用→偏移 0（与既有行为逐位一致），其余宿主 profile→trae/qoder +10。「显式」判定收口（踩坑 #55）：cordis 给 apply 的 entry 恒含 schema 默认端口，entry ≠ 用户显式——entry 端口值偏离 schema 默认才算显式，文件层显式恒采信，cordis 默认 entry 落回分流/文件层。listen/镜像同源（镜像经 `effectiveSettingsFn` 同源同次解析，根除「listen 3913 镜像写 3903」漂移）。
+> 验收实录：G3/G4 机制——desktop Qoder 监听 3913（PID 28088 lastError:null）、Trae 启用实测 3912、web 仍 3901/3903，netstat 两实例各持各端口零 EADDRINUSE（`docs/probes/port-split-2026-10-03.json`）。G5 共存端到端——web(:3090)/desktop(:19387) 同跑各持各桥，desktop 经 :3913 真实聊天出「成功」；关 web 后 desktop Qoder 仍自持出「独立」（桌面独立成立）；web 重启 :3903 自持出「共存」（`docs/probes/coexist-e2e-port-split-2026-10-03.json`）。双实例 traeEnabled=false，3902/3912 未监听、Trae 独立性本期不适用。G6 回归——离线九套件全 PASS、`verify-desktop-acceptance --structural` §4a/§4b 零 desktop 字样保持绿（index.js 无 desktop 特化分支）。G7 文档收尾——goal 状态/STATE/wiki 02·08/AGENTS `#55`/CHANGELOG 0.16.0 同日完成。
 
 ## v0.8 Goal 进展（docs/goals/v0.8-额度可见-模型动态化-多服务商.md）
 

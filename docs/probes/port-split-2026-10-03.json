@@ -1,0 +1,42 @@
+{
+  "goal": "bridge-port-host-split G3/G4 活体验证",
+  "at": "2026-10-03T04:00:59.756Z",
+  "web": {
+    "url": "http://127.0.0.1:3090",
+    "documentPath": "C:\\Users\\21613\\.dsh\\profiles\\web\\cordis.patch.yml",
+    "ports": {
+      "bridge": 3901,
+      "trae": 3902,
+      "qoder": 3903,
+      "qoderRuntime": {
+        "running": true,
+        "port": 3903,
+        "lastError": null
+      }
+    }
+  },
+  "desktop": {
+    "url": "http://127.0.0.1:19387",
+    "documentPath": "C:\\Users\\21613\\.dsh\\profiles\\desktop\\cordis.patch.yml",
+    "ports": {
+      "bridge": 3901,
+      "trae": 3912,
+      "qoder": 3913,
+      "qoderRuntime": {
+        "running": true,
+        "port": 3913,
+        "lastError": null
+      }
+    }
+  },
+  "desktopPatchMirrorBaseURLs": [
+    "baseURL: http://127.0.0.1:3913",
+    "baseURL: http://127.0.0.1:3901"
+  ],
+  "netstatListening": [
+    "TCP    127.0.0.1:3901         0.0.0.0:0              LISTENING       3400",
+    "  TCP    127.0.0.1:3903         0.0.0.0:0              LISTENING       3400",
+    "  TCP    127.0.0.1:3913         0.0.0.0:0              LISTENING       28088"
+  ],
+  "fileLayerPortKeys": []
+}

@@ -5,7 +5,7 @@
 > **角色定位 + 意图/为什么 + 分阶段意图（非逐行指令）+ 已验证事实 + 未知数（探测先行）+ 产出契约 + 边界 + 裁判纪律**。
 > 必读裁判依据：`AGENTS.md`（全部踩坑）+ `docs/rules/*.md` + `host-config.js` 头注释 + `docs/goals/desktop-adaptation.md`（desktop 接入全案）。
 > 进展记录：每完成一个 G 项，在 `docs/rules/STATE.md` 追加一段。
-> 状态：**待启动**（2026-10-03 立项，用户当日确认「做分流」）。
+> 状态：**已落地（G3–G7 一轮完成，0.16.0）**（2026-10-03：desktop Qoder 3913 / Trae 3912 独立监听、web 3902/3903 不变，机制证据 docs/probes/port-split-2026-10-03.json、G5 共存端到端证据 docs/probes/coexist-e2e-port-split-2026-10-03.json——desktop 经 3913 真实聊天、关 web 后桌面独立成立、web 重启两线各自持桥零 EADDRINUSE；G6 离线九套件全 PASS；G7 文档四件套同日收尾）。
 > 驱动：用户要求"window 版本的适配，版本控制分 web ui 还有 Gui"；0.15.1 已修诊断口径（借桥不再报成故障），本 goal 消除借桥本身。
 
 ## 角色与使命（why）

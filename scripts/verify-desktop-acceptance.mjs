@@ -53,6 +53,14 @@ section('A. 离线结构性不变量')
     /\b(if|else if|case|&&|\|\||\?)\b.*desktop/i.test(l) && !/^\s*(\/\/|\*)/.test(l))
   ok('§4a index.js 无 desktop 特化分支', branch.length === 0,
     branch.length ? `命中 ${branch.length} 行：${branch[0].trim().slice(0, 80)}` : '')
+  // 分流收口加固（goal bridge-port-host-split G3）：端口偏移常量与信号函数在
+  // index.js 各唯一一处定义——「分流规则只在一处」机器可判，防分流逻辑散点复刻。
+  const offsetDefs = src.split('\n').filter((l) => /^\s*const\s+HOST_BRIDGE_PORT_OFFSET\s*=/.test(l))
+  const signalDefs = src.split('\n').filter((l) => /^\s*function\s+currentProfileDirName\s*\(/.test(l))
+  ok('§4a+ 分流收口：HOST_BRIDGE_PORT_OFFSET 常量唯一定义', offsetDefs.length === 1,
+    `定义处=${offsetDefs.length}`)
+  ok('§4a+ 分流收口：currentProfileDirName 信号函数唯一定义', signalDefs.length === 1,
+    `定义处=${signalDefs.length}`)
 }
 
 // §4b 宿主差异收口：desktop 相关选路只允许出现在 host-config.js / lib/client.js
@@ -91,6 +99,13 @@ section('B. 桌面环境断言')
 
 const dshHome = join(homedir(), '.dsh')
 const desktopPatch = join(dshHome, 'profiles', 'desktop', 'cordis.patch.yml')
+
+// 从 desktop patch 文本抠某 provider 镜像块的 baseURL 端口（整块镜像纪律：
+// baseURL 跟随镜像写回时的有效端口）。
+function mirrorBlockPort(text, providerId) {
+  const m = text.match(new RegExp(`${providerId}:[\\s\\S]*?baseURL:\\s*http://127\\.0\\.0\\.1:(\\d+)`))
+  return m ? Number(m[1]) : null
+}
 
 if (structuralOnly) {
   skipped('B 组全部', '--structural 模式：CI 只锁 A 组恒真不变量；B 组结果断言随适配进度变化，留给本机默认跑')
@@ -132,6 +147,24 @@ if (structuralOnly) {
       `当前=${JSON.stringify(keys)}（适配未完成时此项 FAIL 即「未达成」信号）`)
     ok('§1d 手写块并存：volces 未被接管/删除', keys.includes('volces'),
       `当前=${JSON.stringify(keys)}`)
+    // 分流端口断言（goal bridge-port-host-split G4）：desktop patch 的 qoder/trae
+    // 镜像块 baseURL 端口应跟随分流值 3913/3912。两条件分开报：通道镜像块存在
+    // 与否（未启用/未同步时路由不存在属预期，SKIP）与端口值本身。
+    const patchText = readFileSync(desktopPatch, 'utf8')
+    const qoderPort = mirrorBlockPort(patchText, 'qoder')
+    const traePort = mirrorBlockPort(patchText, 'trae')
+    if (keys.includes('qoder')) {
+      ok('§4c desktop qoder 镜像 baseURL 端口 = 3913（分流）', qoderPort === 3913,
+        `当前=${qoderPort}`)
+    } else {
+      skipped('§4c qoder 镜像端口', 'providers.qoder 块不存在（通道未启用/目录未同步——路由存在性管理属预期）')
+    }
+    if (keys.includes('trae')) {
+      ok('§4d desktop trae 镜像 baseURL 端口 = 3912（分流）', traePort === 3912,
+        `当前=${traePort}`)
+    } else {
+      skipped('§4d trae 镜像端口', 'providers.trae 块不存在（通道未启用/目录未同步——路由存在性管理属预期）')
+    }
   }
 }
 
@@ -142,6 +175,8 @@ section('C. 活桌面实例断言（诚实标注）')
 skipped('§2 三通道端到端（CodeBuddy 桥聊天出正文）', '需运行中的 desktop 实例——由端到端探针承担，不在离线脚本伪造')
 skipped('§3 UI 壳设置卡回归', '需按 desktop UI 壳形态适配 dsh-ui-test 驱动后另跑（先加载 .agents/skills/dsh-ui-regression/）')
 skipped('§1e ?probe=host-config 活实例全绿', '需运行中的 desktop 实例——workflow G4 阶段承担')
+skipped('§4e 分流端口活体验收（listen 3912/3913 探活 + 双实例 probe 各归各 + web 侧 documentPath 落盘）',
+  '需运行中的 web/desktop 双实例——由活体探针承担（证据落 docs/probes/），不在离线脚本伪造')
 
 // ============================================================
 console.log(`\n${pass} ok / ${fail} FAIL / ${skip} SKIP`)

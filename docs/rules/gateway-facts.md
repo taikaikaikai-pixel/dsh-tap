@@ -72,3 +72,13 @@
 - **推理长度只是弱信号**：各档长度自适应、非严格单调（glm-5.1：low 662 / medium 666 / high 1101 / max 338），"长度没变"不等于"参数没生效"——档位表判据取"HTTP 200 + 无带内错误"，`off` 判据取"省略参数时 reasoning_content 为 0"
 - **插件侧全链路（真实上游联调，2026-09-22）**：`node scripts/probe-codebuddy-tier-wiring.mjs` —— 临时 DSH_HOME（不碰用户配置）起插件桥 → 本地捕获代理 → 真实网关，12 断言全绿：目录声明 → `model-list` 的 `efforts` 档位表 → settings.yaml 镜像带 `reasoningEfforts`（宿主 Model/Effort 选择器数据源）→ 真实 chat 出站体带被注入的 `reasoning_effort`（`max`）且上游 200；负例（未声明档位 `medium`、无表模型 `auto`）出站体不带该键。证据 docs/probes/codebuddy-tier-wiring-2026-09-22.json
 
+## 桥端口按宿主 profile 分流（2026-10-03 落地，goal docs/goals/bridge-port-host-split.md）
+
+- **分流语义**：web 与 desktop 是两进程、共享同一份 `~/.dsh/codebuddy-plugin.json`——分流端口**不持久化进共享文件层**（写进去两进程读同一份仍撞），每进程按自身宿主信号现读现算。归一函数 `resolveBridgePorts`（index.js，唯一出处）：默认 profile（目录名 `web`）或信号不可用 → 偏移 0（= 与既有行为逐位一致）；其余宿主 profile → trae/qoder 翻译网关分流到 默认+10（**3902→3912、3903→3913**）。CodeBuddy 桥 3901 本期不分流（goal 边界，主聊天入口面最大）。
+- **信号链路**：`currentProfileDirName()` 每次现读 `hostConfig.probe().documentPath`（host-config.js probe 的 documentPath 已 try/catch 兜底 null，永不 throw），取 profile 目录名小写。**永不缓存**：settings 服务经 `ctx.inject` 异步注入，首个 resolveNow（applyLive 同步段）跑时 inject 回调可能未落地——缓存会把启动竞态烙成永久错分；现读后服务就绪即自愈（下一次 sync* 端口对账触发重 listen + 镜像重铺）。保守失败方向：信号 null → shift 0 = 今日行为。
+- **「显式」判定**（踩坑 #55）：cordis 给 apply 的 entry config 恒含 `Config({})` 的 schema 默认端口（活 desktop 实测 entryPortKeys=`[bridgePort,traeBridgePort,traeChatTransport,qoderBridgePort]`）——entry ≠ 用户显式。故：entry 端口值**偏离 schema 默认**才算显式（verify-* 套件随机空闲口 ≠ 默认 → 采信）；文件层显式恒采信（设置卡 commit 才落键，含等于默认的值）；cordis 默认 entry 落回分流/文件层。
+- **listen/镜像同源**：sync*Bridge 与镜像（syncQoder/syncTraeModelsToDshSettings 经模块级出口 `effectiveSettingsFn` = apply 内赋值的 resolveNow）同源同一次解析端口，根除 listen 3913 镜像写 3903 的双路径漂移。镜像 baseURL 整块重铺即热生效（路由存在性管理）。
+- **设置卡观感语义**（免当 bug 报）：desktop 端口字段显示 3912/3913，但 `overridden()` 判 false（文件层无该键）故**无「已覆盖」标记**；用户不主动改就不写共享层；删键/重置 = 回到分流值 391x 而非 3902。
+- **活体验证**（docs/probes/port-split-2026-10-03.json）：web(:3090) 持 3901/3902/3903，desktop(:19387) 持 3913（Qoder，PID 28088）——netstat 实证两实例各自持有各自端口、零 EADDRINUSE、desktop 诊断卡 Qoder 行 `running:true port:3913 lastError:null` 不再出现「另一实例代管」；desktop patch qoder 镜像 baseURL 重铺为 3913。Trae 3912 启用实测同构（验证后已还原共享层 traeEnabled=false）。
+
+

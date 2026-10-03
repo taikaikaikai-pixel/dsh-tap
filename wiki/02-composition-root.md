@@ -182,7 +182,7 @@ desktop 是第二种宿主形态（Electron 壳 + asar 内嵌 dsh，host :19387�
 - **选路零改动**：0.2.0-rc.2 的 settings seam 与 0.1.7 同代（forms/mutate/writable 全在）——host-config.js 能力探测自动命中，**未写任何版本号分支**（§4a 静态守卫锁「index.js 无 desktop 特化分支」，`scripts/verify-desktop-acceptance.mjs` A 组）。
 - **新坑 #54**：桌面组合树**不合并 bundle patch 的 codebuddy 块**，模型镜像只写 `providers.codebuddy.models` 子路径会被 0.2.0 llm-pi-ai 校验拒（`needs an api` ⇒ mutate 整体回滚）——接入 = 往 desktop patch 的 `llm-pi-ai.providers` **手放完整 provider 块**（web 用户层同构先例）。
 - **Origin 门**：桌面壳带 `Origin: dsh-app://app`，被本地特权面 sameOrigin 门拒 403 ⇒ index.js 新增通用 `localAllowedOrigins` 字段（**默认空 = 行为不变**，零 desktop 字样）；desktop 文件层写 `["dsh-app://app"]` 后三连实测 200/200/403。
-- **与 web 实例共存**：两实例共享凭据与桥端口；端口先占方持有，后到者 EADDRINUSE 落 `lastError` 不炸（core/bridge.js listen），聊天路由先占方桥——实测 web(:3090) 先占 3901+3903，desktop 桥让位且双通道聊天正常。
+- **与 web 实例共存（0.16.0 起：Qoder/Trae 端口按宿主分流）**：两实例共享凭据与共享文件层，但**翻译网关端口不再共享**——归一函数 `resolveBridgePorts` 按运行时宿主信号（`currentProfileDirName` 现读 profile 目录名，永不缓存）现算：默认 profile（`web`）偏移 0 仍 3902/3903，其余宿主 profile（如 `desktop`）trae/qoder +10 → **3912/3913**。web 与 desktop 同跑各持各桥、零 EADDRINUSE、零借桥，关 web 后 desktop 通道仍可用（共存端到端证据 docs/probes/coexist-e2e-port-split-2026-10-03.json）。**CodeBuddy 桥 3901 不分流**（goal 边界）仍由先占方持有、desktop 借桥属既有共存纪律。镜像 baseURL 与 listen 同源同次解析，desktop patch qoder 镜像重铺为 `…:3913/v1`。分流机制全表见 docs/rules/gateway-facts.md「桥端口按宿主 profile 分流」节。
 
 ## 设置路由契约
 

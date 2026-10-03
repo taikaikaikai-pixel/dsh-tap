@@ -91,12 +91,15 @@ flowchart LR
 
 | 端口 | 进程 | 路由 | 说明 |
 |------|------|------|------|
-| 3901（bridgePort） | core 桥 | `/v2/*` 透传；`/chat/completions` 特化 | CodeBuddy 主聊天 + agenttool 透传；仅 127.0.0.1 |
-| 3902（traeBridgePort） | Trae 翻译网关 | `POST /v1/chat/completions`；`GET /v1/models` | OpenAI↔Trae 协议翻译；仅 127.0.0.1 |
-| 3903（qoderBridgePort） | Qoder 翻译网关 | `POST /v1/chat/completions`；`GET /v1/models` | OpenAI↔COSY 加密信封翻译；仅 127.0.0.1；Host 门 |
+| 3901（bridgePort） | core 桥 | `/v2/*` 透传；`/chat/completions` 特化 | CodeBuddy 主聊天 + agenttool 透传；仅 127.0.0.1；**不分流**，web/desktop 先占方持有、后到借桥 |
+| 3902（traeBridgePort） | Trae 翻译网关 | `POST /v1/chat/completions`；`GET /v1/models` | OpenAI↔Trae 协议翻译；仅 127.0.0.1；web 线端口 |
+| 3903（qoderBridgePort） | Qoder 翻译网关 | `POST /v1/chat/completions`；`GET /v1/models` | OpenAI↔COSY 加密信封翻译；仅 127.0.0.1；Host 门；web 线端口 |
+| 3912 / 3913 | desktop 宿主 Trae / Qoder 翻译网关 | 同 3902 / 3903 | **0.16.0 分流**：非默认 profile（desktop）trae/qoder = 默认+10，与 web 各持各桥零借桥 |
 | 3080 | dsh web | `/dsh-tap/settings` | 设置卡自有路由（ctx.webServer） |
 
 改 3901 端口必须同时改 `cordis.patch.yml` 的 baseURL（或反之），否则主聊天断（设置卡有明示）。
+
+**端口按宿主分流（0.16.0，goal docs/goals/bridge-port-host-split.md）**：web 与 desktop 是两进程、共享同一份 `~/.dsh/codebuddy-plugin.json`——分流端口**不持久化进共享文件层**（写进去两进程读同一份仍撞），每进程按自身宿主信号现读现算。归一函数 `resolveBridgePorts`（index.js，三端口有效值唯一出处）：默认 profile（目录名 `web`）或信号不可用 → 偏移 0（与既有行为逐位一致）；其余宿主 profile（如 `desktop`）→ trae/qoder 翻译网关分流到默认+10（3902→3912、3903→3913）。镜像 baseURL 跟随同源解析重铺（desktop patch qoder = `http://127.0.0.1:3913/v1`），改端口重铺即热生效。分流语义/「显式」判定/信号链路全表见 docs/rules/gateway-facts.md「桥端口按宿主 profile 分流」节。
 
 ## 环境变量
 

@@ -46,7 +46,7 @@
 
 import { chmodSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, dirname, isAbsolute, normalize, extname } from 'node:path'
+import { join, dirname, basename, isAbsolute, normalize, extname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import YAML from 'yaml'
 import z from '@deepseek-ai/schemastery'
@@ -240,6 +240,75 @@ const readFileLayer = () => readJson(SETTINGS_PATH)
 const writeFileLayer = (section) => writeJson(SETTINGS_PATH, section)
 const readAuth = () => readJson(AUTH_PATH)
 const writeAuth = (v) => writeJson(AUTH_PATH, v)
+
+// ---------------------------------------------------------------------------
+// 桥端口按运行时宿主 profile 分流（goal docs/goals/bridge-port-host-split.md）。
+// 共享文件层（codebuddy-plugin.json）被 web/非默认 profile 两进程共读——分流端口
+// 写进去两边读到同一份仍会撞，故分流值**不持久化**，每进程按自身宿主信号现读
+// 现算。默认 profile（'web'）= schema 默认端口，逐位不变；其余宿主 profile 的
+// trae/qoder 翻译网关分流到 默认+10（3902→3912、3903→3913）。CodeBuddy 桥 3901
+// 本期不动（goal 边界）。
+// ---------------------------------------------------------------------------
+const BRIDGE_PORT_DEFAULTS = { bridge: 3901, trae: 3902, qoder: 3903 }
+const HOST_BRIDGE_PORT_OFFSET = 10
+const DEFAULT_PROFILE_DIR_NAME = 'web'
+
+/**
+ * 宿主信号源（两级，皆现读、永不缓存）：
+ * ① process.argv 自证——host 进程把 profile 目录作位置参数传入（如
+ *    …\.dsh\profiles\<name>），启动期即用，零服务就绪时序依赖（首轮
+ *    applyLive 的 sync*Bridge listen 就靠它，等②就绪再 listen 就晚了——
+ *    EADDRINUSE 会以默认端口烙进 lastError，重启前不自愈）；
+ * ② probe().documentPath（host-config.js 已 try/catch 兜底 null）——settings
+ *    服务经 ctx.inject 异步注入，首个 resolveNow 时可能未就绪，只作兜底。
+ * **永不缓存**：缓存会把启动竞态烙成永久错分；现读 + 就绪后下一次 sync*
+ * 端口对账即自愈。返回小写目录名；两级皆不可用 → null。
+ */
+function currentProfileDirName() {
+  for (const arg of process.argv) {
+    const segs = String(arg).split(/[\\/]/)
+    const i = segs.indexOf('profiles')
+    if (i >= 0 && segs[i + 1]) return segs[i + 1].toLowerCase()
+  }
+  const docPath = hostConfig.probe().documentPath
+  if (typeof docPath !== 'string' || !docPath) return null
+  return basename(dirname(docPath)).toLowerCase()
+}
+
+/**
+ * 三端口有效值的唯一出处。数据驱动：默认 profile（'web'）或信号不可用 →
+ * 偏移 0（= 与既有行为逐位一致）；其余宿主 profile → trae/qoder +10。
+ * 文件层显式值优先（用户在设置卡显式改过端口就按显式值用）。
+ */
+function resolveBridgePorts(entryLayer, fileLayer, profileDirName) {
+  const shift = profileDirName && profileDirName !== DEFAULT_PROFILE_DIR_NAME ? HOST_BRIDGE_PORT_OFFSET : 0
+  const valid = (l, k) => typeof l?.[k] === 'number' && l[k] >= 1 && l[k] <= 65535
+  // 「显式」判定（两难收口于此）：
+  //  - cordis 给 apply 的 entry 恒含 schema 默认端口（活实例实测 entryPortKeys=
+  //    [bridgePort,traeBridgePort,traeChatTransport,qoderBridgePort]=Config({}) 的
+  //    number/union 默认键）——把 entry 无差别当显式，schema 默认会压过分流偏移。
+  //  - verify-* 套件又靠 entry 传随机空闲口（文件层是独立 tmpdir、无端口键）。
+  // 折衷：entry 端口值 **偏离 schema 默认**才算显式（套件随机口 ≠ 默认 → 采信；
+  // cordis 的默认 entry = 默认 → 不采信，落到分流/文件层）；文件层显式恒采信
+  // （用户真实写入，含 3903 这种等于默认的值——那是用户明确要的）。
+  const entryExplicit = (k) => valid(entryLayer, k) && entryLayer[k] !== BRIDGE_PORT_DEFAULTS[{ bridgePort: 'bridge', traeBridgePort: 'trae', qoderBridgePort: 'qoder' }[k]]
+  const pick = (k, def, portShift) => entryExplicit(k) ? entryLayer[k]
+    : valid(fileLayer, k) ? fileLayer[k]
+    : def + portShift
+  return {
+    bridgePort: pick('bridgePort', BRIDGE_PORT_DEFAULTS.bridge, 0),
+    traeBridgePort: pick('traeBridgePort', BRIDGE_PORT_DEFAULTS.trae, shift),
+    qoderBridgePort: pick('qoderBridgePort', BRIDGE_PORT_DEFAULTS.qoder, shift),
+  }
+}
+
+/**
+ * 模块级出口：apply() 内赋值为 resolveNow（镜像函数是模块级、拿不到 apply
+ * 闭包里的 resolveNow，故开此出口）。镜像两个 sync*ModelsToDshSettings 经它
+ * 解析端口——listen 端口与镜像 baseURL 同源同一次解析，根除双路径漂移。
+ * 未赋值（apply 前的理论窗口）回退纯文件层默认值语义（shift=0），不炸。
+ */
+let effectiveSettingsFn = null
 
 // ---------------------------------------------------------------------------
 // Model management: the patch supplies a static 18-model base; the user's
@@ -965,7 +1034,9 @@ function readQoderModelPrefs() {
 /** 镜像 providers.qoder **整块**（路由存在性管理，同 trae 镜像纪律）。 */
 async function syncQoderModelsToDshSettings() {
   try {
-    const s = Config({ ...readFileLayer() })
+    // 端口同源：经 effectiveSettingsFn（apply 内赋值的 resolveNow）解析，
+    // 未赋值窗口回退纯文件层默认（shift=0）语义。
+    const s = effectiveSettingsFn ? effectiveSettingsFn() : Config({ ...readFileLayer() })
     const view = qoderProvider.catalogView()
     const disabled = readQoderModelState().disabled
     const prefs = readQoderModelPrefs()
@@ -1069,7 +1140,9 @@ function readTraeModelState() {
  */
 async function syncTraeModelsToDshSettings() {
   try {
-    const s = Config({ ...readFileLayer() }) // entry 侧无 trae 字段，schema 默认补齐
+    // 端口同源 effectiveSettingsFn（镜像与 listen 一次解析；注释「entry 侧无
+    // trae 字段，schema 默认补齐」指纯文件层路径，resolveNow 本身已含 entry 层）。
+    const s = effectiveSettingsFn ? effectiveSettingsFn() : Config({ ...readFileLayer() })
     const view = traeProvider.catalogView()
     const disabled = readTraeModelState().disabled
     const models = s.traeEnabled === true && view
@@ -1136,15 +1209,19 @@ function sendJSON(res, status, payload) {
   res.end(JSON.stringify(payload))
 }
 
-/** Only same-origin writes: POST mutates settings or credentials. */
 /** Only same-origin writes: POST mutates settings or credentials.
- * allowedOrigins：额外放行的 Origin 完整串（精确匹配，非前缀/通配）——
- * 壳内页面经壳转发本地请求时，其自定义 scheme 的 Origin host 不等于回环
- * Host，按跨站拒掉会堵死设置卡写入；Host 门（回环强制）不受影响。 */
+ * allowedOrigins：额外放行的 Origin 完整串（精确匹配，非前缀/通配）。
+ * 无 Origin 的 POST 放行：应用壳把页面请求转发到本机 Host 时会剥掉 Origin
+ * 头（自定义 scheme 的 Origin host 与回环 Host 不同形，壳侧按自有名单校验
+ * 后转发），故壳内写入恒无 Origin——与 GET 侧 localGuardFailure 的「无
+ * Origin 放行」同语义。浏览器发起的跨站 POST 恒带 Origin，不受影响；回环
+ * Host 门（防 DNS rebinding / LAN 直连）不受影响；非浏览器客户端本就可
+ * 伪造任意 Origin 头，此门对它们无额外约束力。 */
 function sameOrigin(req, allowedOrigins = []) {
   const origin = req.headers.origin
   const host = req.headers.host
-  if (origin === undefined || host === undefined) return false
+  if (host === undefined) return false
+  if (origin === undefined) return true
   if (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin)) return true
   try {
     return new URL(origin).host === host
@@ -1859,7 +1936,13 @@ function registerSettingsRoute(ctx, entryConfig, resolveNow, applyLive, retryGat
 
 export function apply(ctx, config = {}) {
   // entry < file; schema defaults fill the rest. Live-resolved per read.
-  const resolveNow = () => Config({ ...config, ...readFileLayer() })
+  // 端口分流：三端口有效值由 resolveBridgePorts 收口（运行时宿主信号现读，
+  // 不缓存），文件层显式端口值优先于分流默认。
+  const resolveNow = () => {
+    const file = readFileLayer()
+    return Config({ ...config, ...file, ...resolveBridgePorts(config, file, currentProfileDirName()) })
+  }
+  effectiveSettingsFn = resolveNow
 
   // Web providers ride the searchEnabled switch: disposing unregisters from
   // ctx.web, re-enabling registers fresh instances. While disabled the

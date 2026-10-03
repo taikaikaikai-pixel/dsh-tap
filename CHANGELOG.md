@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.16.0 (2026-10-03)
+
+- **桥端口按运行时宿主 profile 分流——desktop Qoder/Trae 独立监听 3913/3912，web 线 3902/3903 逐位不变**（goal `docs/goals/bridge-port-host-split.md` G3–G7 一轮落地；功能换代：端口按宿主分流；新坑 **#55**；机制证据 `docs/probes/port-split-2026-10-03.json`、共存端到端证据 `docs/probes/coexist-e2e-port-split-2026-10-03.json`）：
+  - **机制**：共享文件层 `codebuddy-plugin.json` 被 web/desktop 两进程共读——分流端口**不持久化**（写进去两边读同一份仍撞），每进程按自身宿主信号现读现算。新增模块级归一函数 `resolveBridgePorts`（三端口有效值唯一出处）+ 信号源 `currentProfileDirName`（每次现读 `hostConfig.probe().documentPath` 的 profile 目录名，**永不缓存**——settings 服务经 ctx.inject 异步注入，缓存会把启动竞态烙成永久错分）。默认 profile（`web`）或信号不可用 → 偏移 0（= 既有行为逐位一致）；其余宿主 profile → trae/qoder +10（3902→3912、3903→3913）。CodeBuddy 桥 3901 本期不动（goal 边界）。
+  - **「显式」判定收口**（踩坑 #55）：cordis 给 apply 的 entry config 恒含 `Config({})` 的 schema 默认端口（活 desktop 实测 entryPortKeys=`[bridgePort,traeBridgePort,traeChatTransport,qoderBridgePort]`）——entry ≠ 用户显式，若把 entry 无差别当显式，schema 默认会压过分流偏移（分流失效）。故：entry 端口值**偏离 schema 默认**才算显式（verify-* 套件随机空闲口 ≠ 默认 → 采信，否则桥绑 3901 撞真实实例）；文件层显式恒采信（设置卡 commit 才落键，含等于默认的值）；cordis 默认 entry 落回分流/文件层。
+  - **listen/镜像同源**：镜像两函数（syncQoder/syncTraeModelsToDshSettings）从 `Config({...readFileLayer()})` 切到模块级出口 `effectiveSettingsFn`（apply 内赋值的 resolveNow）——listen 端口与镜像 baseURL 同源同一次解析，根除「listen 3913 镜像写 3903」双路径漂移。sync*Bridge / 设置卡回显零改动（只读 `s.<port>`）。
+  - **web 位级不变承诺**：web 的 documentPath 目录名 = `web`（实测 `...\profiles\web\cordis.patch.yml`）→ shift=0 → 产出与今日逐位一致；信号不可用同。共享文件层实测无三端口键、零真实写入。
+  - **设置卡观感语义**（写入 gateway-facts 免当 bug 报）：desktop 端口字段显示 3912/3913 但 `overridden()` 判 false（文件层无该键）→ 无「已覆盖」标记；删键/重置 = 回到分流值 391x 而非 3902——语义自洽。
+  - **验收（G6）**：`node --check`；`verify-desktop-acceptance --structural` exit 0（§4a/§4b 零 desktop 字样 + 新增 §4a+ 收口加固断言全绿；B 组加 §4c/§4d desktop 镜像端口=3913/3912 断言、C 组补 §4e 活体补采 SKIP）；`verify-bridge`/`verify-rotation`/`verify-providers`/`verify-trae`/`verify-qoder`/`verify-host-config`/`verify-core-generic`/`verify-agents-md` 全 PASS。
+  - **活体 G3/G4（机制）**：desktop Qoder 监听 3913（PID 28088，`running:true lastError:null`）、Trae 启用实测监听 3912、web 仍 3901/3903（PID 3400）——netstat 实证两实例各持各端口零 EADDRINUSE，诊断卡不再出现「另一实例代管」；desktop patch qoder 镜像 baseURL 重铺为 3913（`docs/probes/port-split-2026-10-03.json`）。
+  - **活体 G5（共存端到端，`docs/probes/coexist-e2e-port-split-2026-10-03.json`）**：web(:3090) 与 desktop(:19387) 同跑各持各桥——①desktop 经 :3913 真实聊天 `qfmodel` 出正文「成功」`finish_reason=stop`（11 chunks / 1.354s）；②**桌面独立**：`taskkill` web 进程后 desktop Qoder :3913 仍自持、再聊出「独立」（CONTENT-OK），web 已死 CONNECTION-REFUSED；③web 重启后 :3903 自持可用（出「共存」），终态 netstat 3090/3901/3903→web 新 PID 12904、3913/19387→desktop 28088 未动。baseURL 对平：web patch qoder=`…:3903/v1`、desktop patch qoder=`…:3913/v1`；CodeBuddy 桥 3901 仍由 web 先占 desktop 借桥（goal 边界，与分流无关）。双实例 `traeEnabled=false`，3902/3912 未监听、Trae 独立性本期不适用如实标注。
+  - **回退即 revert**：resolveNow 两行 + 归一函数 + 镜像两行切换，共享层无写入无残留；desktop patch 的 391x 镜像块由 sync* 以旧端口整块重铺自动修正。
+  - **G7 文档收尾**：goal 文档状态转「已落地」、STATE.md goal 节同步、wiki/02 desktop 共存节与 wiki/08 端口总表补 3912/3913 分流口径、AGENTS.md 踩坑速查加 `#55`（守预算闸门，`verify-agents-md` 绿）、CHANGELOG 本节定稿 0.16.0。
+- **真 GUI 实测补记（computer-use 首轮真实壳内操作，三个被探针漏掉的缺陷当场爆出并修复）**：
+  - **壳内 POST 全 403（用户报障截图实爆）**：真实桌面壳点「重试监听」→「重试失败（HTTP 403）」。根因 = 壳 `forwardWebRequest`（asar main.js:7469-7474）转发时**剥掉 origin 头**（`["host","origin","cookie","sec-fetch-site"].delete`），而 `sameOrigin` 对 `origin===undefined` 恒拒 ⇒ **桌面壳内所有 POST（保存/重试监听/登录）自 0.15.0 起全是 403**——0.15.0 的「三连 200/200/403」是 curl 模拟（带 Origin 头直打），真壳请求从未实测。修复 = `sameOrigin` 放行无 Origin 的 POST（威胁模型：浏览器跨站 POST 恒带 Origin 不受影响；无 Origin = 壳转发/非浏览器客户端，回环 Host 门兜底；与 GET 侧 `localGuardFailure` 的无-Origin-放行语义自洽；非浏览器客户端本可伪造任意 Origin，此门对它们无约束力）。
+  - **启动时序竞态实爆（评审预言命中）**：真实重启桌面后 desktop 解析回 **3903**（撞 web EADDRINUSE）——首轮 `sync*Bridge` listen 跑在 settings 服务注入前，`documentPath` 未就绪 → 信号 null → 落 default；探针验证时实例恰好时序对，真实重启必踩。修复 = `currentProfileDirName` 两级信号：① **process.argv 自证**（host 进程把 profile 目录作位置参数传入自身 argv，启动期可用零时序依赖）② documentPath 兜底。离线单测 desktop→`desktop` / web→`null` / 套件→`null`；活体重启后 3913 LISTENING（host 同进程）。
+  - **CodeBuddy 头芯片补「·另一实例代管」**：0.15.1 只补了 Trae/Qoder 芯片，CodeBuddy 行（用户截图同款位置）漏了——同步补齐，`[B2]` 预言机 codebuddy 分支镜像同款逻辑。
+  - **GUI 验收（computer-use，AX 树取证）**：壳内设置卡 `Qoder CN 运行中`（3913）、`CodeBuddy … 桥未监听 :3901·另一实例代管`（goal 边界内共享桥如实标注）、点「重试监听」无 403 横幅——壳内 POST 路径修复闭环。
+
 ## 0.15.1 (2026-10-03)
 
 - **诊断口径修复：EADDRINUSE 共存不再报成故障**（用户报障：桌面 GUI 诊断卡显示 Qoder「网关未监听 :3903 / lastError EADDRINUSE」）。真因 = web 实例(:3090)先占 3901/3903、桌面网关退避让位、聊天路由先占方桥（凭据同源功能等价，desktop 端到端证据已实测）——功能正常，是诊断卡把良性 EADDRINUSE 报成了错。`lib/client.js` 沿用 CodeBuddy 桥 `:1391` 已有口径（"若占用者是另一个 dsh 实例，其桥仍会代管本实例流量"），补齐 Qoder/Trae 半边：头芯片未监听文案追加「·另一实例代管」（EADDRINUSE 专属）、Qoder/Trae 网关状态行带同款说明、「复制诊断」聚合文本同步——三处仅在 `lastError === "EADDRINUSE"` 严格等值时触发，`mock-eaddrinuse` 等其他失败文案不变。

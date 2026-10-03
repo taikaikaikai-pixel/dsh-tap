@@ -1,0 +1,51 @@
+{
+  "probe": "coexist-e2e-port-split",
+  "goal": "bridge-port-host-split G5 共存端到端：web 与 desktop 同跑各持各桥、desktop 经 3913 真实聊天、桌面独立性（关 web 后 desktop Qoder 仍可用），验完重启 web",
+  "date": "2026-10-03",
+  "at": "2026-10-03T04:09:00+08:00",
+  "redlines": "单账号、≥1.5s 间隔、只读优先（除必要的真实聊天与 web 实例停/起）、证据落 docs/probes/",
+  "actors": {
+    "web": { "url": "http://127.0.0.1:3090", "pidBefore": 3400, "pidAfterRestart": 12904, "startCmd": "node node_modules/@deepseek-ai/dsh/lib/bin.js web --no-open --port 3090 (cwd=os.homedir(), via dsh-launcher tray.js start-win)", "ownsPorts": [3090, 3901, 3903] },
+    "desktop": { "url": "http://127.0.0.1:19387", "pid": 28088, "image": "DeepSeek Harness.exe", "ownsPorts": [19387, 3913] }
+  },
+  "step1_probe_host_config": {
+    "command": "curl -s http://127.0.0.1:PORT/dsh-tap/settings?probe=host-config -H Origin: http://127.0.0.1:PORT（index.js:1479 挂载，host-config.js:210 probe() 实现）",
+    "web": { "httpCode": 200, "ok": true, "mode": "forms", "writable": true, "formsWritable": true, "entryFound": true, "entryNs": "llm-pi-ai", "attachError": null, "lastError": null, "documentPath": "C:\\Users\\21613\\.dsh\\profiles\\web\\cordis.patch.yml", "providerIds": ["codebuddy", "kimi-coding", "qoder"] },
+    "desktop": { "httpCode": 200, "ok": true, "mode": "forms", "writable": true, "formsWritable": true, "entryFound": true, "entryNs": "llm-pi-ai", "attachError": null, "lastError": null, "documentPath": "C:\\Users\\21613\\.dsh\\profiles\\desktop\\cordis.patch.yml", "providerIds": ["volces", "qoder", "codebuddy"] },
+    "note": "probe 载荷无逐 provider baseURL 字段（host-config.js:210-240 实测结构）；baseURL 对平改由两份活 patch 文件 + 运行时 settings 视图承担",
+    "baseURL_parity": {
+      "web_patch": { "codebuddy": "http://127.0.0.1:3901/v2 (web/cordis.patch.yml:43)", "qoder": "http://127.0.0.1:3903/v1 (web/cordis.patch.yml:329)" },
+      "desktop_patch": { "codebuddy": "http://127.0.0.1:3901/v2 (desktop/cordis.patch.yml:205)", "qoder": "http://127.0.0.1:3913/v1 (desktop/cordis.patch.yml:101)" },
+      "runtime_settings_view": { "web": { "bridgePort": 3901, "qoderBridgePort": 3903, "traeBridgePort": 3902, "qoderBridge": { "running": true, "port": 3903 } }, "desktop": { "bridgePort": 3901, "qoderBridgePort": 3913, "traeBridgePort": 3912, "qoderBridge": { "running": true, "port": 3913 }, "bridge": { "running": false, "port": 3901, "lastError": "EADDRINUSE——3901 由 web 先占，desktop 借桥属既有共存纪律(core/bridge.js:600-662)，与分流目标无关" } } },
+      "trae_note": "双实例 traeEnabled=false（settings 视图实测），故 3902/3912 均未监听、desktop patch 无 trae 镜像块——与任务给定端口实况 {p3902:null,p3912:null} 一致；Trae 独立性本次不适用（通道未启用）"
+    }
+  },
+  "step2_desktop_qoder_3913_real_chat": {
+    "command": "curl -sS -N --max-time 90 http://127.0.0.1:3913/v1/chat/completions -H 'Content-Type: application/json' -H 'Authorization: Bearer dsh-qoder-bridge' -H 'Origin: http://127.0.0.1:19387' -d '{\"model\":\"qfmodel\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"请只回复两个字：成功\"}]}'",
+    "httpCode": 200, "timeSeconds": 1.354, "sseChunks": 11, "content": "成功", "contentChars": 2, "finishReason": "stop", "verdict": "CONTENT-OK"
+  },
+  "step3_desktop_independence": {
+    "kill": { "command": "taskkill /PID 3400 /F", "result": "成功: 已终止 PID 为 3400 的进程", "netstatAfter": "仅 3913/19387 LISTENING(28088)；3090/3901/3903 全灭" },
+    "web_down_confirm": { "command": "curl http://127.0.0.1:3090/dsh-tap/settings?probe=host-config", "result": "HTTP 000 CONNECTION-REFUSED（预期）" },
+    "desktop_probe_solo": { "httpCode": 200, "ok": true },
+    "desktop_qoder_solo_chat": { "command": "同 step2 但提示词『请只回复两个字：独立』", "httpCode": 200, "timeSeconds": 2.665, "content": "独立", "contentChars": 2, "finishReason": "stop", "verdict": "CONTENT-OK——web 已死，3913 仍由 desktop(28088) 自持并真实出正文" },
+    "web_restart": { "command": "cd C:\\Users\\21613\\dev\\dsh-launcher && node tray.js start-win 3090", "result": { "started": true, "port": 3090, "pid": 12904, "ready": true }, "note": "启动路径取自 dsh-launcher/tray.js:302-303（NATIVE_DSH_BIN=launcher 下 node_modules，cwd=os.homedir()），与被杀进程原命令行一致" }
+  },
+  "final_coexistence": {
+    "netstat": "3090/3901/3903 → 12904(web 新)；3913/19387 → 28088(desktop 未动)",
+    "desktop_probe_final": { "httpCode": 200, "ok": true, "providerIds": ["volces", "qoder", "codebuddy"], "attachError": null, "lastError": null },
+    "web_qoder_3903_chat_after_restart": { "command": "curl http://127.0.0.1:3903/v1/chat/completions 提示词『请只回复两个字：共存』", "httpCode": 200, "content": "共存", "finishReason": "stop", "verdict": "CONTENT-OK——web 重生后 3903 自持可用" }
+  },
+  "rawEvidence": {
+    "webProbe": "docs/probes/_tmp-web-probe.json",
+    "desktopProbe": "docs/probes/_tmp-desktop-probe.json",
+    "desktopProbeSolo": "docs/probes/_tmp-desktop-probe-solo.json",
+    "desktopProbeFinal": "docs/probes/_tmp-desktop-probe-final.json",
+    "webProbeRestart": "docs/probes/_tmp-web-probe-restart.json",
+    "webSettings": "docs/probes/_tmp-web-settings.json",
+    "desktopSettings": "docs/probes/_tmp-desktop-settings.json",
+    "sse3913": "docs/probes/_tmp-3913-chat.sse",
+    "sse3913Solo": "docs/probes/_tmp-3913-chat-solo.sse",
+    "sse3903Covive": "docs/probes/_tmp-3903-chat-covive.sse"
+  }
+}

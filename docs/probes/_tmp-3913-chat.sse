@@ -1,0 +1,24 @@
+data: {"choices":[{"delta":{"content":"","reasoning_content":"","role":"assistant"},"index":0}],"created":1791000543,"id":"chatcmpl-bb49b6a4-bf37-956b-add3-92d4dc6eaa3a","model":"auto","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"","reasoning_content":"用户"},"index":0}],"created":1791000543,"id":"chatcmpl-bb49b6a4-bf37-956b-add3-92d4dc6eaa3a","model":"auto","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"","reasoning_content":"要求只"},"index":0}],"created":1791000543,"id":"chatcmpl-bb49b6a4-bf37-956b-add3-92d4dc6eaa3a","model":"auto","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"","reasoning_content":"回复两个字：“"},"index":0}],"created":1791000543,"id":"chatcmpl-bb49b6a4-bf37-956b-add3-92d4dc6eaa3a","model":"auto","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"","reasoning_content":"成功”。需要"},"index":0}],"created":1791000543,"id":"chatcmpl-bb49b6a4-bf37-956b-add3-92d4dc6eaa3a","model":"auto","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"","reasoning_content":"严格遵循，仅"},"index":0}],"created":1791000543,"id":"chatcmpl-bb49b6a4-bf37-956b-add3-92d4dc6eaa3a","model":"auto","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"","reasoning_content":"输出这两个字，"},"index":0}],"created":1791000543,"id":"chatcmpl-bb49b6a4-bf37-956b-add3-92d4dc6eaa3a","model":"auto","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"","reasoning_content":"不加其他内容。"},"index":0}],"created":1791000543,"id":"chatcmpl-bb49b6a4-bf37-956b-add3-92d4dc6eaa3a","model":"auto","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"成功","reasoning_content":""},"index":0}],"created":1791000543,"id":"chatcmpl-bb49b6a4-bf37-956b-add3-92d4dc6eaa3a","model":"auto","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"","reasoning_content":""},"finish_reason":"stop","index":0}],"created":1791000543,"id":"chatcmpl-bb49b6a4-bf37-956b-add3-92d4dc6eaa3a","model":"auto","object":"chat.completion.chunk"}
+
+data: {"choices":[],"created":1791000543,"id":"chatcmpl-bb49b6a4-bf37-956b-add3-92d4dc6eaa3a","model":"auto","object":"chat.completion.chunk","usage":{"billable":false,"completion_tokens":24,"completion_tokens_details":{"reasoning_tokens":21},"credits":0.002630848,"original_credits":0.002630848,"prompt_tokens":67,"prompt_tokens_details":{"cacheable_tokens":0,"cached_tokens":0},"total_tokens":91}}
+
+data: [DONE]
+
