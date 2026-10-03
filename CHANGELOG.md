@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.1 (2026-10-03)
+
+- **诊断口径修复：EADDRINUSE 共存不再报成故障**（用户报障：桌面 GUI 诊断卡显示 Qoder「网关未监听 :3903 / lastError EADDRINUSE」）。真因 = web 实例(:3090)先占 3901/3903、桌面网关退避让位、聊天路由先占方桥（凭据同源功能等价，desktop 端到端证据已实测）——功能正常，是诊断卡把良性 EADDRINUSE 报成了错。`lib/client.js` 沿用 CodeBuddy 桥 `:1391` 已有口径（"若占用者是另一个 dsh 实例，其桥仍会代管本实例流量"），补齐 Qoder/Trae 半边：头芯片未监听文案追加「·另一实例代管」（EADDRINUSE 专属）、Qoder/Trae 网关状态行带同款说明、「复制诊断」聚合文本同步——三处仅在 `lastError === "EADDRINUSE"` 严格等值时触发，`mock-eaddrinuse` 等其他失败文案不变。
+- **回归**：`card-accordion.js` 新增 `[B6]`（4 断言：真 EADDRINUSE mock ⇒ 头芯片追加 + Qoder 网关行代管说明正向锁，踩坑 #50——此前套件无此锁，删掉追加照样全绿）；`[B2]` 状态行预言机同步镜像 client.js 的 EADDRINUSE 分支（逐字全等口径不变）。全套 **204 通过 / 0 失败**（基线 200 + [B6] 4），零真实写入 md5 对账一致（`c5cff30c…`）。
+
 ## 0.15.0 (2026-10-03)
 
 - **desktop profile 接入落地**（goal `docs/goals/desktop-adaptation.md` G3–G7 一轮完成；实施实录见 goal 文档「实施实测」节与 STATE.md 同日节）：
