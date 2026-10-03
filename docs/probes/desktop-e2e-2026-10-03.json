@@ -1,0 +1,222 @@
+{
+  "probe": "desktop-e2e",
+  "date": "2026-10-03",
+  "context": "desktop 实例（Electron 壳 PID 11660 + host PID 30212 :19387）；桥端口先占方为 web 实例（PID 26028 :3090，3901+3903），共存纪律见 core/bridge.js:600-662",
+  "startedAt": "2026-10-03T00:35:45.909Z",
+  "pluginCfgMd5Before": "c5cff30c98e179bb47b1359559f81db7",
+  "probes": [
+    {
+      "name": "codebuddy-bridge-3901",
+      "url": "http://127.0.0.1:3901/v2/chat/completions",
+      "model": "glm-5.3-flash",
+      "startedAt": "2026-10-03T00:35:45.911Z",
+      "status": 200,
+      "firstContentDelta": "成功",
+      "midSamples": [],
+      "contentChars": 2,
+      "finishReason": "stop",
+      "sseChunks": 71,
+      "sawReasoning": true,
+      "ms": 2831,
+      "verdict": "CONTENT-OK",
+      "endedAt": "2026-10-03T00:35:48.742Z"
+    },
+    {
+      "name": "qoder-gateway-3903",
+      "url": "http://127.0.0.1:3903/v1/chat/completions",
+      "model": "qfmodel",
+      "startedAt": "2026-10-03T00:35:50.744Z",
+      "status": 200,
+      "firstContentDelta": "成功",
+      "midSamples": [],
+      "contentChars": 2,
+      "finishReason": "stop",
+      "sseChunks": 18,
+      "sawReasoning": true,
+      "ms": 1770,
+      "verdict": "CONTENT-OK",
+      "endedAt": "2026-10-03T00:35:52.514Z"
+    }
+  ],
+  "pluginCfgMd5After": "c5cff30c98e179bb47b1359559f81db7",
+  "pluginCfgUnchanged": true,
+  "endedAt": "2026-10-03T00:35:52.514Z",
+  "hostConfigProbe": {
+    "ok": true,
+    "probe": {
+      "mode": "forms",
+      "servicePresent": true,
+      "formsWritable": true,
+      "api": [
+        "importLegacyDocument",
+        "configure",
+        "invalidate",
+        "writable",
+        "documentPath",
+        "prepareDocument",
+        "describe",
+        "update",
+        "replace",
+        "mutate",
+        "write",
+        "schema"
+      ],
+      "writable": true,
+      "documentPath": "C:\\Users\\21613\\.dsh\\profiles\\desktop\\cordis.patch.yml",
+      "entryFound": true,
+      "entryNs": "llm-pi-ai",
+      "entryRevision": 0,
+      "autoGenerate": false,
+      "applies": "live",
+      "valueKeys": [
+        "providers"
+      ],
+      "providerIds": [
+        "volces",
+        "qoder",
+        "codebuddy"
+      ],
+      "schemaKeys": [
+        "uid",
+        "refs"
+      ],
+      "describeCount": 20,
+      "allNamespaces": [
+        "session-log-deepseek",
+        "agent-default-model",
+        "llm-pi-ai",
+        "pwsh-sandbox",
+        "permission",
+        "subagent",
+        "web-search-deepseek",
+        "agent-loop",
+        "llm-deepseek",
+        "llm-deepseek-account",
+        "product-analytics",
+        "subagent-model-selection-settings",
+        "ui-settings-account",
+        "ui-theme",
+        "locale",
+        "ui-settings",
+        "ui-settings-general",
+        "ui-conversation",
+        "ui-chat",
+        "agent-preset-registry"
+      ],
+      "attachError": null,
+      "lastError": null,
+      "legacySettingsPath": "C:\\Users\\21613\\.dsh\\settings.yaml",
+      "legacyExists": false
+    }
+  },
+  "liveSettingsView": {
+    "oauth": {
+      "pending": false,
+      "authUrl": "",
+      "error": "",
+      "signedIn": true,
+      "needsRelogin": false,
+      "account": {
+        "nickname": "二减",
+        "uid": "b671d7cc-aacd-4fe7-bbc9-5819de0c17af",
+        "enterpriseName": ""
+      },
+      "accessTokenExpiresAt": 1794496370482
+    },
+    "bridge": {
+      "running": false,
+      "port": 3901,
+      "lastError": "EADDRINUSE"
+    },
+    "trae": {
+      "oauth": {
+        "pending": false,
+        "authUrl": "",
+        "error": "",
+        "signedIn": false,
+        "account": null,
+        "accessTokenExpiresAt": null,
+        "refreshExpiresAt": null,
+        "signatureFormat": "der"
+      },
+      "bridge": {
+        "running": false,
+        "port": null,
+        "lastError": null
+      },
+      "models": {
+        "disabled": [],
+        "sync": null
+      }
+    },
+    "qoderAuthAndBridge": {
+      "oauth": {
+        "pending": false,
+        "authUrl": "",
+        "error": "",
+        "signedIn": true,
+        "needsRelogin": false,
+        "account": {
+          "nickname": "aliyun1985984145",
+          "uid": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0"
+        },
+        "accessTokenExpiresAt": 1792693520000,
+        "refreshExpiresAt": 1821205520000,
+        "hasMachineId": true
+      },
+      "bridge": {
+        "running": false,
+        "port": 3903,
+        "lastError": "EADDRINUSE"
+      }
+    },
+    "host": {
+      "mode": "forms",
+      "servicePresent": true,
+      "missingEntries": [],
+      "webPin": {
+        "searchProvider": "codebuddy",
+        "fetchProvider": "codebuddy",
+        "ok": true
+      },
+      "channels": {
+        "codebuddy": {
+          "expected": 29,
+          "actual": 29
+        },
+        "trae": {
+          "expected": null,
+          "actual": null
+        },
+        "qoder": {
+          "expected": 14,
+          "actual": 14
+        }
+      },
+      "drift": []
+    },
+    "flags": {
+      "qoderEnabled": true,
+      "traeEnabled": false,
+      "bridgeEnabled": true,
+      "localAllowedOrigins": [
+        "dsh-app://app"
+      ]
+    }
+  },
+  "processTopology": {
+    "desktopShell": "PID 11660 DeepSeek Harness.exe (Electron 44.0.0)",
+    "desktopHost": "PID 30212 DeepSeek Harness.exe --expose-internals ...app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js <asar dsh> C:/Users/21613/.dsh/profiles/desktop <primary-runtime> <pnpm.mjs> <runtime/bin> :19387",
+    "webInstance": "PID 26028 node.exe .../dsh-launcher/node_modules/@deepseek-ai/dsh/lib/bin.js web --no-open --port 3090 —— 先占 3901+3903",
+    "netstat": "127.0.0.1:19387 LISTENING 30212; 127.0.0.1:3901 LISTENING 26028; 127.0.0.1:3903 LISTENING 26028; 3902 未监听"
+  },
+  "conclusions": {
+    "codebuddyBridge": "CONTENT-OK（基线）：经 :3901 glm-5.3-flash 流式首增量=成功、finish_reason=stop（桥进程为 web 实例 26028，desktop 桥 EADDRINUSE 让位——core/bridge.js:600-662 共存纪律，凭据同源功能等价）",
+    "qoder": "CONTENT-OK：经 :3903 qfmodel 流式首增量=成功、finish_reason=stop；qoderEnabled=true、OAuth signedIn=true",
+    "trae": "未启用（如实标注）：traeEnabled=false（用户设置 ~/.dsh/codebuddy-plugin.json:37）、:3902 无监听、host.channels.trae expected=null/actual=null —— 不代开",
+    "multiProviderHotLoad": "providerIds=[volces,qoder,codebuddy]、applies=live、formsWritable=true；host.channels 对账 codebuddy 29/29、qoder 14/14、drift=[]、missingEntries=[]（模型进选择器数据源）；forms mutate/write 通道即热加载机制",
+    "zeroWrite": "codebuddy-plugin.json md5 跑前=跑后=c5cff30c98e179bb47b1359559f81db7",
+    "redlines": "单账号（CodeBuddy/Qoder 各 1 次聊天）、间隔 2s>1.5s、其余全部只读 GET、证据落 docs/probes/"
+  },
+  "offlineAcceptance": "9 ok / 0 FAIL / 3 SKIP（C 组三项活实例断言由本探针本轮补跑）"
+}

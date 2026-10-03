@@ -9,6 +9,7 @@
   - **Origin 门兜底**：`Origin: dsh-app://app` 的本地特权面请求实测 403（方案风险 3 命中）⇒ index.js 新增通用 `localAllowedOrigins` 配置字段（**默认空 = 行为不变**，零 desktop 字样，§4a/§4b 静态守卫保持绿）+ `localGuardFailure`/`sameOrigin` 两门消费（完整串精确匹配，Host 回环门不变）；desktop 侧文件层建议值 `["dsh-app://app"]`，落地后三连实测 200 / 200 / 陌生 Origin 403
   - **端到端**：CodeBuddy 桥 `glm-5.3-flash` 真实聊天 `content:"成功"` + `finish_reason:"stop"`；Qoder :3903 流式正文在途；Trae 按用户设置禁用未测
   - **回归**：离线九套件全绿（models 23 / host-config 36 / trae 89 / qoder 154 / desktop-acceptance / agents-md 预算…）+ `dsh-ui-test/` card-accordion **200** + qoder-slot-check **13** + qoder-tab-phase2 **11**，零真实写入 md5 对账一致；desktop patch 首启镜像写回前已备份（`cordis.patch.yml.pre-dsh-tap-20261003.bak`）
+  - **活体验证收尾（段内补记，零代码改动；发版后 08:35 端到端探针，证据 `docs/probes/desktop-e2e-2026-10-03.json`）**：desktop 活实例四项全绿 `{"mounted":true,"cfg":true,"e2e":true,"verifyOk":true}`——①mounted：Electron 壳 + host :19387（0.2.0-rc.2 asar 内嵌）真实挂载；②cfg：§1c `?probe=host-config` 活实例全绿（`formsWritable=true`、`documentPath=…profiles\desktop\cordis.patch.yml`、`applies=live`、`providerIds=[volces,qoder,codebuddy]`，宿主对账 codebuddy 29/29 + qoder 14/14、`drift=[]`、web 钉选 ok）；③e2e：**双通道真实聊天 CONTENT-OK**——桥 :3901 `glm-5.3-flash` 与 Qoder :3903 `qfmodel` 首增量"成功"+`finish_reason=stop`（上条"Qoder 流式正文在途"就此闭合），Trae 按用户设置禁用如实标注不代开；④verifyOk：`verify-desktop-acceptance` = **9 ok / 0 FAIL / 3 SKIP**，验收 C 组 §1c/§2 由本探针补跑（§3 壳内设置卡回归仍未验）。共存纪律实证：web(:3090) 先占 3901+3903，desktop 桥 EADDRINUSE 让位不炸、聊天路由先占方桥；零真实写入 md5 跑前=跑后=`c5cff30c…`
 
 ## 0.14.0 (2026-09-27)
 

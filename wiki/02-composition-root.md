@@ -174,6 +174,16 @@ presets 常量：`PROVIDER_PRESETS = [arkProvider, bailianProvider, deepseekProv
 
 `qoderProvider = createQoderProvider({ readAuth, writeAuth, settings, meter, runtime: qoderRuntime, forensics: { logPath: () => process.env.QODER_GATEWAY_LOG } })`——凭据经 `qoderProvider.oauth.resolveQoderCredential`（临期自动刷新，无 core 轮转——单候选 OAuth）。
 
+## desktop profile 宿主（0.2.0-rc.2，2026-10-03 实测）
+
+desktop 是第二种宿主形态（Electron 壳 + asar 内嵌 dsh，host :19387；profile 在 `~/.dsh/profiles/desktop/`）。接入实录与 goal 见 docs/goals/desktop-adaptation.md；活体证据见 docs/probes/desktop-e2e-2026-10-03.json。
+
+- **装载**：desktop 自带 CLI `plugin --profile desktop add <repo>` 一次到位——`dependencies.dsh-tap=link:` 与 `dsh.profile.bundles` 两落点自动写好，link 实落 `profiles/desktop/node_modules/dsh-tap`。操作前优雅退出应用（托盘），首启前备份 `cordis.patch.yml`。
+- **选路零改动**：0.2.0-rc.2 的 settings seam 与 0.1.7 同代（forms/mutate/writable 全在）——host-config.js 能力探测自动命中，**未写任何版本号分支**（§4a 静态守卫锁「index.js 无 desktop 特化分支」，`scripts/verify-desktop-acceptance.mjs` A 组）。
+- **新坑 #54**：桌面组合树**不合并 bundle patch 的 codebuddy 块**，模型镜像只写 `providers.codebuddy.models` 子路径会被 0.2.0 llm-pi-ai 校验拒（`needs an api` ⇒ mutate 整体回滚）——接入 = 往 desktop patch 的 `llm-pi-ai.providers` **手放完整 provider 块**（web 用户层同构先例）。
+- **Origin 门**：桌面壳带 `Origin: dsh-app://app`，被本地特权面 sameOrigin 门拒 403 ⇒ index.js 新增通用 `localAllowedOrigins` 字段（**默认空 = 行为不变**，零 desktop 字样）；desktop 文件层写 `["dsh-app://app"]` 后三连实测 200/200/403。
+- **与 web 实例共存**：两实例共享凭据与桥端口；端口先占方持有，后到者 EADDRINUSE 落 `lastError` 不炸（core/bridge.js listen），聊天路由先占方桥——实测 web(:3090) 先占 3901+3903，desktop 桥让位且双通道聊天正常。
+
 ## 设置路由契约
 
 路由：`/dsh-tap/settings`（经 `ctx.inject(['webServer'])` 注册）。

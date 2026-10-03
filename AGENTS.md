@@ -19,7 +19,7 @@
 | 多服务商 | `providers/openai-compat.js` + `ark`/`bailian`/`deepseek`/`bigmodel`/`moonshot`/`openrouter`/`qwen` | key 型上游共享骨架 + 每上游 preset（热加载免重启） | docs/rules/extra-providers.md + wiki/06-provider-openai-compat.md |
 | 浏览器半 | `lib/client.js` | 设置卡（4 区块通道手风琴；宿主 UI 原语 + cbc- 样式；刷新生效注意缓存） | wiki/07-web-client.md |
 
-改动生效方式：静态配置、组合根、core、codebuddy 适配器 = 重启 dsh；trae/qoder 网关端口域名热生效、patch 路由改动重启；多服务商热加载；浏览器半刷新页面。
+改动生效方式：静态配置、组合根、core、codebuddy 适配器 = 重启 dsh（desktop 宿主 = 退出并重启桌面应用）；trae/qoder 网关端口域名热生效、patch 路由改动重启；多服务商热加载；浏览器半刷新页面。
 
 设置数据流：设置卡 → `POST /dsh-tap/settings`（自有路由）→ `~/.dsh/codebuddy-plugin.json`（文件层）→ `Config({entry, file})` 活解析。OAuth 令牌单独存 `~/.dsh/*-plugin-auth.json`，**永不回传浏览器**（key 也只回脱敏 `ck_a…5678`）。
 
