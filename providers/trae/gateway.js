@@ -366,27 +366,33 @@ async function forEachSseEvent(body, parser, cb) {
   const decoder = new TextDecoder()
   let buf = ''
   let lastEventName = null
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    let nl
-    while ((nl = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, nl).trim()
-      buf = buf.slice(nl + 1)
-      if (!line) { lastEventName = null; continue }
-      if (line.startsWith('event:')) { lastEventName = line.slice(6).trim(); continue }
-      if (line.startsWith('id:') || line.startsWith(':')) continue
-      if (!line.startsWith('data:')) continue
-      const data = line.slice(5).trim()
-      if (data === '[DONE]') { parser.handle('done', {}); continue }
-      let chunk = null
-      try { chunk = JSON.parse(data) } catch { continue }
-      const ret = await cb(parser.handle(lastEventName, chunk))
-      if (ret) return ret
+  // 提前 return（cb 判 'fallback'/'err'/'done'）或异常时取消上游 reader——
+  // 否则连接残留在 undici 池里泄漏（3003 回退每条一次）。
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      let nl
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim()
+        buf = buf.slice(nl + 1)
+        if (!line) { lastEventName = null; continue }
+        if (line.startsWith('event:')) { lastEventName = line.slice(6).trim(); continue }
+        if (line.startsWith('id:') || line.startsWith(':')) continue
+        if (!line.startsWith('data:')) continue
+        const data = line.slice(5).trim()
+        if (data === '[DONE]') { parser.handle('done', {}); continue }
+        let chunk = null
+        try { chunk = JSON.parse(data) } catch { continue }
+        const ret = await cb(parser.handle(lastEventName, chunk))
+        if (ret) return ret
+      }
     }
+    return undefined
+  } finally {
+    reader.cancel().catch(() => {})
   }
-  return undefined
 }
 
 /**
