@@ -12,7 +12,10 @@
  *   - id 用目录原 id（dsh 里模型 id 按 provider 命名空间隔离，与 codebuddy
  *     重名不冲突）；
  *   - contextWindow 取 contextWindowDefault，缺失回落 max（数组取最大档）；
- *   - maxTokens 取 maxOutputTokens；multimodal → input [text,image]。
+ *   - maxTokens 取 maxOutputTokens；multimodal → input [text,image]；
+ *   - reasoning_effort_config.options → reasoningEfforts（键 = 宿主枚举映射
+ *     TRAE_EFFORT_TO_HOST_KEY/枚举内恒等，值 = 声明拼写；support_thinking
+ *     非 true 或空 options 不出档）。
  */
 
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -30,6 +33,8 @@ import {
 // 整块拒收（2026-10-04 实测 host-config lastError），值则恒为目录声明拼写
 //（remote 通道 custom_model.reasoning_effort 线值，不臆造，踩坑 #42）。
 const TRAE_EFFORT_TO_HOST_KEY = { light: 'low', high: 'high', extra_high: 'xhigh' }
+// 宿主枚举全集：声明拼写本就在枚举内时恒等透传（如未来上游声明 low/max）。
+const HOST_EFFORT_ENUM = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
 
 /** 目录条目 → dsh 模型 profile（可路由集合 = preset 且未禁用）。 */
 export function catalogToProfiles(catalog) {
@@ -52,7 +57,7 @@ export function catalogToProfiles(catalog) {
     if (eff && eff.supportThinking === true && Array.isArray(eff.options) && eff.options.length) {
       const table = {}
       for (const opt of eff.options) {
-        const hostKey = TRAE_EFFORT_TO_HOST_KEY[opt]
+        const hostKey = TRAE_EFFORT_TO_HOST_KEY[opt] ?? (HOST_EFFORT_ENUM.has(opt) ? opt : undefined)
         if (hostKey) table[hostKey] = opt
       }
       if (Object.keys(table).length) p.reasoningEfforts = table

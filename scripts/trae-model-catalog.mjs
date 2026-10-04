@@ -109,9 +109,12 @@ function normalizeMaxTurns(maxTurns, maxTurn) {
 
 /** reasoning_effort_config（2026-10-04 实测形态 {support_thinking, options[],
  *  default_level}）→ {supportThinking, options, defaultLevel}；非对象 → null，
- *  options 只收非空字符串。档位拼写逐模型照抄声明（不臆造，踩坑 #42）。 */
+ *  options 只收非空字符串。三个键都不在场的空对象同样归 null——否则"首个
+ *  非 null wins"的跨分类合并会让空 config 遮蔽后面的真配置。
+ *  档位拼写逐模型照抄声明（不臆造，踩坑 #42）。 */
 function normalizeEffortConfig(v) {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  if (v.support_thinking === undefined && !Array.isArray(v.options) && v.default_level == null) return null
   return {
     supportThinking: v.support_thinking === true,
     options: Array.isArray(v.options) ? v.options.filter((o) => typeof o === 'string' && o) : [],

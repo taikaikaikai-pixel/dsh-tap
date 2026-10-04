@@ -171,6 +171,16 @@ try {
     && JSON.stringify(glm.reasoningEffortConfig.options) === '["light","high","extra_high"]'
     && glm.reasoningEffortConfig.defaultLevel === 'high')
   check('无 reasoning_effort_config 的条目归一为 null', kimi?.reasoningEffortConfig === null)
+  // 空对象 config（{}）归一为 null——否则"首个非 null  wins"合并规则会让空
+  // config 遮蔽后续分类的真配置（终审 Minor）。
+  const shadowCat = normalizeCatalog({
+    valid: true, itemKey: 'k:AI.agent.model.model_list_map', userId: 'k', dbPath: 'p',
+    json: {
+      catA: [fixtureModel({ config_name: 'm1', reasoning_effort_config: {} })],
+      catB: [fixtureModel({ config_name: 'm1', reasoning_effort_config: { support_thinking: true, options: ['high'], default_level: 'high' } })],
+    },
+  })
+  check('空 reasoning_effort_config 不遮蔽后续分类的真配置', shadowCat.models[0]?.reasoningEffortConfig?.options?.[0] === 'high', JSON.stringify(shadowCat.models[0]?.reasoningEffortConfig))
 
   const warnText = catalog.warnings.join('\n')
   check('reasoning_effort_config 进白名单（不再上 warnings）', !warnText.includes('reasoning_effort_config'))

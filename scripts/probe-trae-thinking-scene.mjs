@@ -32,7 +32,7 @@ import {
   TRAE_APP_ID, TRAE_IDE_VERSION, TRAE_IDE_VERSION_CODE,
 } from '../providers/trae/gateway.js'
 import {
-  buildRemoteCreateBody, createRemoteSession, openRemoteEvents,
+  createRemoteSession, openRemoteEvents,
   stopRemoteSession, createRemoteEventParser,
 } from '../providers/trae/remote.js'
 import { readJson } from '../core/json-store.js'
@@ -67,23 +67,6 @@ const authStore = readJson(AUTH_PATH)
 
 // ---------------------------------------------------------------------------
 // P1：remote 通道，custom_model.reasoning_effort（官方 bundle 证实的线缆字段）
-
-function remoteBodyWithEffort(level) {
-  const body = buildRemoteCreateBody(MODEL, [{ role: 'user', content: PROMPT }])
-  if (level !== undefined) {
-    // 官方形态（551.*.mjs custom_model 合并链）：preset 模型 config_source=1。
-    body.initial_message.custom_model = {
-      model_name: MODEL,
-      config_name: MODEL,
-      config_source: 1,
-      is_preset: true,
-      use_remote_service: true,
-      multimodal: false,
-      reasoning_effort: level,
-    }
-  }
-  return body
-}
 
 async function remoteArm(label, level) {
   let sessionId = null
@@ -169,14 +152,17 @@ async function rawArm(label, { fn, extraBody }) {
     const parser = createTraeStreamParser()
     let reasoning = ''
     let visible = ''
+    let lastEventName = null
     for (const line of raw.split('\n')) {
       const s = line.trim()
+      if (!s) { lastEventName = null; continue }
+      if (s.startsWith('event:')) { lastEventName = s.slice(6).trim(); continue }
       if (!s.startsWith('data:')) continue
       const dataStr = s.slice(5).trim()
       if (!dataStr || dataStr === '[DONE]') continue
       let chunk
       try { chunk = JSON.parse(dataStr) } catch { continue }
-      const ev = parser.handle(null, chunk)
+      const ev = parser.handle(lastEventName, chunk)
       if (ev.error) out.inband = JSON.stringify(ev.error).slice(0, 200)
       if (typeof ev.reasoning === 'string') reasoning += ev.reasoning
       if (typeof ev.text === 'string') visible += ev.text

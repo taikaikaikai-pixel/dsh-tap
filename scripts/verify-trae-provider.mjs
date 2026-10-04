@@ -27,7 +27,7 @@
 
 import { createServer, request as httpRequest } from 'node:http'
 import { createHash, verify as cryptoVerify, createPublicKey } from 'node:crypto'
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -532,6 +532,7 @@ try {
   check('空 options 不出档', catalogToProfiles({ models: [{ id: 'm', provider: null, selectable: true, status: true, reasoningEffortConfig: { supportThinking: true, options: [], defaultLevel: null } }] })[0].reasoningEfforts === undefined)
   check('extra_high 映射 xhigh + 未映射拼写不进宿主表', JSON.stringify(catalogToProfiles({ models: [{ id: 'm', provider: null, selectable: true, status: true, reasoningEffortConfig: { supportThinking: true, options: ['extra_high', 'weird'], defaultLevel: null } }] })[0].reasoningEfforts) === '{"xhigh":"extra_high"}')
   check('全部拼写未映射 → 不出档', catalogToProfiles({ models: [{ id: 'm', provider: null, selectable: true, status: true, reasoningEffortConfig: { supportThinking: true, options: ['weird'], defaultLevel: null } }] })[0].reasoningEfforts === undefined)
+  check('宿主枚举拼写恒等透传（low/max 本就在枚举内）', JSON.stringify(catalogToProfiles({ models: [{ id: 'm', provider: null, selectable: true, status: true, reasoningEffortConfig: { supportThinking: true, options: ['low', 'max'], defaultLevel: null } }] })[0].reasoningEfforts) === '{"low":"low","max":"max"}')
   check('目录指纹进 view（不泄露 key）', typeof view.candidate === 'string' && view.candidate.startsWith('sha256:'))
   // G3：catalogView 暴露逐模型 efforts（设置卡 select 与校验的共同真源，
   // 同 qoder catalogView().efforts 口径；仅含目录声明了档位的模型）。
@@ -1178,6 +1179,144 @@ try {
   stop9()
   fbMock.server.closeAllConnections?.()
   fbMock.server.close()
+
+  // =========================================================================
+  // [18] 组合根端到端（DSH_HOME 隔离 + USERPROFILE 重定向 fixture home）：
+  // apply() 起真 index.js —— 目录同步 → 镜像 compat/档位表 → traeModelSetPrefs
+  // 全链路 → 失败路径 syncView.error。终审 Important：组合根新增路径（镜像
+  // compat = #66 的哑火点）必须有离线锁，不能只靠活体对账。
+  {
+    const YAML = (await import('yaml')).default
+    const { readJson, writeJson } = await import('../core/json-store.js')
+    const rootDir = join(workDir, 'e2e-home')
+    mkdirSync(join(rootDir, 'AppData', 'Roaming'), { recursive: true }) // win32 发现的空 home（启动自动同步恒落空 = 各平台同形）
+    const prevDshHome = process.env.DSH_HOME
+    const prevUserProfile = process.env.USERPROFILE
+    process.env.DSH_HOME = rootDir
+    process.env.USERPROFILE = rootDir
+    try {
+      // 预置已登录凭据（远有效期 → 不触发 refresh 网络调用；脱敏断言用）
+      writeJson(join(rootDir, 'trae-plugin-auth.json'), {
+        auth: { accessToken: 'tt-e2e-secret', refreshToken: 'rtt-e2e', expiresAt: Date.now() + 3_600_000 },
+        device: { deviceId: 'd-e2e', machineId: 'm-e2e' },
+        account: { uid: 'u-e2e', nickname: 'e2e' },
+      })
+      // codebuddy 侧启动同步指向 404 mock（快速失败，与本节断言无关）
+      const deadEnd = createServer((req, res) => { res.writeHead(404, { 'content-type': 'application/json' }); res.end('{}') })
+      await new Promise((r) => deadEnd.listen(0, '127.0.0.1', r))
+      const deadOrigin = `http://127.0.0.1:${deadEnd.address().port}`
+      // trae 网关空闲端口
+      const portProbe = createServer()
+      await new Promise((r) => portProbe.listen(0, '127.0.0.1', r))
+      const gwPort = portProbe.address().port
+      await new Promise((r) => portProbe.close(r))
+      // 生产形态：启用开关与端口走文件层（镜像按 Config({...readFileLayer()}) 解析）
+      writeJson(join(rootDir, 'codebuddy-plugin.json'), {
+        traeEnabled: true,
+        traeBridgePort: gwPort,
+        traeChatBaseURL: deadOrigin,
+      })
+      const fixtureDb = join(rootDir, 'fixture.vscdb')
+      buildCatalogFixture(fixtureDb) // glm-5.3（声明 light/high）+ kimi-k3（无声明）+ BYOK + dead
+
+      let routeHandler = null
+      let disposeRoot = null
+      const tap = await import('../index.js')
+      tap.apply({
+        inject: (services, cb) => {
+          if (services.includes('webServer')) cb({ webServer: { register: (route) => { routeHandler = route.handler } } })
+        },
+        on: (event, cb) => { if (event === 'dispose') disposeRoot = cb },
+      }, {
+        bridgeEnabled: false,
+        searchEnabled: false,
+        imageGenEnabled: false,
+        qoderEnabled: false,
+        baseURL: deadOrigin,
+      })
+      check('[18] apply() 注册设置路由', typeof routeHandler === 'function')
+      const ui = createServer((req, res) => routeHandler(req, res))
+      await new Promise((r) => ui.listen(0, '127.0.0.1', r))
+      const uiOrigin = `http://127.0.0.1:${ui.address().port}`
+      const call = async (method, body) => {
+        const res = await fetch(`${uiOrigin}/dsh-tap/settings`, {
+          method,
+          headers: { 'content-type': 'application/json', origin: uiOrigin },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        })
+        return { status: res.status, json: await res.json().catch(() => null) }
+      }
+      const SETTINGS_YAML = join(rootDir, 'settings.yaml')
+      const FILE_LAYER = join(rootDir, 'codebuddy-plugin.json')
+      const readMirrorBlock = () => {
+        try { return YAML.parse(readFileSync(SETTINGS_YAML, 'utf8'))?.['llm-pi-ai']?.providers?.trae ?? null } catch { return null }
+      }
+
+      // -- 目录同步（显式 dbPath = fixture；启动自动同步已被空 home 落空）--
+      const s1 = await call('POST', { action: 'trae-model-sync', dbPath: fixtureDb })
+      check('[18] trae-model-sync fixture → ok:true count=2', s1.status === 200 && s1.json?.ok === true && s1.json?.sync?.count === 2, JSON.stringify(s1.json?.sync))
+      check('[18] 响应回带 trae.models.efforts（仅声明模型）', JSON.stringify(s1.json?.trae?.models?.efforts) === JSON.stringify({ 'glm-5.3': ['light', 'high'] }), JSON.stringify(s1.json?.trae?.models?.efforts))
+      // 镜像写在路由 then 链里 fire-and-forget——轮询落盘
+      let block = null
+      for (let i = 0; i < 100; i++) {
+        block = readMirrorBlock()
+        if (block?.compat && Array.isArray(block.models) && block.models.length === 2) break
+        await sleep(100)
+      }
+      check('[18] 镜像块 compat（pi-ai 出站写 reasoning_effort 的前提，#66 哑火点）',
+        JSON.stringify(block?.compat) === JSON.stringify({ thinkingFormat: 'openai', supportsReasoningEffort: true }), JSON.stringify(block?.compat))
+      const glmMirror = block?.models?.find((m) => m.id === 'glm-5.3')
+      const kimiMirror = block?.models?.find((m) => m.id === 'kimi-k3')
+      check('[18] 镜像条目档位表 = 宿主枚举键 → 声明拼写', JSON.stringify(glmMirror?.reasoningEfforts) === JSON.stringify({ low: 'light', high: 'high' }), JSON.stringify(glmMirror?.reasoningEfforts))
+      check('[18] 无声明模型镜像不带 reasoningEfforts', kimiMirror && !('reasoningEfforts' in kimiMirror))
+
+      // -- GET 视图契约 --
+      const g1 = (await call('GET')).json
+      check('[18] GET trae.models.sync 成功态（count=2 无 error）', g1?.trae?.models?.sync?.count === 2 && g1.trae.models.sync.error === undefined, JSON.stringify(g1?.trae?.models?.sync))
+      check('[18] GET trae.models.modelPrefs 初始空字典', JSON.stringify(g1?.trae?.models?.modelPrefs) === '{}')
+      check('[18] GET 脱敏：access token 不进设置视图', !JSON.stringify(g1).includes('tt-e2e-secret'))
+
+      // -- traeModelSetPrefs 全链路 --
+      let r = await call('POST', { patch: { traeModelSetPrefs: { id: 'glm-5.3', prefs: { effort: 'light' } } } })
+      check('[18] prefs 设声明档位 → 200 ok', r.status === 200 && r.json?.ok === true, JSON.stringify(r.json).slice(0, 200))
+      check('[18] 写文件层 traeModelPrefs', JSON.stringify(readJson(FILE_LAYER).traeModelPrefs) === JSON.stringify({ 'glm-5.3': { effort: 'light' } }))
+      check('[18] POST 响应回带 modelPrefs 一致', r.json?.trae?.models?.modelPrefs?.['glm-5.3']?.effort === 'light')
+      const yamlBefore = existsSync(SETTINGS_YAML) ? readFileSync(SETTINGS_YAML, 'utf8') : ''
+      const layerBefore = readFileSync(FILE_LAYER, 'utf8')
+      r = await call('POST', { patch: { traeModelSetPrefs: { id: 'glm-5.3', prefs: { effort: 'light' } } } })
+      check('[18] 重复提交同值幂等（settings.yaml 与文件层逐字节不变）',
+        r.json?.ok === true && readFileSync(SETTINGS_YAML, 'utf8') === yamlBefore && readFileSync(FILE_LAYER, 'utf8') === layerBefore)
+      r = await call('POST', { patch: { traeModelSetPrefs: { id: 'glm-5.3', prefs: { effort: 'turbo' } } } })
+      check('[18] 非法档位 → 400 且列出声明档位', r.status === 400 && /effort 必须是该模型目录声明的档位（light\/high）/.test(r.json?.error ?? ''), r.json?.error)
+      r = await call('POST', { patch: { traeModelSetPrefs: { id: 'kimi-k3', prefs: { effort: 'light' } } } })
+      check('[18] 未声明档位模型 → 400 明确文案', r.status === 400 && /目录未声明思考档位/.test(r.json?.error ?? ''), r.json?.error)
+      r = await call('POST', { patch: { traeModelSetPrefs: { id: 'no-such', prefs: { effort: 'light' } } } })
+      check('[18] 目录外 id → 400', r.status === 400 && /不在 Trae 目录里/.test(r.json?.error ?? ''))
+      r = await call('POST', { patch: { traeModelSetPrefs: { id: 'glm-5.3', prefs: { effort: 'light', bogus: 1 } } } })
+      check('[18] 未知 prefs 键 → 400', r.status === 400 && /不支持的键/.test(r.json?.error ?? ''))
+      r = await call('POST', { patch: { traeModelSetPrefs: { id: 'glm-5.3', prefs: {} } } })
+      check('[18] 空 prefs = 删记录回默认', r.json?.ok === true && JSON.stringify(readJson(FILE_LAYER).traeModelPrefs ?? {}) === '{}')
+
+      // -- 失败路径：syncView.error 经真路由上浮（G2 组合根侧）--
+      const f1 = await call('POST', { action: 'trae-model-sync', dbPath: join(rootDir, 'missing.vscdb') })
+      check('[18] 同步失败 ok:false 且视图带 error+旧计数（kept）',
+        f1.json?.ok === false && typeof f1.json?.trae?.models?.sync?.error === 'string'
+        && f1.json.trae.models.sync.count === 2, JSON.stringify(f1.json?.trae?.models?.sync))
+      const g2 = (await call('GET')).json
+      check('[18] GET 视图同样带 sync.error（刷新后仍在）', typeof g2?.trae?.models?.sync?.error === 'string' && g2.trae.models.sync.count === 2)
+      const s2 = await call('POST', { action: 'trae-model-sync', dbPath: fixtureDb })
+      check('[18] 再次成功同步后 error 清空', s2.json?.ok === true && s2.json?.trae?.models?.sync?.error === undefined)
+
+      ui.close()
+      deadEnd.close()
+      if (typeof disposeRoot === 'function') disposeRoot()
+    } finally {
+      if (prevDshHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = prevDshHome
+      if (prevUserProfile === undefined) delete process.env.USERPROFILE
+      else process.env.USERPROFILE = prevUserProfile
+    }
+  }
 
 } finally {
   rmSync(workDir, { recursive: true, force: true })

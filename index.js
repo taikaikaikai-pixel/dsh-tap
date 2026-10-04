@@ -1206,6 +1206,7 @@ async function setTraeModelPrefs({ id, prefs } = {}) {
   if (prefs.effort !== undefined) {
     const stored = readTraeModelPrefs()[id]?.effort
     const allowed = [...new Set([...traeDeclaredTiers(id), ...(stored ? [stored] : [])])]
+    if (!allowed.length) throw new Error(`${id} 目录未声明思考档位（不支持逐模型调节）`)
     if (typeof prefs.effort !== 'string' || !allowed.includes(prefs.effort)) {
       throw new Error(`effort 必须是该模型目录声明的档位（${allowed.join('/')}）`)
     }

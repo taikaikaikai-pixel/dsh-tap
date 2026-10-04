@@ -4,7 +4,7 @@
 > 写法同构 `bridge-port-host-split.md`：角色定位 + 意图/为什么 + 分阶段意图（非逐行指令）+ 已验证事实 + 未知数（探测先行）+ 产出契约 + 边界。
 > 必读裁判依据：`AGENTS.md`（全部踩坑）+ `docs/rules/*.md` + `docs/reverse/traework-cn.md` + `docs/reverse/trae-cloud-api.md` + `docs/reverse/trae-model-catalog.md` + `docs/diagnosis-trae-3003.md`。
 > 进展记录：每完成一个 G 项，在 `docs/rules/STATE.md` 追加一段。
-> 状态：**立项（2026-10-04）**。驱动：用户在 dsh 设置卡点 Trae「同步目录」拿不到模型列表；实测根因 = vscdb 发现路径写死 WSL 格式（`/mnt/c/Users`），Windows 桌面端扫不到；且 `trae-model-sync` 失败时错误原因没浮到 UI（只显示泛化「未同步」）。
+> 状态：**已落地（2026-10-04，G1–G4 一轮完成 + 终审修复闭环）**。驱动：用户在 dsh 设置卡点 Trae「同步目录」拿不到模型列表；实测根因 = vscdb 发现路径写死 WSL 格式（`/mnt/c/Users`），Windows 桌面端扫不到；且 `trae-model-sync` 失败时错误原因没浮到 UI（只显示泛化「未同步」）。验收实录见 docs/rules/STATE.md 同名节。
 
 ## 角色与使命（why）
 
