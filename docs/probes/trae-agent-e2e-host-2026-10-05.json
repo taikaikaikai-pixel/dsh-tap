@@ -1,0 +1,25 @@
+{
+  "at": "2026-10-05T05:15:00+08:00",
+  "evidence": "trae-agent-e2e-host",
+  "host": "DeepSeek Harness desktop 0.2.0-rc.2 (PID 31940, :19387, profile=desktop link:C:/Users/21613/dev/dsh-tap @feat/trae-agent-v3 5894c46)",
+  "transport": "traeChatTransport=agent（设置卡 POST patch 热切换； schema 接受新档=宿主已加载新代码的证明）",
+  "model": "TraeWork CN 分组 / GLM-5.3（宿主模型选择器显式点选；agent 面实际服务模型=glm-5.2，钉死改派见 M1 A6 臂）",
+  "session": {
+    "userMessage": "请用 bash 工具执行命令 echo trae-agent-e2e-ok，然后用 read 工具读 docs/rules/STATE.md 的第一行。完成后告诉我两个结果。",
+    "turns": [
+      "turn1: 模型出 tool_calls（pwsh echo + read file_path=docs/rules/STATE.md）",
+      "DSH 本地执行：pwsh echo → trae-agent-e2e-ok；read → 「# 课题状态表（交接用，新会话 30 秒接上）」",
+      "turn2: 最终回答『两个结果如下：1. echo…trae-agent-e2e-ok（pwsh 等价命令，本机无独立 bash）2. docs/rules/STATE.md 第 1 行: # 课题状态表…两个操作都成功返回了。STATE.md 共 194 行…』"
+    ],
+    "duration": "1分39秒（宿主 UI 计时）",
+    "traceTab": "轨迹视图含 pwsh {\"command\":\"echo trae-…\"} → trae-agent-e2e-ok 与 read {\"file_path\":\"C:\\\\Users…\"} 两条工具执行记录（截图证据 frame-6aaa96b2/frame-a124ff6d）"
+  },
+  "quota": {
+    "endpoint": "POST api.trae.cn/trae/api/v2/pay/ide_user_ent_usage（req_source=0）",
+    "beforeProbe": { "ideUsed": 430.394, "at": "M1 探针轮（约 04:30）" },
+    "afterHostSession": { "ideUsed": 482.54, "at": "05:19（真实会话后）" },
+    "deltaIde": 52.15,
+    "note": "delta 含 M1 探针 8 臂 + fn 扫描 ×2 + 本真实会话（多轮带全量历史重放）；消耗落在 IDE 池（available_endpoint=0），与 raw/agent 面计量口径一致；work 池恒 0（未走 remote 面）。"
+  },
+  "restore": "验证后 transport 已恢复 remote（用户原设置）"
+}

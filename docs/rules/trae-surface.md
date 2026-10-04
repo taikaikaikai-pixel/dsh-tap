@@ -198,6 +198,39 @@ skill 开关：~/.trae-cn/skill-config.json（disabledSkills 60+ 个，含 lark-
 
 ---
 
+## 5.5 agent 面实测事实（function=solo_work_lite，2026-10-05 探针落地）
+
+同一聊天端点 `POST trae-api-cn.mchost.guru/api/agent/v3/llm_utils_chat` 的「agent 用法」由
+`function` 参数切换——**solo_work_lite 面**（证据 docs/probes/trae-agent-v3-*.jsonl，
+探针 scripts/probe-trae-agent-v3.mjs，8 臂 + function 名扫描 ×2；社区参照
+dsh-connect-trae SOLO_ROUTE_DECISION / Trae2api-cn build_llm_chat_body）：
+
+- **能力面（实测证实）**：接受 OpenAI 风格 tools（parameters 必须序列化为字符串，同
+  inline 面 Go string 型约束）+ tool_choice=auto；返回结构化 tool_calls（SSE
+  output 事件的 tool_calls[i] 键为 **function_call**，arguments 增量片段按 index
+  拼接）；**并行调用**（A4 臂单事件双 tool_calls）；**role:tool 回传闭环**——
+  第二轮历史携带 assistant.tool_calls + role:tool 结果后产出最终回答（A3 臂）。
+- **方言陷阱（踩坑 #68）**：历史 assistant.tool_calls 的出站键必须是
+  **function_call**——OpenAI 同构的 function 键被 proto 层拒：
+  2001 `*idecopilot.ToolCall read field 4 'FunctionCall' error: required field
+  Name is not set`。inline_chat 面则用 function 键透传（2026-08-24 校准）——
+  **同端点不同 function 面各有方言**，不能互推。
+- **function 名注册表（扫描实测）**：agent_chat / agent_v3 / solo_agent_chat /
+  agent / assistant_chat 均未注册（2001 "no function config found for appId=…"）；
+  chat 已注册但模型名不被路由（4023 "the model is unknown"——进入模型路由层才报）；
+  solo_agent 被 dsh-connect-trae 标注为 Remote-agent 花名册函数（用它调任何模型
+  回 4011）。
+- **模型路由钉死**：任何 model 名都 200，但 timing_cost.provider_model_name 恒为
+  glm-5.2（A6 臂 kimi-k2.6 / DeepSeek-V4-Flash 实测）——改派由网关 SSE 注释行
+  / message.note 诚实披露，计量记真实模型。
+- **reasoning_effort 被忽略**（A5 臂与 A2 同形态，不报错也不生效）——档位注入
+  仅保留在 remote 面；agent 面照发不虚标（踩坑 #42 纪律）。
+- **宽容面**：错模型名（E1）与坏参数形态（E2，temperature 字符串）均静默容忍
+  返回 200——与 inline 面 3003 硬错相反。
+- **额度**：token_usage 事件携带 prompt/completion/total/reasoning_tokens/
+  cache_read_input_tokens 全字段；消耗 IDE 池（available_endpoint=0，同 raw 面）。
+- 落地：`traeChatTransport:'agent'`（第三档，设置卡可选，逐请求热读取免重启）。
+
 ## 6. 未解清单（下一步探测计划）
 
 - [ ] api.trae.cn 各端点的完整认证方案（x-cloudide-token 从哪来、哪些端点共用）
