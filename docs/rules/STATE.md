@@ -26,6 +26,15 @@
 > 落地机制（写进 goal 的核心难点已解）：配置文件共享 ⇒ 端口按"运行时宿主"现读现算不持久化——归一函数 `resolveBridgePorts`（三端口唯一出处）+ 信号 `currentProfileDirName`（现读 `hostConfig.probe().documentPath` profile 目录名，永不缓存防启动竞态烙死）；默认 profile（`web`）/信号不可用→偏移 0（与既有行为逐位一致），其余宿主 profile→trae/qoder +10。「显式」判定收口（踩坑 #55）：cordis 给 apply 的 entry 恒含 schema 默认端口，entry ≠ 用户显式——entry 端口值偏离 schema 默认才算显式，文件层显式恒采信，cordis 默认 entry 落回分流/文件层。listen/镜像同源（镜像经 `effectiveSettingsFn` 同源同次解析，根除「listen 3913 镜像写 3903」漂移）。
 > 验收实录：G3/G4 机制——desktop Qoder 监听 3913（PID 28088 lastError:null）、Trae 启用实测 3912、web 仍 3901/3903，netstat 两实例各持各端口零 EADDRINUSE（`docs/probes/port-split-2026-10-03.json`）。G5 共存端到端——web(:3090)/desktop(:19387) 同跑各持各桥，desktop 经 :3913 真实聊天出「成功」；关 web 后 desktop Qoder 仍自持出「独立」（桌面独立成立）；web 重启 :3903 自持出「共存」（`docs/probes/coexist-e2e-port-split-2026-10-03.json`）。双实例 traeEnabled=false，3902/3912 未监听、Trae 独立性本期不适用。G6 回归——离线九套件全 PASS、`verify-desktop-acceptance --structural` §4a/§4b 零 desktop 字样保持绿（index.js 无 desktop 特化分支）。G7 文档收尾——goal 状态/STATE/wiki 02·08/AGENTS `#55`/CHANGELOG 0.16.0 同日完成。
 
+## 宿主「推理等级」入口补齐（2026-10-04，用户报「输入框里有些模型没有思考强度」）
+
+> 状态：**已落地（工作区未提交）**。驱动：用户要在输入框（composer 的模型选择器 → 推理等级）设置思考强度，选了「就用原生入口，帮我修通/补齐」。
+> 事实基线（asar/launcher 实读 0.2.0-rc.2 + live 实例 + pi-ai 源码）：入口**只由模型条目的 `reasoningEfforts` 决定**（pi-ai `resolveModelReasoning` → `reasoning:true`+`thinkingLevelMap` → `reasoningInfo` → `reasoning.efforts[]` → 选择器出该项）。两种方言的 off 语义不同：**anthropic = 发 `thinking:{type:disabled}`**（`anthropic-messages.js:902`），**openai-completions = 省略参数**（`openai-completions.js:716`，要求 map.off 是字符串才发）。实测 live：volces 2/7、Qoder 0/14、codebuddy 16/25 有档位。
+> 落地：①**Qoder（仓库）**——`providers/qoder/catalog.js` 新增 `qoderReasoningEfforts()`，把目录的 `thinking_config`（`disabled`→`off:null`；`enabled.efforts` 键→线值照抄档位名）投影进 `projectQoderModel`；`index.js` 镜像块补 `compat:{thinkingFormat:'openai',supportsReasoningEffort:true}`（缺它 pi-ai 出站不写 `reasoning_effort`）。投影后 **9/14 出档**（`auto`/`qmodel`/`qmodel_latest`/`q37fmodel`/`mmodel` 目录没声明命名档位 → 不出）。②**volces（用户 profile patch，仓库外）**——`glm-5.3-flash`/`glm-5.3`/`kimi-k3`/`doubao-seed-evolving`/`doubao-seed-2.1-lite` 补 `reasoningEfforts`；档位面按 Ark `/api/plan/v1/messages` 实测裁：`thinking.type=disabled` 被 `glm-5.3`/`glm-5.3-flash` **400 拒** ⇒ 这两个不声明 off 档；备份 `.pre-effort-20261004.bak`，补齐后 **volces 7/7**。
+> 未定论（记录在案，均需多采样才能定）：①Ark 是 anthropic 方言，档位映射 pi-ai 预算表（low 2048/medium 8192/high 16384/max→high），2 采样下自适应模型多数看不到单调差异（glm-5.3 有、glm-5.3-flash/kimi-k3/doubao-seed-2.1-lite 无）⇒ 档位更像"上限"；②Qoder 线上效果 6 臂单采样非单调（`disabled` 臂仍出 619 字推理）⇒ 按 #42 纪律**未改写出站方言**，维持 `reasoning_effort` 透传（与设置卡 prefs 同源）。
+> 验证：`verify-qoder-provider` **161/0**（新增 9 断言：投影 6 + 镜像形状/compat 3）；宿主目录效应用 pi-ai 真 `getSupportedThinkingLevels` 复算 **32/46 出档**；证据 `docs/probes/qoder-thinking-config-*.json`，新取证脚本 `scripts/probe-qoder-thinking-config.mjs`（只读一次签名 GET）。
+> 生效：Qoder 镜像与 volces patch 都属启动期加载 ⇒ **重启 dsh / 退出并重启桌面应用**；设置卡（浏览器半）刷新页面即可。
+
 ## v0.8 Goal 进展（docs/goals/v0.8-额度可见-模型动态化-多服务商.md）
 
 | G 项 | 状态 | 进展记录 |

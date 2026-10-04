@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.18.0 (2026-10-04)
+
+- **宿主「推理等级」入口补齐：Qoder 目录的逐模型思考能力声明投影进镜像（并补路由 compat），用户 profile 的 Ark(volces) 5 个模型补档位表**（用户报「我想在输入框设置模型的思考强度……有些模型没有这一项」；新坑 **#64**；证据 `docs/probes/qoder-thinking-config-*.json`）：
+  - **判据（源码级）**：宿主 composer 模型菜单的「推理等级」只由模型条目的 `reasoningEfforts` 决定——pi-ai `resolveModelReasoning` → `reasoning:true` + `thinkingLevelMap` → `reasoningInfo` → `reasoning.efforts[]`，`getSupportedThinkingLevels` 再按 map 过滤（`off` 键缺省 = map.off 为 null = 不出 Off 档）。两种方言的 off 语义不同：**anthropic = 发 `thinking:{type:disabled}`**（`anthropic-messages.js:902`）、**openai-completions = 省略参数**（`openai-completions.js:716`）。live 实例实测基线：volces 2/7、Qoder 0/14、codebuddy 16/25 出档。
+  - **Qoder（仓库）**：目录条目本就带 `thinking_config:{disabled:{…},enabled:{efforts:{"<档>":{is_default}}}}`（2026-10-04 实测 14 模型、9 个带命名档位），而 `projectQoderModel` 此前只投影 id/name/contextWindow/maxTokens/input——声明在投影层被丢掉。新增 `qoderReasoningEfforts()`（providers/qoder/catalog.js）：`disabled` 在场 → `off:null`（省略参数，同 prefs 的 off 语义）；`enabled.efforts` 的键 → 线值照抄档位名；无命名档位/无 thinking_config → 不出表（llm-pi-ai 拒绝"只有 off"的表，也不臆造档位）。镜像块同时补 `compat:{thinkingFormat:'openai',supportsReasoningEffort:true}`——**缺 compat，pi-ai 出站不会把选中档位写成 `reasoning_effort`**（选择器出档但请求里没这个键）。投影后 **9/14 出档**：`qmodel_38max`/`qfmodel` = off/low/medium/xhigh；`dmodel`/`gm51model` = off/high/max；`gmodel`/`kmodel`/`kmodel_latest` = low/high/max；`gfmodel` = high/max；`dfmodel` = off/low/high/max；`auto`/`qmodel`/`qmodel_latest`/`q37fmodel`/`mmodel` 目录无命名档位 → 不出。
+  - **Ark(volces)（用户 profile `~/.dsh/profiles/desktop/cordis.patch.yml`，备份 `.pre-effort-20261004.bak`）**：`glm-5.3-flash`/`glm-5.3`/`kimi-k3`/`doubao-seed-evolving`/`doubao-seed-2.1-lite` 补 `reasoningEfforts`。档位面按 Ark `/api/plan/v1/messages` 实测裁：7 个模型思考默认开、`thinking:{type:enabled,budget_tokens}` 全部接受；`thinking:{type:disabled}` 被 `glm-5.3`/`glm-5.3-flash` **400 `InvalidParameter`**（"thinking.type `disabled` is not supported by this model"）⇒ 这两个**不声明 off 档**（声明 = 摆一个必然 400 的档位）。补齐后 **volces 7/7 出档**。
+  - **诚实边界（未定论，记录在案）**：①Ark 是 anthropic 方言，档位映射 pi-ai 预算表（low 2048 / medium 8192 / high 16384 / max 夹到 high），2 采样下自适应思考的模型多数看不到单调差异（glm-5.3：2048→1713 / 16384→2219 有；glm-5.3-flash、kimi-k3、doubao-seed-2.1-lite 无）⇒ 档位更像"上限"而非"强度旋钮"；②Qoder 线上效果 6 臂单采样呈自适应非单调（`thinking_config=disabled` 臂仍出 619 字推理、`reasoning_effort=low` 比 `max` 更长）⇒ 按踩坑 #42 纪律**不臆造 `thinking_config` 翻译**，维持网关既有 `reasoning_effort` 透传（与设置卡 prefs 同源，客户端带值不覆盖）。
+  - **回归**：`verify-qoder-provider` **161 通过 / 0 失败**（新增 9 断言：thinking_config 投影 6 + 镜像形状/compat 3）；`verify-models --list` / `verify-bridge` / `verify-rotation` / `verify-core-generic` / `verify-providers` / `verify-trae-provider` / `verify-host-config`（36/0）/ `verify-agents-md`（踩坑编号 1..64 连续、预算绿）/ `verify-desktop-acceptance --structural`（7 ok / 0 FAIL / 5 SKIP）全部 exit 0。新增取证脚本 `scripts/probe-qoder-thinking-config.mjs`（只读一次签名 GET，落 `docs/probes/qoder-thinking-config-<ts>.json`）。
+  - **生效方式**：Qoder 镜像（组合根）与 volces patch（profile 静态层）都属启动期加载 ⇒ **重启 dsh / 退出并重启桌面应用**；宿主目录效应用 pi-ai 真 `getSupportedThinkingLevels` 复算 = **32/46 模型出档**。
+
 ## 0.17.0 (2026-10-03)
 
 - **风险清单全量核实与修复**（8 项高/中危 + 9 项低危逐条实锤后修复；新坑 **#57–#63**；离线九套件全绿）：

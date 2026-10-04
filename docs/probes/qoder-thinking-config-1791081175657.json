@@ -1,0 +1,253 @@
+{
+  "at": "2026-10-04T02:32:55.657Z",
+  "source": "GET https://gateway.qoder.com.cn/algo/api/v2/model/list?Encode=1（providers/qoder/catalog.js，签名只读）",
+  "models": 14,
+  "withEffortTable": 9,
+  "entries": {
+    "auto": {
+      "is_reasoning": true,
+      "thinking_config": null,
+      "effortTable": null
+    },
+    "qmodel_38max": {
+      "is_reasoning": true,
+      "thinking_config": {
+        "disabled": {},
+        "enabled": {
+          "efforts": {
+            "xhigh": {},
+            "low": {},
+            "medium": {
+              "is_default": true
+            }
+          },
+          "is_default": true
+        }
+      },
+      "effortTable": {
+        "off": null,
+        "xhigh": "xhigh",
+        "low": "low",
+        "medium": "medium"
+      }
+    },
+    "qfmodel": {
+      "is_reasoning": true,
+      "thinking_config": {
+        "disabled": {},
+        "enabled": {
+          "efforts": {
+            "xhigh": {},
+            "low": {},
+            "medium": {
+              "is_default": true
+            }
+          },
+          "is_default": true
+        }
+      },
+      "effortTable": {
+        "off": null,
+        "xhigh": "xhigh",
+        "low": "low",
+        "medium": "medium"
+      }
+    },
+    "qmodel_latest": {
+      "is_reasoning": true,
+      "thinking_config": {
+        "disabled": {
+          "description": "Disable thinking"
+        },
+        "enabled": {
+          "description": "Enable thinking",
+          "is_default": true
+        }
+      },
+      "effortTable": null
+    },
+    "qmodel": {
+      "is_reasoning": true,
+      "thinking_config": {
+        "disabled": {
+          "description": "Disable thinking"
+        },
+        "enabled": {
+          "description": "Enable thinking",
+          "is_default": true
+        }
+      },
+      "effortTable": null
+    },
+    "q37fmodel": {
+      "is_reasoning": true,
+      "thinking_config": null,
+      "effortTable": null
+    },
+    "dmodel": {
+      "is_reasoning": true,
+      "thinking_config": {
+        "disabled": {
+          "description": "Disable thinking"
+        },
+        "enabled": {
+          "description": "Enable thinking",
+          "efforts": {
+            "high": {
+              "description": "High thinking intensity"
+            },
+            "max": {
+              "description": "Maximum thinking intensity",
+              "is_default": true
+            }
+          },
+          "is_default": true
+        }
+      },
+      "effortTable": {
+        "off": null,
+        "high": "high",
+        "max": "max"
+      }
+    },
+    "dfmodel": {
+      "is_reasoning": false,
+      "thinking_config": {
+        "disabled": {
+          "description": "Disable thinking"
+        },
+        "enabled": {
+          "description": "Enable thinking",
+          "efforts": {
+            "high": {
+              "description": "High thinking intensity"
+            },
+            "max": {
+              "description": "Maximum thinking intensity",
+              "is_default": true
+            },
+            "low": {}
+          },
+          "is_default": true
+        }
+      },
+      "effortTable": {
+        "off": null,
+        "high": "high",
+        "max": "max",
+        "low": "low"
+      }
+    },
+    "gmodel": {
+      "is_reasoning": true,
+      "thinking_config": {
+        "enabled": {
+          "efforts": {
+            "high": {},
+            "low": {},
+            "max": {
+              "is_default": true
+            }
+          },
+          "is_default": true
+        }
+      },
+      "effortTable": {
+        "high": "high",
+        "low": "low",
+        "max": "max"
+      }
+    },
+    "gfmodel": {
+      "is_reasoning": true,
+      "thinking_config": {
+        "enabled": {
+          "efforts": {
+            "high": {},
+            "max": {
+              "is_default": true
+            }
+          },
+          "is_default": true
+        }
+      },
+      "effortTable": {
+        "high": "high",
+        "max": "max"
+      }
+    },
+    "gm51model": {
+      "is_reasoning": true,
+      "thinking_config": {
+        "disabled": {
+          "description": "Disable thinking"
+        },
+        "enabled": {
+          "description": "Enable thinking",
+          "efforts": {
+            "high": {
+              "description": "High thinking intensity"
+            },
+            "max": {
+              "description": "Maximum thinking intensity",
+              "is_default": true
+            }
+          },
+          "is_default": true
+        }
+      },
+      "effortTable": {
+        "off": null,
+        "high": "high",
+        "max": "max"
+      }
+    },
+    "kmodel_latest": {
+      "is_reasoning": false,
+      "thinking_config": {
+        "enabled": {
+          "description": "Enable thinking",
+          "efforts": {
+            "high": {},
+            "low": {},
+            "max": {
+              "is_default": true
+            }
+          },
+          "is_default": true
+        }
+      },
+      "effortTable": {
+        "high": "high",
+        "low": "low",
+        "max": "max"
+      }
+    },
+    "kmodel": {
+      "is_reasoning": true,
+      "thinking_config": {
+        "enabled": {
+          "description": "Enable thinking",
+          "efforts": {
+            "high": {},
+            "low": {},
+            "max": {
+              "is_default": true
+            }
+          },
+          "is_default": true
+        }
+      },
+      "effortTable": {
+        "high": "high",
+        "low": "low",
+        "max": "max"
+      }
+    },
+    "mmodel": {
+      "is_reasoning": false,
+      "thinking_config": null,
+      "effortTable": null
+    }
+  }
+}

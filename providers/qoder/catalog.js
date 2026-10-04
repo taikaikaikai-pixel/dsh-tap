@@ -4,11 +4,46 @@
  * 2026-09-20 实测：签名 GET 返回明文 JSON（即便带 Encode=1——服务端对该
  * 端点不加密；密文时走 cosy.decrypt 兜底）。条目取 `.chat` 数组：
  *   { key, display_name, format, source, enable, is_vl, is_reasoning,
- *     max_input_tokens, context_config: { "<档>": { token_count, is_default } } }
+ *     max_input_tokens, context_config: { "<档>": { token_count, is_default } },
+ *     thinking_config: { disabled: {...}, enabled: { efforts: { "<档>": {...} } } } }
  * 只收 format==='openai' 且 enable!==false 的条目（实测 14 个全满足）。
  * contextWindow 取 context_config 默认档（无则 max_input_tokens）；
  * 目录不发布输出上限——maxTokens 取 32768 保守默认（可在 settings 镜像后手调）。
+ * 思考强度取 thinking_config 的逐模型能力声明（见 qoderReasoningEfforts）——
+ * 投影进 profile.reasoningEfforts，宿主 Model/Effort 选择器据此出档（同
+ * CodeBuddy 侧 catalogReasoningEfforts 的分层：目录声明 → 镜像 → 宿主选择器）。
  */
+
+/**
+ * thinking_config → dsh `reasoningEfforts` 档位表（键 = 档位名，值 = 出站线值）。
+ *
+ * 2026-10-04 实测（14 模型全量目录，证据 docs/probes/qoder-thinking-config-*.json）：
+ *   { disabled: {...}, enabled: { efforts: { "<档>": { is_default? } }, is_default? } }
+ * - `disabled` 在场 = 该模型**声明**支持关思考 → `off: null`。null = 省略参数
+ *   （与网关 prefs 的 off 语义、codebuddy 侧 off 档同一条线），不是发 "off"
+ *   拼写——档位拼写的接受面逐模型不一致，不臆造（踩坑 #42）。
+ * - `enabled.efforts` 的键 = 可选档位，线值照抄档位名（与设置卡 prefs 的既有
+ *   拼写同源；网关只做"未带时补默认"，不翻译）。
+ * - 无 thinking_config、或 enabled 里没有命名档位（如 qmodel/qmodel_latest 只有
+ *   一个开关）→ 返回 null：llm-pi-ai 拒绝"只有 off"的档位表，且没有强度可选时
+ *   不该在宿主选择器里摆一个空档位。
+ * @param {object} entry 目录原始条目
+ * @returns {Record<string, string|null>|null} 档位表或 null
+ */
+export function qoderReasoningEfforts(entry) {
+  const tc = entry?.thinking_config
+  if (!tc || typeof tc !== 'object') return null
+  const enabled = tc.enabled && typeof tc.enabled === 'object' ? tc.enabled : null
+  const efforts = enabled?.efforts && typeof enabled.efforts === 'object' ? enabled.efforts : null
+  const levels = efforts
+    ? Object.keys(efforts).filter((k) => typeof k === 'string' && k)
+    : []
+  if (!levels.length) return null
+  const table = {}
+  if (tc.disabled && typeof tc.disabled === 'object') table.off = null
+  for (const level of levels) table[level] = level
+  return table
+}
 
 /** 目录条目 → dsh profile。 */
 export function projectQoderModel(entry) {
@@ -20,12 +55,14 @@ export function projectQoderModel(entry) {
   const contextWindow = Number.isFinite(defaultVariant?.token_count)
     ? defaultVariant.token_count
     : (Number.isFinite(entry.max_input_tokens) ? entry.max_input_tokens : 128000)
+  const reasoningEfforts = qoderReasoningEfforts(entry)
   return {
     id: entry.key,
     name: typeof entry.display_name === 'string' && entry.display_name ? entry.display_name : entry.key,
     contextWindow,
     maxTokens: 32768,
     input: entry.is_vl === true ? ['text', 'image'] : ['text'],
+    ...(reasoningEfforts ? { reasoningEfforts } : {}),
   }
 }
 

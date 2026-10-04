@@ -75,6 +75,7 @@ TraeWork CN / Qoder CN：各自区块的**区块头右侧勾选框**就是启用
 | `probe-qoder-pairing.mjs [--live] [--model dmodel]` | 宿主真实序列化器离线复现 tool 配对/可见性坏体 + 真实上游重放 |
 | `probe-qoder-matrix.mjs --suite flash\|tools\|reject\|repair` | Qoder 差分矩阵（逐变量隔离上游报错，证据 docs/probes/qoder-matrix-*.json） |
 | `probe-qoder-flash-confirm.mjs` | Qwen3.8-Flash 上游节点状态确认（3×Flash + 2×对照，恢复即翻绿） |
+| `probe-qoder-thinking-config.mjs` | 【只读】Qoder 目录逐模型 `thinking_config` → `reasoningEfforts` 档位表投影（一次签名 GET，无聊天请求；证据 docs/probes/qoder-thinking-config-*.json） |
 | `probe-qoder-quota.mjs [--read-only]` | 用量计数器差分（quota/heatmap/summary 前后对比，--read-only 只读） |
 | `probe-qoder-attribution.mjs [--arm N]` | 用量归因梯度实验（裸体/信封/business块/finish/tracking 逐臂判定） |
 | `probe-trae-model-routing.mjs --round 2\|evidence\|3\|4` / `probe-trae-3003-diagnosis.mjs` | Trae 模型改派矩阵（四轮合并，轮次对应原 model-routing/routing-evidence/routing3/routing4） / 3003 故障定位取证 |

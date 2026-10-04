@@ -1052,6 +1052,13 @@ async function syncQoderModelsToDshSettings() {
       api: 'openai-completions',
       baseURL: `http://127.0.0.1:${s.qoderBridgePort}/v1`,
       headers: { Authorization: 'Bearer dsh-qoder-bridge' },
+      // 宿主 Model/Effort 选择器要出档，路由必须声明 supportsReasoningEffort——
+      // pi-ai 的 openai-completions 出站只在 compat.supportsReasoningEffort 为真时
+      // 才把选中档位写成 reasoning_effort（同 codebuddy 路由的 compat 形状）；
+      // thinkingFormat 显式钉 openai，免得 pi-ai 从 127.0.0.1 的 URL 猜成别的方言
+      // （codebuddy 侧踩过：猜错会发 thinking 而不是 reasoning_effort）。
+      // 档位表由 catalog 投影进 models[].reasoningEfforts（见 qoderReasoningEfforts）。
+      compat: { thinkingFormat: 'openai', supportsReasoningEffort: true },
       models: YAML.parse(YAML.stringify(models)),
     }
     return await hostConfig.applyOps([{ op: 'set', path, value: block }])

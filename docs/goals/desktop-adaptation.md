@@ -32,6 +32,19 @@
 | npm 上的 `dsh@1.0.1` 是 2016 年同名无关包（"A shell written in JavaScript"），与 deepseek 的 dsh 无关——**别被 dist-tag 误导** | npm registry 元数据（2026-10-03 查） |
 | 本机 Node = v24.19.0（≥22 满足） | `node --version` |
 
+## 后续补记（2026-10-04）：volces 路由补 `reasoningEfforts`（宿主「推理等级」入口）
+
+用户报「输入框里有些模型没有思考强度」——宿主 composer 模型菜单的「推理等级」**只由模型条目的 `reasoningEfforts` 决定**（pi-ai `resolveModelReasoning` → `reasoningInfo` → `reasoning.efforts[]`；完整投影链与判据见踩坑 #64）。desktop patch 的 volces 路由原有 7 个模型里只有 `deepseek-v4.1-flash`/`ark-code-latest` 声明了档位；2026-10-04 用 Ark `/api/plan/v1/messages` 逐模型实测后补齐其余 5 个：
+
+| 模型 | 实测（baseline / enabled / disabled） | 补的声明 |
+|---|---|---|
+| `glm-5.3-flash`、`glm-5.3` | 思考默认开；`thinking:{type:enabled,budget_tokens}` 接受；**`thinking:{type:disabled}` 400 `InvalidParameter`**（"thinking.type `disabled` is not supported by this model"） | `low/medium/high/max`（**无 off**） |
+| `kimi-k3`、`doubao-seed-evolving`、`doubao-seed-2.1-lite` | 思考默认开；`enabled` 接受；`disabled` 200 且 thinking 块为空（真关思考） | `off:null` + `low/medium/high/max` |
+
+- **`off` 必须逐模型裁**：pi-ai 对 anthropic 方言的 off 线值就是发 `thinking:{type:disabled}`（`anthropic-messages.js:902`）——给拒 disabled 的模型声明 off 等于摆一个必然 400 的档位；`off` 键缺省时 `map.off` 为 null、不发 disabled，退化为"不带 thinking 参数"= 上游默认（照常思考），安全。
+- **边界（未定论）**：Ark 侧档位映射 pi-ai 预算表（low 2048 / medium 8192 / high 16384 / max 夹到 high），而这些模型是**自适应思考**——2 采样/档位下多数看不到单调差异（`glm-5.3` 2048→1713 / 16384→2219 有；`glm-5.3-flash`、`kimi-k3`、`doubao-seed-2.1-lite` 无）⇒ 档位更像"上限"而非"强度旋钮"；`disabled` 是硬效果。
+- 备份 `cordis.patch.yml.pre-effort-20261004.bak`；生效 = **重启桌面应用**（profile patch 属启动期加载）。补齐后 volces 7/7 出档。
+
 ## 顶层未知数（探测先行，勿凭记忆动手）
 
 | # | 未知数 | 决定什么 |

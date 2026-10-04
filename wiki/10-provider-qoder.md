@@ -217,6 +217,7 @@ flowchart TB
 - **镜像**：settings.yaml 的 `providers.qoder.models` 条目仅在选中变体时改 `contextWindow`（= 变体 token_count）；未选/变体消失回落目录默认档；`variants` 不进 settings.yaml（镜像形状零扰动）。
 - **读侧契约**：GET /dsh-tap/settings 的 `qoder.models` 带 `modelPrefs`（当前值）与 `variants`（`[{name,tokenCount,isDefault}]`，无变体 → 缺省/空数组）——UI 唯一数据源。
 - **出站**：见 handleChat 第 5 步（补默认注入，客户端带值不覆盖）。
+- **宿主选择器入口（2026-10-04）**：目录的 `thinking_config` 经 `qoderReasoningEfforts()`（catalog.js）投影进镜像条目的 `reasoningEfforts`，镜像块另带 `compat: {thinkingFormat:'openai', supportsReasoningEffort:true}` ⇒ 宿主输入框的「推理等级」对**目录声明了命名档位**的模型出档（实测 9/14：`qmodel_38max`/`qfmodel` = off/low/medium/xhigh、`dmodel`/`gm51model` = off/high/max、`gmodel`/`kmodel`/`kmodel_latest` = low/high/max、`gfmodel` = high/max、`dfmodel` = off/low/high/max；`auto`/`qmodel`/`qmodel_latest`/`q37fmodel`/`mmodel` 目录没声明命名档位 → 不出，不臆造）。两条口径分清：**设置卡 select** = 逐模型**持久默认**（写 `qoderModelPrefs`，网关"客户端未带时补默认"），**宿主「推理等级」** = **本会话选择**（显式带 `reasoning_effort`，网关不覆盖）——客户端带值恒赢。设置卡选项表仍是固定 `off/low/medium/high/max`，与目录声明的档位名（含 `xhigh`）不逐一对应；**档位真源是目录声明**，宿主选择器按它出档。生效方式：镜像属启动期组合根，**重启 dsh**（desktop = 退出并重启桌面应用）后可见。
 
 ## 错误处理（无独立 errors.js——归网关内联映射）
 

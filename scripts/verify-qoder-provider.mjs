@@ -645,7 +645,7 @@ console.log('\n[18] 出站 tool 配对 + 可见性修复（sanitizeToolPairing +
 console.log('\n[15] 目录投影（fetchQoderCatalog）')
 {
   const { createCosyRuntime } = await import('../providers/qoder/cosy.js')
-  const { fetchQoderCatalog, applyQoderContextVariant } = await import('../providers/qoder/catalog.js')
+  const { fetchQoderCatalog, applyQoderContextVariant, qoderReasoningEfforts } = await import('../providers/qoder/catalog.js')
   const { fileURLToPath } = await import('node:url')
   const wasmPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'providers', 'qoder', 'qoder_auth.wasm')
   const cosy = createCosyRuntime({ wasmPath })
@@ -654,7 +654,7 @@ console.log('\n[15] 目录投影（fetchQoderCatalog）')
     res.end(JSON.stringify({
       chat: [
         { key: 'auto', format: 'openai', source: 'system', enable: true, display_name: 'Auto', is_vl: true, max_input_tokens: 180000 },
-        { key: 'qmodel_38max', format: 'openai', source: 'system', enable: true, display_name: 'Qwen3.8-Max', is_vl: true, context_config: { '200K': { token_count: 200000, is_default: true }, '1M': { token_count: 1000000 } } },
+        { key: 'qmodel_38max', format: 'openai', source: 'system', enable: true, display_name: 'Qwen3.8-Max', is_vl: true, context_config: { '200K': { token_count: 200000, is_default: true }, '1M': { token_count: 1000000 } }, thinking_config: { disabled: {}, enabled: { efforts: { low: {}, medium: { is_default: true }, xhigh: {} }, is_default: true } } },
         { key: 'disabled-m', format: 'openai', enable: false },
         { key: 'other-fmt', format: 'anthropic', enable: true },
       ],
@@ -668,6 +668,11 @@ console.log('\n[15] 目录投影（fetchQoderCatalog）')
   ok(result.profiles[1].contextWindow === 200000, 'contextWindow 取 context_config 默认档')
   ok(result.profiles[0].contextWindow === 180000, '无 context_config 回落 max_input_tokens')
   ok(result.profiles[0].input.includes('image') && result.profiles[1].input.includes('image'), 'is_vl → input 含 image')
+  ok(JSON.stringify(result.profiles[1].reasoningEfforts) === JSON.stringify({ off: null, low: 'low', medium: 'medium', xhigh: 'xhigh' }), 'thinking_config → reasoningEfforts（disabled→off:null，efforts 键照抄档位名）')
+  ok(result.profiles[0].reasoningEfforts === undefined, '无 thinking_config → 不出档位表（条目形状不变）')
+  ok(qoderReasoningEfforts({ key: 'x', thinking_config: { disabled: {}, enabled: { is_default: true } } }) === null, 'enabled 无命名档位 → null（不摆空档位）')
+  ok(qoderReasoningEfforts({ key: 'x' }) === null && qoderReasoningEfforts(null) === null, '无 thinking_config / 空条目 → null')
+  ok(qoderReasoningEfforts({ key: 'x', thinking_config: { enabled: { efforts: { high: {}, max: { is_default: true } } } } })?.off === undefined, 'enabled 无 disabled → 无 off 档（不臆造关思考）')
   ok(result.sources.qmodel_38max === 'system', 'sources 映射保留')
   ok(JSON.stringify(result.variants.qmodel_38max) === JSON.stringify([
     { name: '200K', tokenCount: 200000, isDefault: true },
@@ -786,7 +791,7 @@ console.log('\n[17] qoderModelSetPrefs 全链路：apply() 起真组合根，moc
       res.end(JSON.stringify({
         chat: [
           { key: 'auto', format: 'openai', source: 'system', enable: true, display_name: 'Auto', is_vl: true, max_input_tokens: 180000 },
-          { key: 'qmodel_38max', format: 'openai', source: 'system', enable: true, display_name: 'Qwen3.8-Max', is_vl: true, context_config: { '200K': { token_count: 200000, is_default: true }, '1M': { token_count: 1000000 } } },
+          { key: 'qmodel_38max', format: 'openai', source: 'system', enable: true, display_name: 'Qwen3.8-Max', is_vl: true, context_config: { '200K': { token_count: 200000, is_default: true }, '1M': { token_count: 1000000 } }, thinking_config: { disabled: {}, enabled: { efforts: { low: {}, medium: { is_default: true }, xhigh: {} }, is_default: true } } },
         ],
       }))
       return
@@ -863,7 +868,9 @@ console.log('\n[17] qoderModelSetPrefs 全链路：apply() 起真组合根，moc
   let doc = YAML.parse(readFileSync(SETTINGS_YAML, 'utf8'))
   let block = doc['llm-pi-ai'].providers.qoder
   ok(block.models.length === 2, '镜像块铺 2 模型')
-  ok(JSON.stringify(Object.keys(block.models.find((m) => m.id === 'qmodel_38max')).sort()) === JSON.stringify(['contextWindow', 'id', 'input', 'maxTokens', 'name']), '镜像条目形状不变（variants 不进 settings.yaml）')
+  ok(JSON.stringify(Object.keys(block.models.find((m) => m.id === 'qmodel_38max')).sort()) === JSON.stringify(['contextWindow', 'id', 'input', 'maxTokens', 'name', 'reasoningEfforts']), '镜像条目形状：variants 不进 settings.yaml，档位表进 reasoningEfforts')
+  ok(JSON.stringify(block.models.find((m) => m.id === 'qmodel_38max').reasoningEfforts) === JSON.stringify({ off: null, low: 'low', medium: 'medium', xhigh: 'xhigh' }), '镜像带目录声明的档位表（宿主 Model/Effort 选择器数据源）')
+  ok(JSON.stringify(block.compat) === JSON.stringify({ thinkingFormat: 'openai', supportsReasoningEffort: true }), '镜像块声明 compat（pi-ai 才会把选中档位写成 reasoning_effort）')
   ok(block.models.find((m) => m.id === 'qmodel_38max').contextWindow === 200000, '未选变体 → contextWindow 维持目录默认档')
 
   let r = await call('POST', { patch: { qoderModelSetPrefs: { id: 'qmodel_38max', prefs: { effort: 'high', contextVariant: '1M' } } } })
