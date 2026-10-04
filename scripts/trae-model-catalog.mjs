@@ -54,7 +54,7 @@ const MAPPED_SOURCE_FIELDS = new Set([
   'config_name', 'name', 'display_name', 'provider', 'model_type', 'multimodal',
   'prompt_max_tokens', 'context_window_size', 'max_tokens', 'max_turn', 'max_turns',
   'is_default', 'is_preset', 'selectable', 'status', 'fee_model_level',
-  'reasoning_effort_options',
+  'reasoning_effort_options', 'reasoning_effort_config',
 ])
 const TECHNICAL_SOURCE_FIELDS = new Set(['temperature', 'top_p', 'top_k', 'thinking_enable', 'tags', 'features'])
 
@@ -105,6 +105,18 @@ function normalizeMaxTurns(maxTurns, maxTurn) {
     if (d !== null) return d
   }
   return numOrNull(maxTurn)
+}
+
+/** reasoning_effort_config（2026-10-04 实测形态 {support_thinking, options[],
+ *  default_level}）→ {supportThinking, options, defaultLevel}；非对象 → null，
+ *  options 只收非空字符串。档位拼写逐模型照抄声明（不臆造，踩坑 #42）。 */
+function normalizeEffortConfig(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  return {
+    supportThinking: v.support_thinking === true,
+    options: Array.isArray(v.options) ? v.options.filter((o) => typeof o === 'string' && o) : [],
+    defaultLevel: typeof v.default_level === 'string' && v.default_level ? v.default_level : null,
+  }
 }
 
 /**
@@ -361,6 +373,7 @@ export function normalizeCatalog(candidate, { generatedAt = new Date().toISOStri
         status: item.status === undefined ? null : item.status === true,
         feeModelLevel: numOrNull(item.fee_model_level),
         reasoningEffortOptions: item.reasoning_effort_options ?? null,
+        reasoningEffortConfig: normalizeEffortConfig(item.reasoning_effort_config),
       }
       const technical = {}
       for (const field of TECHNICAL_SOURCE_FIELDS) {
@@ -389,7 +402,8 @@ export function normalizeCatalog(candidate, { generatedAt = new Date().toISOStri
 
       // Merge rule: first occurrence wins for limits/labels; differences are
       // preserved per-category in categoryProfiles; isDefault ORs; provider /
-      // reasoningEffortOptions take the first non-null across categories.
+      // reasoningEffortOptions / reasoningEffortConfig take the first non-null
+      // across categories.
       if (!existing.categories.includes(category)) existing.categories.push(category)
       const diff = {}
       for (const field of LIMIT_FIELDS) {
@@ -400,6 +414,9 @@ export function normalizeCatalog(candidate, { generatedAt = new Date().toISOStri
       if (existing.provider == null && profile.provider != null) existing.provider = profile.provider
       if (existing.reasoningEffortOptions == null && profile.reasoningEffortOptions != null) {
         existing.reasoningEffortOptions = profile.reasoningEffortOptions
+      }
+      if (existing.reasoningEffortConfig == null && profile.reasoningEffortConfig != null) {
+        existing.reasoningEffortConfig = profile.reasoningEffortConfig
       }
       functions[category].push({ id, displayName: firstString(item.display_name, item.name) ?? id })
     }

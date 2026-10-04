@@ -1,0 +1,92 @@
+{
+  "at": "2026-10-04T08:43:24.002Z",
+  "model": "glm-5.3",
+  "repeat": 1,
+  "prompt": "一个笼子里有鸡和兔共 10 只，脚共 28 只。鸡兔各几只？只给最终数字。",
+  "p1": [
+    {
+      "arm": "baseline#1",
+      "level": null,
+      "createHttp": 200,
+      "eventsHttp": 200,
+      "reasoningChars": 322,
+      "textChars": 20,
+      "actualModel": "glm-5.3",
+      "usage": {
+        "prompt_tokens": 18828,
+        "completion_tokens": 129,
+        "total_tokens": 18957
+      },
+      "bytes": 33147
+    },
+    {
+      "arm": "light#1",
+      "level": "light",
+      "createHttp": 200,
+      "eventsHttp": 200,
+      "reasoningChars": 285,
+      "textChars": 12,
+      "actualModel": "glm-5.3",
+      "usage": {
+        "prompt_tokens": 18639,
+        "completion_tokens": 118,
+        "total_tokens": 18757
+      },
+      "bytes": 31519
+    },
+    {
+      "arm": "high#1",
+      "level": "high",
+      "createHttp": 200,
+      "eventsHttp": 200,
+      "reasoningChars": 260,
+      "textChars": 12,
+      "actualModel": "glm-5.3",
+      "usage": {
+        "prompt_tokens": 18680,
+        "completion_tokens": 131,
+        "total_tokens": 18811
+      },
+      "bytes": 31320
+    },
+    {
+      "arm": "extra_high#1",
+      "level": "extra_high",
+      "createHttp": 200,
+      "eventsHttp": 200,
+      "reasoningChars": 209,
+      "textChars": 20,
+      "actualModel": "glm-5.3",
+      "usage": {
+        "prompt_tokens": 18639,
+        "completion_tokens": 87,
+        "total_tokens": 18726
+      },
+      "bytes": 30830
+    }
+  ],
+  "p2": [],
+  "verdicts": {
+    "light": {
+      "vals": [
+        285
+      ],
+      "mean": 285,
+      "verdict": "DIRECTION-CONSISTENT"
+    },
+    "high": {
+      "vals": [
+        260
+      ],
+      "mean": 260,
+      "verdict": "DIRECTION-CONSISTENT"
+    },
+    "extra_high": {
+      "vals": [
+        209
+      ],
+      "mean": 209,
+      "verdict": "DIRECTION-CONSISTENT"
+    }
+  }
+}

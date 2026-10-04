@@ -1,0 +1,193 @@
+{
+  "at": "2026-10-04T08:45:30.309Z",
+  "model": "glm-5.3",
+  "repeat": 2,
+  "prompt": "一个笼子里有鸡和兔共 10 只，脚共 28 只。鸡兔各几只？只给最终数字。",
+  "p1": [
+    {
+      "arm": "baseline#1",
+      "level": null,
+      "createHttp": 200,
+      "eventsHttp": 200,
+      "reasoningChars": 215,
+      "textChars": 12,
+      "actualModel": "glm-5.3",
+      "usage": {
+        "prompt_tokens": 18639,
+        "completion_tokens": 91,
+        "total_tokens": 18730
+      },
+      "bytes": 29777
+    },
+    {
+      "arm": "light#1",
+      "level": "light",
+      "createHttp": 200,
+      "eventsHttp": 200,
+      "reasoningChars": 382,
+      "textChars": 12,
+      "actualModel": "glm-5.3",
+      "usage": {
+        "prompt_tokens": 18639,
+        "completion_tokens": 119,
+        "total_tokens": 18758
+      },
+      "bytes": 33855
+    },
+    {
+      "arm": "high#1",
+      "level": "high",
+      "createHttp": 200,
+      "eventsHttp": 200,
+      "reasoningChars": 298,
+      "textChars": 12,
+      "actualModel": "glm-5.3",
+      "usage": {
+        "prompt_tokens": 18639,
+        "completion_tokens": 129,
+        "total_tokens": 18768
+      },
+      "bytes": 31451
+    },
+    {
+      "arm": "extra_high#1",
+      "level": "extra_high",
+      "createHttp": 200,
+      "eventsHttp": 200,
+      "reasoningChars": 362,
+      "textChars": 25,
+      "actualModel": "glm-5.3",
+      "usage": {
+        "prompt_tokens": 18607,
+        "completion_tokens": 141,
+        "total_tokens": 18748
+      },
+      "bytes": 36606
+    },
+    {
+      "arm": "baseline#2",
+      "level": null,
+      "createHttp": 200,
+      "eventsHttp": 200,
+      "reasoningChars": 220,
+      "textChars": 12,
+      "actualModel": "glm-5.3",
+      "usage": {
+        "prompt_tokens": 18828,
+        "completion_tokens": 113,
+        "total_tokens": 18941
+      },
+      "bytes": 32397
+    },
+    {
+      "arm": "light#2",
+      "level": "light",
+      "createHttp": 200,
+      "eventsHttp": 200,
+      "reasoningChars": 206,
+      "textChars": 12,
+      "actualModel": "glm-5.3",
+      "usage": {
+        "prompt_tokens": 18828,
+        "completion_tokens": 95,
+        "total_tokens": 18923
+      },
+      "bytes": 30758
+    },
+    {
+      "arm": "high#2",
+      "level": "high",
+      "createHttp": 200,
+      "eventsHttp": 200,
+      "reasoningChars": 235,
+      "textChars": 12,
+      "actualModel": "glm-5.3",
+      "usage": {
+        "prompt_tokens": 18639,
+        "completion_tokens": 96,
+        "total_tokens": 18735
+      },
+      "bytes": 31094
+    },
+    {
+      "arm": "extra_high#2",
+      "level": "extra_high",
+      "createHttp": 200,
+      "eventsHttp": 200,
+      "reasoningChars": 191,
+      "textChars": 17,
+      "actualModel": "glm-5.3",
+      "usage": {
+        "prompt_tokens": 18639,
+        "completion_tokens": 79,
+        "total_tokens": 18718
+      },
+      "bytes": 29357
+    }
+  ],
+  "p2": [
+    {
+      "arm": "inline+thinking.type=enabled",
+      "function": "inline_chat",
+      "http": 200,
+      "reasoningChars": 0,
+      "textChars": 0,
+      "providerModel": null,
+      "rawHead": "id:1\nevent:error\ndata:{\"code\":3003,\"message\":\"model service is unavailable\\nerror, status code: 400, message: Unknown error: code = 400 Bad Request, err = \\\"{\\\\\\\"error\\\\\\\":{\\\\\\\"code\\\\\\\":\\\\\\\"InvalidParameter\\\\\\\",\\\\\\\"message\\\\\\\":\\\\\\\"Invalid combination of reasoning_effort and thinking type: high + disabled Request id: 02179110371685048d5338027eb69ea02d994912dcdaa3dba9155\\\\\\\",\\\\\\\"param\\\\\\\":\\\\\\\"\\\\\\\",\\"
+    },
+    {
+      "arm": "inline+thinking_enable",
+      "function": "inline_chat",
+      "http": 200,
+      "reasoningChars": 0,
+      "textChars": 0,
+      "providerModel": null,
+      "rawHead": "id:1\nevent:error\ndata:{\"code\":3003,\"message\":\"model service is unavailable\\nerror, status code: 400, message: Unknown error: code = 400 Bad Request, err = \\\"{\\\\\\\"error\\\\\\\":{\\\\\\\"code\\\\\\\":\\\\\\\"InvalidParameter\\\\\\\",\\\\\\\"message\\\\\\\":\\\\\\\"Invalid combination of reasoning_effort and thinking type: high + disabled Request id: 02179110373717685e0539960409bb0924d817b6584b9bb4538dc\\\\\\\",\\\\\\\"param\\\\\\\":\\\\\\\"\\\\\\\",\\"
+    },
+    {
+      "arm": "inline+scene_params.effort",
+      "function": "inline_chat",
+      "http": 200,
+      "reasoningChars": 0,
+      "textChars": 0,
+      "providerModel": null,
+      "rawHead": "id:1\nevent:error\ndata:{\"code\":3003,\"message\":\"model service is unavailable\\nerror, status code: 400, message: Unknown error: code = 400 Bad Request, err = \\\"{\\\\\\\"error\\\\\\\":{\\\\\\\"code\\\\\\\":\\\\\\\"InvalidParameter\\\\\\\",\\\\\\\"message\\\\\\\":\\\\\\\"Invalid combination of reasoning_effort and thinking type: high + disabled Request id: 0217911037574763ebf96015607feb0bddf2c4016e264d448ef41\\\\\\\",\\\\\\\"param\\\\\\\":\\\\\\\"\\\\\\\",\\"
+    },
+    {
+      "arm": "solo_agent_lite+effort",
+      "function": "solo_agent_lite",
+      "error": "The operation was aborted due to timeout"
+    },
+    {
+      "arm": "chat_v3+effort",
+      "function": "chat_v3",
+      "error": "The operation was aborted due to timeout"
+    }
+  ],
+  "verdicts": {
+    "light": {
+      "vals": [
+        382,
+        206
+      ],
+      "mean": 294,
+      "verdict": "INCONCLUSIVE"
+    },
+    "high": {
+      "vals": [
+        298,
+        235
+      ],
+      "mean": 267,
+      "verdict": "DIRECTION-CONSISTENT"
+    },
+    "extra_high": {
+      "vals": [
+        362,
+        191
+      ],
+      "mean": 277,
+      "verdict": "INCONCLUSIVE"
+    }
+  }
+}

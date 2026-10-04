@@ -24,6 +24,13 @@ import {
   selectDefaultCandidate, normalizeCatalog,
 } from '../../scripts/trae-model-catalog.mjs'
 
+// Trae 声明拼写 → 宿主枚举键（保序映射：light<high<extra_high ↔ low<high<xhigh）。
+// 宿主 llm-pi-ai 对 models[].reasoningEfforts 的键有固定枚举
+//（off|minimal|low|medium|high|xhigh|max）——声明拼写原样做键会被宿主 schema
+// 整块拒收（2026-10-04 实测 host-config lastError），值则恒为目录声明拼写
+//（remote 通道 custom_model.reasoning_effort 线值，不臆造，踩坑 #42）。
+const TRAE_EFFORT_TO_HOST_KEY = { light: 'low', high: 'high', extra_high: 'xhigh' }
+
 /** 目录条目 → dsh 模型 profile（可路由集合 = preset 且未禁用）。 */
 export function catalogToProfiles(catalog) {
   const list = []
@@ -37,6 +44,19 @@ export function catalogToProfiles(catalog) {
     if (ctx != null) p.contextWindow = ctx
     if (m.maxOutputTokens != null) p.maxTokens = m.maxOutputTokens
     if (m.multimodal === true) p.input = ['text', 'image']
+    // 档位投影（goal: trae-work-cn-repair G3）：目录 reasoning_effort_config
+    // 声明 {support_thinking, options, default_level} → reasoningEfforts。
+    // supportThinking 非 true 或空 options 不出档（不摆假档位）；未映射拼写
+    // 不进宿主表（仍可由设置卡档位控件按声明拼写使用）。
+    const eff = m.reasoningEffortConfig
+    if (eff && eff.supportThinking === true && Array.isArray(eff.options) && eff.options.length) {
+      const table = {}
+      for (const opt of eff.options) {
+        const hostKey = TRAE_EFFORT_TO_HOST_KEY[opt]
+        if (hostKey) table[hostKey] = opt
+      }
+      if (Object.keys(table).length) p.reasoningEfforts = table
+    }
     list.push(p)
   }
   return list

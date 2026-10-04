@@ -111,20 +111,37 @@ function commonParams() {
   })
 }
 
-/** chat_sessions 创建体（9router 变体：content 空数组，query 承载全部）。 */
-export function buildRemoteCreateBody(model, messages) {
+/** chat_sessions 创建体（9router 变体：content 空数组，query 承载全部）。
+ *  opts.reasoningEffort：目录声明的档位拼写 → initial_message.custom_model
+ *  .reasoning_effort（官方客户端线缆形态，@byted-icube/solo-lite 551.*.mjs
+ *  custom_model 合并链取证 + 2026-10-04 probe-trae-thinking-scene 证实接受面；
+ *  preset 模型 config_source=1）。不带/空串 = 不出 custom_model（既有路径
+ *  零变化）。 */
+export function buildRemoteCreateBody(model, messages, { reasoningEffort } = {}) {
+  const initialMessage = {
+    chat_session_id: '',
+    content: [],
+    query: flattenQuery(messages),
+    model_name: model,
+    agent_type: 'solo_agent_remote',
+    model_selection_strategy: 'manual',
+    common_params: commonParams(),
+  }
+  if (typeof reasoningEffort === 'string' && reasoningEffort) {
+    initialMessage.custom_model = {
+      model_name: model,
+      config_name: model,
+      config_source: 1,
+      is_preset: true,
+      use_remote_service: true,
+      multimodal: false,
+      reasoning_effort: reasoningEffort,
+    }
+  }
   return {
     mode: 'code',
     environment_id: 'default',
-    initial_message: {
-      chat_session_id: '',
-      content: [],
-      query: flattenQuery(messages),
-      model_name: model,
-      agent_type: 'solo_agent_remote',
-      model_selection_strategy: 'manual',
-      common_params: commonParams(),
-    },
+    initial_message: initialMessage,
     env: 'remote',
     auto_create_project: false,
     origin: 'web',
@@ -144,13 +161,13 @@ const isEdgeSkewReject = (status, text) =>
  *  失败而非无限挂起（2026-08-24 本地代理抽风实测）。测试可用 opts.timeoutMs 调短。 */
 const CREATE_TIMEOUT_MS = 20_000
 
-export async function createRemoteSession(baseURL, token, model, messages, { timeoutMs } = {}) {
+export async function createRemoteSession(baseURL, token, model, messages, { timeoutMs, reasoningEffort } = {}) {
   const limit = Number(timeoutMs) > 0 ? Number(timeoutMs) : CREATE_TIMEOUT_MS
   const attemptOnce = async () => {
     const resp = await fetch(`${baseURL}/api/remote/v1/chat_sessions`, {
       method: 'POST',
       headers: remoteWebHeaders(token, { stream: false }),
-      body: JSON.stringify(buildRemoteCreateBody(model, messages)),
+      body: JSON.stringify(buildRemoteCreateBody(model, messages, { reasoningEffort })),
       signal: AbortSignal.timeout(limit),
     })
     return { resp, text: await resp.text() }

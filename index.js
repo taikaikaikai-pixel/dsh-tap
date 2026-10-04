@@ -977,6 +977,7 @@ const traeProvider = createTraeProvider({
   meter,
   runtime: traeRuntime,
   forensics: { logPath: () => process.env.TRAE_BRIDGE_LOG },
+  getModelPrefs: () => readTraeModelPrefs(),
 })
 
 // ---------------------------------------------------------------------------
@@ -1164,6 +1165,63 @@ function readTraeModelState() {
   }
 }
 
+/** 目录为该模型声明的档位（未同步 / 未声明 → []）。 */
+function traeDeclaredTiers(id) {
+  const tiers = traeProvider.catalogView()?.efforts?.[id]
+  return Array.isArray(tiers) ? tiers : []
+}
+
+/**
+ * Trae 逐模型 prefs（goal: trae-work-cn-repair G3）。目前只有 effort 一个键。
+ * 读侧保留规则：目录已同步时只认声明档位；未同步窗口（启动竞态）读不出声明，
+ * 存量值原样保留——同步完成后的下次读写自然按声明过滤。
+ */
+function readTraeModelPrefs() {
+  const raw = readFileLayer().traeModelPrefs
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const synced = traeProvider.catalogView() != null
+  const out = {}
+  for (const [id, v] of Object.entries(raw)) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) continue
+    if (typeof v.effort !== 'string' || !v.effort) continue
+    if (synced && !traeDeclaredTiers(id).includes(v.effort)) continue
+    out[id] = { effort: v.effort }
+  }
+  return out
+}
+
+/**
+ * traeModelSetPrefs 写路径（UI 契约：patch.traeModelSetPrefs = { id, prefs }）。
+ * 允许集 = 目录声明 ∪ {该模型当前存量值}（同 qoder R3：UI 发全量期望态，存量
+ * 值即使目录不再声明也不能误判非法）；空 prefs = 删记录回默认。
+ */
+async function setTraeModelPrefs({ id, prefs } = {}) {
+  if (typeof id !== 'string' || !id.trim()) throw new Error('traeModelSetPrefs 需要 id')
+  assertSafeModelId(id)
+  const view = traeProvider.catalogView()
+  if (!view || !view.profiles.some((p) => p.id === id)) throw new Error(`${id} 不在 Trae 目录里（先同步目录）`)
+  if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) throw new Error('traeModelSetPrefs 需要 prefs 对象')
+  const unknown = Object.keys(prefs).filter((k) => k !== 'effort')
+  if (unknown.length) throw new Error(`prefs 不支持的键：${unknown.join(', ')}`)
+  if (prefs.effort !== undefined) {
+    const stored = readTraeModelPrefs()[id]?.effort
+    const allowed = [...new Set([...traeDeclaredTiers(id), ...(stored ? [stored] : [])])]
+    if (typeof prefs.effort !== 'string' || !allowed.includes(prefs.effort)) {
+      throw new Error(`effort 必须是该模型目录声明的档位（${allowed.join('/')}）`)
+    }
+  }
+  const layer = readFileLayer()
+  const state = layer.traeModelPrefs && typeof layer.traeModelPrefs === 'object' && !Array.isArray(layer.traeModelPrefs)
+    ? { ...layer.traeModelPrefs } : {}
+  const rec = {}
+  if (prefs.effort !== undefined) rec.effort = prefs.effort
+  if (Object.keys(rec).length) state[id] = rec
+  else delete state[id]
+  layer.traeModelPrefs = state
+  writeFileLayer(layer)
+  await syncTraeModelsToDshSettings()
+}
+
 /**
  * 镜像 providers.trae **整块**（0.8.7 / dsh 0.1.1-rc.2 适配，取代"恒铺
  * models 路径 + 空数组遮蔽"）：llm-pi-ai 收紧了目录校验——非目录路由的空
@@ -1197,6 +1255,12 @@ async function syncTraeModelsToDshSettings() {
       api: 'openai-completions',
       baseURL: `http://127.0.0.1:${s.traeBridgePort}/v1`,
       headers: { Authorization: 'Bearer dsh-trae-bridge' },
+      // 宿主 Model/Effort 选择器出档的两前提（同 qoder 镜像纪律，踩坑 #64）：
+      // 路由声明 compat.supportsReasoningEffort（否则 pi-ai 出站不写
+      // reasoning_effort）+ 档位表已投影进 models[].reasoningEfforts
+      //（catalogToProfiles 从目录 reasoning_effort_config 投影）。
+      // thinkingFormat 钉 openai 防 pi-ai 从 127.0.0.1 猜方言。
+      compat: { thinkingFormat: 'openai', supportsReasoningEffort: true },
       models: YAML.parse(YAML.stringify(models)),
     }
     return await hostConfig.applyOps([{ op: 'set', path, value: block }])
@@ -1439,6 +1503,10 @@ function settingsView(resolveNow) {
       },
       models: {
         disabled: Object.keys(readTraeModelState().disabled),
+        // 逐模型偏好读侧（UI 契约 traeModelSetPrefs 的镜像；只含已设置键）+
+        // 目录声明的逐模型档位表（设置卡 select 选项真源，G3）。
+        modelPrefs: readTraeModelPrefs(),
+        efforts: traeProvider.catalogView()?.efforts ?? {},
         sync: traeProvider.syncView(),
       },
     },
@@ -1509,6 +1577,9 @@ function settingsView(resolveNow) {
  *                                                             （available 布尔即结论，恒 200）
  *   POST {action:'trae-oauth-*'|'trae-model-*'|'trae-quota'（双池余额只读）}
  *   POST {patch:{traeModelSetEnabled:{id,enabled}}}             → Trae 逐模型启停 → 镜像
+ *   POST {patch:{traeModelSetPrefs:{id,prefs}}}                 → Trae 逐模型思考强度
+ *                                                                 （prefs 完整替换；{} = 删记录
+ *                                                                 回默认；effort 限目录声明档位）
  *   POST {action:'qoder-oauth-*'|'qoder-model-*'|'qoder-quota'（配额只读）}
  *   POST {action:'usage'}                                   → usage meter + bridge state + quota snapshot
  *   POST {action:'gateway-retry', channel}                  → P2-3 区块头「重试监听」：
@@ -1903,6 +1974,24 @@ function registerSettingsRoute(ctx, entryConfig, resolveNow, applyLive, retryGat
               await setTraeModelEnabled(patch.traeModelSetEnabled)
               const after = readFileLayer()
               delete withKeys.traeModelState
+              Object.assign(after, { apiKeys: withKeys.apiKeys, activeApiKey: withKeys.activeApiKey })
+              writeFileLayer(after)
+              sendJSON(response, 200, {
+                ok: true,
+                value: settingsView(resolveNow).value,
+                user: maskedUserLayer(after),
+                trae: settingsView(resolveNow).trae,
+              })
+              applyLive()
+              return
+            }
+            if (patch.traeModelSetPrefs !== undefined) {
+              // 同 traeModelSetEnabled 的层叠纪律：setTraeModelPrefs 内部自写
+              // traeModelPrefs，事后重读层并把本请求里的 apiKeys 改动合回。
+              const withKeys = { ...nextUser }
+              await setTraeModelPrefs(patch.traeModelSetPrefs)
+              const after = readFileLayer()
+              delete withKeys.traeModelPrefs
               Object.assign(after, { apiKeys: withKeys.apiKeys, activeApiKey: withKeys.activeApiKey })
               writeFileLayer(after)
               sendJSON(response, 200, {

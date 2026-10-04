@@ -337,6 +337,7 @@ function buildCatalogFixture(dbPath) {
         model_type: 'reasoning_model', multimodal: false, prompt_max_tokens: 936000,
         max_tokens: 64000, max_turn: 500, context_window_size: { default: 200000, max: [1000000] },
         is_preset: true, selectable: true, status: true, fee_model_level: 2,
+        reasoning_effort_config: { support_thinking: true, options: ['light', 'high'], default_level: 'high' },
       },
       {
         config_name: 'kimi-k3', name: 'kimi-k3', display_name: 'Kimi-K3', provider: '',
@@ -521,7 +522,21 @@ try {
   const kimi = view.profiles.find((p) => p.id === 'kimi-k3')
   check('profile 字段映射（ctx/maxTokens/多模态）', glm.contextWindow === 200000 && glm.maxTokens === 64000 && !glm.input && kimi.input[1] === 'image')
   check('ctx 缺失回落 max 数组最大档', kimi.contextWindow === 500000)
+  // 档位投影（G3）：目录 reasoning_effort_config.options → profile.reasoningEfforts
+  //（键=宿主枚举词汇映射 light→low/high→high/extra_high→xhigh，值=目录声明拼写
+  // ——宿主 schema 对键有固定枚举，原拼写做键会被整块拒收；同 Qoder 纪律：
+  // 不声明不出档，#42）。
+  check('reasoningEfforts 投影：宿主枚举键 → 目录声明线值', JSON.stringify(glm.reasoningEfforts) === '{"low":"light","high":"high"}', JSON.stringify(glm.reasoningEfforts))
+  check('无声明模型不出 reasoningEfforts 键', !('reasoningEfforts' in kimi))
+  check('support_thinking=false 不出档', catalogToProfiles({ models: [{ id: 'm', provider: null, selectable: true, status: true, reasoningEffortConfig: { supportThinking: false, options: ['high'], defaultLevel: 'high' } }] })[0].reasoningEfforts === undefined)
+  check('空 options 不出档', catalogToProfiles({ models: [{ id: 'm', provider: null, selectable: true, status: true, reasoningEffortConfig: { supportThinking: true, options: [], defaultLevel: null } }] })[0].reasoningEfforts === undefined)
+  check('extra_high 映射 xhigh + 未映射拼写不进宿主表', JSON.stringify(catalogToProfiles({ models: [{ id: 'm', provider: null, selectable: true, status: true, reasoningEffortConfig: { supportThinking: true, options: ['extra_high', 'weird'], defaultLevel: null } }] })[0].reasoningEfforts) === '{"xhigh":"extra_high"}')
+  check('全部拼写未映射 → 不出档', catalogToProfiles({ models: [{ id: 'm', provider: null, selectable: true, status: true, reasoningEffortConfig: { supportThinking: true, options: ['weird'], defaultLevel: null } }] })[0].reasoningEfforts === undefined)
   check('目录指纹进 view（不泄露 key）', typeof view.candidate === 'string' && view.candidate.startsWith('sha256:'))
+  // G3：catalogView 暴露逐模型 efforts（设置卡 select 与校验的共同真源，
+  // 同 qoder catalogView().efforts 口径；仅含目录声明了档位的模型）。
+  check('catalogView 带逐模型 efforts（仅声明模型）', JSON.stringify(view.efforts) === JSON.stringify({ 'glm-5.3': ['light', 'high'] }), JSON.stringify(view.efforts))
+
   // syncView（设置卡模型区的同步状态）：失败原因必须随视图带出——此前
   // catalogView() 失败即 null，UI 只能显示泛化「未同步」（goal: trae-work-cn-repair G2）。
   const syncOkView = traeProvider.syncView()
@@ -786,6 +801,7 @@ try {
   const remoteMock = await mockTraeRemote()
   const rt5 = { running: false, port: null, lastError: null }
   const meterRemote = []
+  const remotePrefs = {} // G3 档位 prefs 补默认（可变引用，逐臂调整）
   const gateway5 = createTraeGateway({
     settings: () => ({ ...settings, traeChatBaseURL: remoteMock.base, traeChatTransport: 'remote', maxConcurrentPerSession: 4 }),
     withCredentials: async (attempt) => {
@@ -796,6 +812,7 @@ try {
     meter: { record: (r) => meterRemote.push(r) },
     runtime: rt5,
     getCatalogIds: () => ids,
+    getModelPrefs: () => remotePrefs,
   })
   const stop5 = gateway5.listen(0)
   await sleep(80)
@@ -841,6 +858,45 @@ try {
     && rCreate.headers['x-trae-client-type'] === 'web'
     && rCreate.headers['origin'] === 'https://solo.trae.cn')
   check('remote 计量：记 model_config 的真实模型', meterRemote.some((m) => m.model === 'glm-5.3' && m.usage?.total_tokens === 109))
+  check('remote 出站：无档位时创建体不带 custom_model（既有路径零变化）', rCreate.body.initial_message.custom_model === undefined)
+
+  // G3 档位线缆（2026-10-04 官方 bundle 取证 + probe-trae-thinking-scene 证实
+  // 接受面）：reasoning_effort → initial_message.custom_model.reasoning_effort；
+  // 客户端未带时文件层 prefs 补默认；客户端带值优先。
+  const rEffIdx = remoteMock.state.creates.length
+  const rEff = await fetch(`http://127.0.0.1:${rt5.port}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'glm-5.3', reasoning_effort: 'light', messages: [{ role: 'user', content: 'hi' }] }),
+  })
+  await rEff.text()
+  const rCreateEff = remoteMock.state.creates[rEffIdx]
+  check('remote 出站：客户端 reasoning_effort 注入 custom_model（官方线缆形态）',
+    rCreateEff.body.initial_message.custom_model?.reasoning_effort === 'light'
+    && rCreateEff.body.initial_message.custom_model?.config_name === 'glm-5.3'
+    && rCreateEff.body.initial_message.custom_model?.config_source === 1
+    && rCreateEff.body.initial_message.custom_model?.is_preset === true
+    && rCreateEff.body.initial_message.custom_model?.use_remote_service === true,
+    JSON.stringify(rCreateEff.body.initial_message.custom_model))
+  remotePrefs['glm-5.3'] = { effort: 'high' }
+  const rEffPrefIdx = remoteMock.state.creates.length
+  const rEffPref = await fetch(`http://127.0.0.1:${rt5.port}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'glm-5.3', messages: [{ role: 'user', content: 'hi' }] }),
+  })
+  await rEffPref.text()
+  check('remote 出站：客户端未带时 prefs 补默认', remoteMock.state.creates[rEffPrefIdx].body.initial_message.custom_model?.reasoning_effort === 'high')
+  const rEffWinIdx = remoteMock.state.creates.length
+  const rEffWin = await fetch(`http://127.0.0.1:${rt5.port}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'glm-5.3', reasoning_effort: 'light', messages: [{ role: 'user', content: 'hi' }] }),
+  })
+  await rEffWin.text()
+  check('remote 出站：客户端带值时 prefs 不覆盖', remoteMock.state.creates[rEffWinIdx].body.initial_message.custom_model?.reasoning_effort === 'light')
+  delete remotePrefs['glm-5.3']
+
   // 非流式聚合
   const rAgg = await fetch(`http://127.0.0.1:${rt5.port}/v1/chat/completions`, {
     method: 'POST',
@@ -881,6 +937,15 @@ try {
   check('buildRemoteCreateBody：信封形态', rbody.initial_message.model_name === 'kimi-k3'
     && rbody.initial_message.model_selection_strategy === 'manual' && rbody.env === 'remote'
     && typeof rbody.initial_message.common_params === 'string')
+  const rbodyEff = buildRemoteCreateBody('glm-5.3', [{ role: 'user', content: 'x' }], { reasoningEffort: 'light' })
+  check('buildRemoteCreateBody：effort → custom_model（preset 形态）',
+    rbodyEff.initial_message.custom_model?.reasoning_effort === 'light'
+    && rbodyEff.initial_message.custom_model?.model_name === 'glm-5.3'
+    && rbodyEff.initial_message.custom_model?.config_name === 'glm-5.3'
+    && rbodyEff.initial_message.custom_model?.config_source === 1
+    && rbodyEff.initial_message.custom_model?.is_preset === true)
+  check('buildRemoteCreateBody：空 effort 不出 custom_model',
+    buildRemoteCreateBody('glm-5.3', [{ role: 'user', content: 'x' }], { reasoningEffort: '' }).initial_message.custom_model === undefined)
   const rp = createRemoteEventParser()
   rp.handle('plan_item', { id: 'p1', thought: '', reasoning_content: 'r', tool_call_info: { name: '', params: null } })
   rp.handle('plan_item', { id: 'p1', thought: '', reasoning_content: 'r', tool_call_info: { name: 'finish', params: { summary: '最终答复' } } })

@@ -29,6 +29,7 @@ export const TRAE_PROVIDER_ID = 'trae'
  *   meter: { record: Function },
  *   runtime: { running: boolean, port: number|null, lastError: string|null },
  *   forensics?: { logPath: () => string|undefined },
+ *   getModelPrefs?: () => object,  // { [id]: { effort? } } remote 出站补默认档位（G3）
  * }} deps
  */
 export function createTraeProvider(deps) {
@@ -62,6 +63,15 @@ export function createTraeProvider(deps) {
             count: catalogState.profiles.length,
             candidate: catalogState.source.chosen,
             profiles: catalogState.profiles,
+            // 逐模型目录声明档位（reasoning_effort_config.options 原文拼写，G3）——
+            // 设置卡 select 选项与 traeModelSetPrefs 校验的真源（上游词汇；宿主
+            // 选择器侧的枚举键映射在 catalogToProfiles 的 reasoningEfforts 里）。
+            // 未声明模型不在场。
+            efforts: Object.fromEntries(
+              (catalogState.catalog?.models ?? [])
+                .filter((m) => m.reasoningEffortConfig?.supportThinking === true
+                  && Array.isArray(m.reasoningEffortConfig.options) && m.reasoningEffortConfig.options.length)
+                .map((m) => [m.id, m.reasoningEffortConfig.options])),
           }
         : null
     },
@@ -102,6 +112,7 @@ export function createTraeProvider(deps) {
     runtime: deps.runtime,
     forensics: deps.forensics,
     getCatalogIds: () => provider.catalogIds(),
+    getModelPrefs: deps.getModelPrefs ?? (() => ({})),
   })
   provider.gateway = gateway
 

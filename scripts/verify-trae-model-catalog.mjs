@@ -66,6 +66,7 @@ function buildFixtureDb(dbPath) {
         prompt_max_tokens: 936000, max_tokens: 64000, max_turn: 500,
         max_turns: { default: 500, max: 2000 },
         context_window_size: { default: 200000, max: [1000000] },
+        reasoning_effort_config: { support_thinking: true, options: ['light', 'high', 'extra_high'], default_level: 'high' },
         ak: 'SECRET-AK-TOP', sk: 'SECRET-SK-TOP',
       }),
       fixtureModel({
@@ -165,7 +166,14 @@ try {
     && catalog.functions.solo_work_lite?.length === 2
     && Array.isArray(catalog.functions.assistant) && catalog.functions.assistant.length === 0)
   check('空 provider 归一为 null', glm?.provider === null)
+  check('reasoning_effort_config 归一为 reasoningEffortConfig',
+    glm?.reasoningEffortConfig?.supportThinking === true
+    && JSON.stringify(glm.reasoningEffortConfig.options) === '["light","high","extra_high"]'
+    && glm.reasoningEffortConfig.defaultLevel === 'high')
+  check('无 reasoning_effort_config 的条目归一为 null', kimi?.reasoningEffortConfig === null)
+
   const warnText = catalog.warnings.join('\n')
+  check('reasoning_effort_config 进白名单（不再上 warnings）', !warnText.includes('reasoning_effort_config'))
   check('warnings 记录非数组分类', warnText.includes('broken_category'))
   check('warnings 记录无 id 条目跳过', warnText.includes('无法确定 id'))
   check('warnings 记录敏感字段移除（仅字段名）', warnText.includes('ak') && warnText.includes('sk'))

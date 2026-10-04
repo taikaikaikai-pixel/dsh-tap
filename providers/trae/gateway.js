@@ -443,6 +443,7 @@ function sseLineValue(value) {
  *   runtime: { running, port, lastError },
  *   forensics?: { logPath: () => string|undefined },
  *   getCatalogIds: () => string[],
+ *   getModelPrefs?: () => object,      // { [id]: { effort? } } remote 出站补默认档位
  * }} deps
  */
 export function createTraeGateway(deps) {
@@ -472,6 +473,11 @@ export function createTraeGateway(deps) {
     const s = deps.settings()
     const parser = createRemoteEventParser()
     const id = `trae-remote-${randomUUID().slice(0, 8)}`
+    // G3 档位：客户端带 reasoning_effort 优先，否则文件层 prefs 补默认
+    //（线缆形态 = initial_message.custom_model.reasoning_effort，见 remote.js）。
+    const clientEffort = typeof payload.reasoning_effort === 'string' && payload.reasoning_effort ? payload.reasoning_effort : undefined
+    const prefsEffort = deps.getModelPrefs?.()?.[model]?.effort
+    const reasoningEffort = clientEffort ?? (typeof prefsEffort === 'string' && prefsEffort ? prefsEffort : undefined)
     let sessionCreated = null
     let tokenForStop = null
     const release = await limiter.acquire(sessionId, s.maxConcurrentPerSession ?? 4)
@@ -479,7 +485,7 @@ export function createTraeGateway(deps) {
       const { cred, res: eventsResp, err } = await deps.withCredentials(async (c) => {
         const token = String(c.authorization).replace(/^Cloud-IDE-JWT\s+/, '')
         tokenForStop = token
-        sessionCreated = await createRemoteSession(s.traeChatBaseURL, token, model, payload.messages)
+        sessionCreated = await createRemoteSession(s.traeChatBaseURL, token, model, payload.messages, { reasoningEffort })
         return openRemoteEvents(s.traeChatBaseURL, token, sessionCreated.sessionId, sessionCreated.messageId)
       })
       if (!cred || err) {
