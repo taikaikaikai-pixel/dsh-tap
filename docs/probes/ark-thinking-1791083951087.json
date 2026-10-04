@@ -1,0 +1,437 @@
+{
+  "at": "2026-10-04T03:19:11.087Z",
+  "endpoint": "https://ark.cn-beijing.volces.com/api/plan/v1/messages",
+  "levels": [
+    "low",
+    "medium",
+    "high",
+    "max"
+  ],
+  "prompt": "一个农夫有 17 只羊，除了 9 只以外都跑了，还剩几只？只给最终数字。",
+  "models": [
+    {
+      "model": "deepseek-v4.1-flash",
+      "thinksByDefault": true,
+      "acceptsEnabled": true,
+      "offAccepted": true,
+      "table": {
+        "off": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "max": "max"
+      },
+      "arms": {
+        "baseline": {
+          "status": 200,
+          "blockTypes": [
+            "thinking",
+            "text"
+          ],
+          "thinkingChars": 326,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 56,
+            "output_tokens": 106,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        },
+        "enabled": {
+          "status": 200,
+          "blockTypes": [
+            "thinking",
+            "text"
+          ],
+          "thinkingChars": 207,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 56,
+            "output_tokens": 68,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        },
+        "disabled": {
+          "status": 200,
+          "blockTypes": [
+            "text"
+          ],
+          "thinkingChars": 0,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 30,
+            "output_tokens": 1,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        }
+      }
+    },
+    {
+      "model": "ark-code-latest",
+      "thinksByDefault": true,
+      "acceptsEnabled": true,
+      "offAccepted": true,
+      "table": {
+        "off": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "max": "max"
+      },
+      "arms": {
+        "baseline": {
+          "status": 200,
+          "blockTypes": [
+            "thinking",
+            "text"
+          ],
+          "thinkingChars": 255,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 56,
+            "output_tokens": 93,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        },
+        "enabled": {
+          "status": 200,
+          "blockTypes": [
+            "thinking",
+            "text"
+          ],
+          "thinkingChars": 260,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 56,
+            "output_tokens": 83,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        },
+        "disabled": {
+          "status": 200,
+          "blockTypes": [
+            "text"
+          ],
+          "thinkingChars": 0,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 30,
+            "output_tokens": 1,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        }
+      }
+    },
+    {
+      "model": "glm-5.3-flash",
+      "thinksByDefault": true,
+      "acceptsEnabled": true,
+      "offAccepted": false,
+      "table": {
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "max": "max"
+      },
+      "arms": {
+        "baseline": {
+          "status": 200,
+          "blockTypes": [
+            "thinking",
+            "text"
+          ],
+          "thinkingChars": 263,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 38,
+            "output_tokens": 85,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        },
+        "enabled": {
+          "status": 200,
+          "blockTypes": [
+            "thinking",
+            "text"
+          ],
+          "thinkingChars": 292,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 38,
+            "output_tokens": 100,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        },
+        "disabled": {
+          "status": 400,
+          "blockTypes": [],
+          "thinkingChars": 0,
+          "textChars": 0,
+          "usage": null,
+          "error": {
+            "code": "InvalidParameter",
+            "message": "thinking.type `disabled` is not supported by this model Request id: 0217910839209515e054c6d0ba743fab13ed8d72af4b8b224e3ee"
+          }
+        }
+      }
+    },
+    {
+      "model": "glm-5.3",
+      "thinksByDefault": true,
+      "acceptsEnabled": true,
+      "offAccepted": false,
+      "table": {
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "max": "max"
+      },
+      "arms": {
+        "baseline": {
+          "status": 200,
+          "blockTypes": [
+            "thinking",
+            "text"
+          ],
+          "thinkingChars": 402,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 38,
+            "output_tokens": 116,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        },
+        "enabled": {
+          "status": 200,
+          "blockTypes": [
+            "thinking",
+            "text"
+          ],
+          "thinkingChars": 342,
+          "textChars": 5,
+          "usage": {
+            "input_tokens": 38,
+            "output_tokens": 122,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        },
+        "disabled": {
+          "status": 400,
+          "blockTypes": [],
+          "thinkingChars": 0,
+          "textChars": 0,
+          "usage": null,
+          "error": {
+            "code": "InvalidParameter",
+            "message": "thinking.type `disabled` is not supported by this model Request id: 0217910839249165e054c6d0ba743fab13ed8d72af4b8b2525060"
+          }
+        }
+      }
+    },
+    {
+      "model": "kimi-k3",
+      "thinksByDefault": true,
+      "acceptsEnabled": true,
+      "offAccepted": true,
+      "table": {
+        "off": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "max": "max"
+      },
+      "arms": {
+        "baseline": {
+          "status": 200,
+          "blockTypes": [
+            "thinking",
+            "text"
+          ],
+          "thinkingChars": 287,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 111,
+            "output_tokens": 119,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        },
+        "enabled": {
+          "status": 200,
+          "blockTypes": [
+            "thinking",
+            "text"
+          ],
+          "thinkingChars": 265,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 111,
+            "output_tokens": 93,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        },
+        "disabled": {
+          "status": 200,
+          "blockTypes": [
+            "text"
+          ],
+          "thinkingChars": 0,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 44,
+            "output_tokens": 11,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        }
+      }
+    },
+    {
+      "model": "doubao-seed-evolving",
+      "thinksByDefault": true,
+      "acceptsEnabled": true,
+      "offAccepted": true,
+      "table": {
+        "off": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "max": "max"
+      },
+      "arms": {
+        "baseline": {
+          "status": 200,
+          "blockTypes": [
+            "thinking",
+            "text"
+          ],
+          "thinkingChars": 28,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 76,
+            "output_tokens": 64,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        },
+        "enabled": {
+          "status": 200,
+          "blockTypes": [
+            "thinking",
+            "text"
+          ],
+          "thinkingChars": 18,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 76,
+            "output_tokens": 36,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        },
+        "disabled": {
+          "status": 200,
+          "blockTypes": [
+            "text"
+          ],
+          "thinkingChars": 0,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 75,
+            "output_tokens": 1,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        }
+      }
+    },
+    {
+      "model": "doubao-seed-2.1-lite",
+      "thinksByDefault": true,
+      "acceptsEnabled": true,
+      "offAccepted": true,
+      "table": {
+        "off": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "max": "max"
+      },
+      "arms": {
+        "baseline": {
+          "status": 200,
+          "blockTypes": [
+            "thinking",
+            "text"
+          ],
+          "thinkingChars": 69,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 60,
+            "output_tokens": 234,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        },
+        "enabled": {
+          "status": 200,
+          "blockTypes": [
+            "thinking",
+            "text"
+          ],
+          "thinkingChars": 79,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 60,
+            "output_tokens": 43,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        },
+        "disabled": {
+          "status": 200,
+          "blockTypes": [
+            "text"
+          ],
+          "thinkingChars": 0,
+          "textChars": 1,
+          "usage": {
+            "input_tokens": 59,
+            "output_tokens": 1,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+          },
+          "error": null
+        }
+      }
+    }
+  ]
+}

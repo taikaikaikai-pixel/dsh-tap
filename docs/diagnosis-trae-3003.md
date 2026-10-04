@@ -247,3 +247,20 @@ Trae 业务码 3003。
 - 带 tools 的请求不静默降级（工具语义不可靠），维持原错误透传。
 - 回归 +2 断言（81 项全绿）：mock 仅对 inline_chat 注入 3003 → 客户端拿到真
   实文本、note 标注 served-by/requested、两次上游调用、计量记真实模型。
+
+**2026-10-04 补记：内层错误签名已明确（思考档位课题取证时复现）**
+
+- 复跑 `node scripts/probe-trae-efforts.mjs`（默认模型）与
+  `node scripts/probe-trae-live.mjs --chat` 均得同一 498 字节 SSE：`event:error`
+  `code 3003`，内层 400 为
+  `{"code":"InvalidParameter","message":"Invalid combination of reasoning_effort and thinking type: high + disabled"}`。
+- 判读：inline_chat 这个 scene 把 **thinking 置为 disabled**，而这些模型
+  （glm-5.3 / Doubao-Seed-2.1-Pro 等）**默认档是 high** ⇒ 组合非法。**与请求里
+  带没带 `reasoning_effort` 无关**（基线臂同样 3003），且与旧结论「inline_chat
+  面对一切 model 名恒 3003」一致——这次拿到了内层真因。
+- 影响：Trae 通道的**思考档位**无从验证（唯一携带该字段的 inline_chat 面不通，
+  可用的 chat_v3 面请求体没有 effort/thinking 字段）⇒ 路由维持不开 `compat`、
+  不出档位。证据 `docs/probes/trae-efforts-*.json` +
+  `docs/probes/trae-chat-live-1791083764857.json`；事实表见
+  docs/rules/gateway-facts.md「TraeWork CN 通道事实」。后续课题 = 找能把
+  thinking 置 enabled 的 scene/参数组合。

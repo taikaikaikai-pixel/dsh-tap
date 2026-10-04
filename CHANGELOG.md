@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.19.0 (2026-10-04)
+
+- **设置卡思考档位改由目录逐模型声明驱动 + 新模型免人工（B/C 步一轮）**（承接 0.18.0 的 A 步发版；Qoder 卡档位真源化、key 型服务商声明透传不丢、Trae/Ark 探针取证、缺口检测脚本；新坑见 pitfalls #64 同族增补）：
+  - **B — Qoder 卡档位真源化（`feat(qoder)` 26f3098）**：设置卡 Qoder 行档位 select 不再用固定表 `off/low/medium/high/max`，改由目录逐模型声明（`thinking_config.enabled.efforts`）驱动，与宿主「推理等级」同一真源。写入校验按模型收口（未声明档位写入报 400 且列出该模型自己的档位表）；存量兼容——`readQoderModelPrefs` 不静默丢值，存量 `max`（qfmodel/qmodel_38max，目录只声明 xhigh/low/medium）以「思考:max（目录未声明）」形态在 UI 可见可选，不自动迁移。GET 视图 `qoder.models` 增 `efforts` 字段供卡直读。`verify-qoder-provider` 161→**171 断言**（新增 efforts 形状/逐模型拒绝/存量兼容 10 断言）。
+  - **C2 — key 型服务商档位声明透传且刷新不丢**：`providers/openai-compat.js` `providerBlock` 支持 `preset.modelEfforts`（按模型 id 合并 `reasoningEfforts`）与 `preset.reasoningCompat===true` 时写 `compat:{thinkingFormat:'openai',supportsReasoningEffort:true}`。**修一实锤**：`index.js` 此前把声明只传给不写块的 `testExtraProvider`，真正重建块的 `refreshExtraProviderModels` 漏传 ⇒ 每次刷新把档位声明洗掉（注释谎称已修）。新增接缝 `rebuildAdapterForEntry`（openai-compat.js）让 test/refresh/add 三路结构性恒一致，refresh 不再丢声明。`verify-providers` 17→**24 断言**（7c-7e providerBlock 纯函数 + 新增第 10 节 10a-10d 覆盖 refresh 重建后声明仍在，10c 经变异测试验证能抓到旧 bug）。文档 `docs/rules/extra-providers.md` 增 **E-P8** 透传契约（逐条实测依据 #42、拼写不映射）。
+  - **C1 — Trae 方言探针：负结论只落文档不落投影**：`scripts/probe-trae-efforts.mjs`（probe 类不入 CI）经 Trae 通道同题多臂（baseline / `reasoning_effort=light`/`high`/`extra_high`，多采样）——**全臂 3003**，内层 400 恒为 `Invalid combination of reasoning_effort and thinking type: high + disabled`；连不带 effort 的 baseline 臂（`inline_chat` scene 置 thinking disabled）也 3003，证明与请求字段无关。按 R4 负结论：`docs/rules/gateway-facts.md` Trae 节记「reasoning_effort 方言仍不可用 ⇒ 不开 compat、不出档」（含逐模型档位词汇表），Trae 路由维持不出档；后续课题 = 找能把 thinking 置 enabled 的 scene/参数组合。证据 `docs/probes/trae-efforts-*.json` + `trae-chat-live-*.json`。
+  - **C3 — Ark 一条命令 + 省额度默认**：`scripts/probe-ark-thinking.mjs` 固化 Ark `/api/plan/v1/messages` 三臂判据（`--emit`/`--write`/`--from`）。实测 7 模型：全接受 `thinking:{type:enabled,budget_tokens}`；`disabled` 被 `glm-5.3`/`glm-5.3-flash` 400 拒 ⇒ 这两个不声明 off 档（声明 = 摆必然 400 的档），其余 5 个声明 `off:null`+low/medium/high/max。证据 `docs/probes/ark-thinking-*.json`。**省额度默认**（额度事故后加固）：默认每模型只跑 baseline+enabled 两臂（off 未测不臆造、`--write` 保留 patch 既有 off 档），`--full-matrix` 才跑旧三臂全矩阵——7 模型从 21 次降到 14 次上游调用；顺带修 `--repeat` 覆盖 bug（改多样本聚合 min/mean/max）与 yaml `get()` 把 `off:null` 归并成 undefined 致写出丢档的真雷（改从 Pair 原始节点读）。
+  - **C4 — 缺口检测让漏项可见**：`scripts/probe-effort-gaps.mjs`（probe 类不入 CI）对 CodeBuddy（/v3/config）/Qoder（目录）/Trae（state.vscdb）三托管路由比对「上游声明了档位」vs「路由条目有 reasoningEfforts 且路由有 compat」，逐模型打 ok/GAP 表 + 缺口汇总；缺口 = exit 1、找不到宿主配置层 = exit 2，免凭据。加入 `docs/rules/STATE.md` 发版清单（规则 4：发版前跑一次，#64 的回归眼）。
+  - **回归**：`verify-models --list`（23/23）/ `verify-bridge` / `verify-rotation` / `verify-core-generic` / `verify-providers`（24）/ `verify-trae-provider`（90）/ `verify-qoder-provider`（171）/ `verify-host-config`（36）/ `verify-agents-md`（51，踩坑编号连续、预算绿）/ `verify-desktop-acceptance --structural`（7 ok / 0 FAIL / 5 SKIP）全部 exit 0。
+  - **生效方式**：B/C1 的镜像属组合根启动期加载 ⇒ **重启 dsh / 退出并重启桌面应用**；卡侧刷新页面即可。Trae 维持不出档（缺口 C4 可见）。
+
 ## 0.18.0 (2026-10-04)
 
 - **宿主「推理等级」入口补齐：Qoder 目录的逐模型思考能力声明投影进镜像（并补路由 compat），用户 profile 的 Ark(volces) 5 个模型补档位表**（用户报「我想在输入框设置模型的思考强度……有些模型没有这一项」；新坑 **#64**；证据 `docs/probes/qoder-thinking-config-*.json`）：

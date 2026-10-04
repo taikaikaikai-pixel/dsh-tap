@@ -1,0 +1,49 @@
+{
+  "at": "2026-10-04T03:15:35.666Z",
+  "model": "Doubao-Seed-2.1-Pro",
+  "levels": [
+    "light"
+  ],
+  "repeat": 1,
+  "prompt": "一个笼子里有鸡和兔共 10 只，脚共 28 只。鸡兔各几只？只给最终数字。",
+  "baselineMean": 0,
+  "verdicts": {
+    "light": {
+      "vals": [
+        0
+      ],
+      "mean": 0,
+      "verdict": "INCONCLUSIVE"
+    }
+  },
+  "arms": [
+    {
+      "arm": "baseline#1",
+      "level": null,
+      "http": 200,
+      "reasoningChars": 0,
+      "textChars": 0,
+      "reasoningHead": "",
+      "providerModel": null,
+      "finish": "stop",
+      "usage": null,
+      "inband": null,
+      "bytes": 498,
+      "rawHead": "id:1\nevent:error\ndata:{\"code\":3003,\"message\":\"model service is unavailable\\nerror, status code: 400, message: Unknown error: code = 400 Bad Request, err = \\\"{\\\\\\\"error\\\\\\\":{\\\\\\\"code\\\\\\\":\\\\\\\"InvalidParameter\\\\\\\",\\\\\\\"message\\\\\\\":\\\\\\\"Invalid combination of reasoning_effort and thinking type: high + disabled Request id: 021791083735190ed184bca67267c66343cb5809556148170f001\\\\\\\",\\\\\\\"param\\\\\\\":\\\\\\\"\\\\\\\",\\\\\\\"type\\\\\\\":\\\\\\\"BadRequest\\\\\\\"}}\\\"\",\"extra\":null}\n\nid:2\nevent:done\ndata:{\"finish_reason\":\"stop\"}\n\n"
+    },
+    {
+      "arm": "light#1",
+      "level": "light",
+      "http": 200,
+      "reasoningChars": 0,
+      "textChars": 0,
+      "reasoningHead": "",
+      "providerModel": null,
+      "finish": "stop",
+      "usage": null,
+      "inband": null,
+      "bytes": 498,
+      "rawHead": "id:1\nevent:error\ndata:{\"code\":3003,\"message\":\"model service is unavailable\\nerror, status code: 400, message: Unknown error: code = 400 Bad Request, err = \\\"{\\\\\\\"error\\\\\\\":{\\\\\\\"code\\\\\\\":\\\\\\\"InvalidParameter\\\\\\\",\\\\\\\"message\\\\\\\":\\\\\\\"Invalid combination of reasoning_effort and thinking type: high + disabled Request id: 021791083735574efa3941fd485b49a1b31357264d7ab9e12b0ea\\\\\\\",\\\\\\\"param\\\\\\\":\\\\\\\"\\\\\\\",\\\\\\\"type\\\\\\\":\\\\\\\"BadRequest\\\\\\\"}}\\\"\",\"extra\":null}\n\nid:2\nevent:done\ndata:{\"finish_reason\":\"stop\"}\n\n"
+    }
+  ]
+}

@@ -11,13 +11,16 @@
  *   7. providerBlock shape (apiKeyEnv convention)
  *   8. shipped presets: baseURL 钉选；qwen 兜底、openrouter staticCatalog
  *   9. staticCatalog 形态：公开 /models 不调不验，chat 探针验 key，吃内置清单
+ *   10. refresh 重建接缝（0.19.0 修）：重建 adapter 重铺块后档位声明仍在
+ *       （mock 上游走 refresh 实际序列）+ index.js test/refresh 调用点源级断言
  *
  * Usage: node scripts/verify-providers.mjs   (no network, no credentials)
  */
 
 import { createServer } from 'node:http'
+import { readFileSync } from 'node:fs'
 
-import { PROVIDER_ID_RE, keyRefFor, fetchOpenAIModels, probeChatKey, providerBlock, createOpenAICompatProvider } from '../providers/openai-compat.js'
+import { PROVIDER_ID_RE, keyRefFor, fetchOpenAIModels, probeChatKey, providerBlock, createOpenAICompatProvider, rebuildAdapterForEntry } from '../providers/openai-compat.js'
 import ark from '../providers/ark/index.js'
 import bailian from '../providers/bailian/index.js'
 import deepseek from '../providers/deepseek/index.js'
@@ -120,6 +123,28 @@ const GOOD = 'sk-good-key'
       && block.models.length === 2 && block.models[1].name === 'N' && !('name' in block.models[0]),
     JSON.stringify(block))
   check('7b keyRefFor / PROVIDER_ID_RE 不变', keyRefFor('ark') === 'ARK_API_KEY' && PROVIDER_ID_RE.test('a-1') && !PROVIDER_ID_RE.test('Bad'))
+  // 7c 思考档位声明透传（0.19.0）：preset.modelEfforts 按模型 id 合并进条目，
+  // 未声明的模型保持原形状；reasoningCompat 才写 compat（缺它 pi-ai 出站不写
+  // reasoning_effort）。refresh 走同一函数 ⇒ 声明不丢（下面 7e 用缩减清单复验）。
+  const preset7 = {
+    id: 'mock-up', displayName: 'Mock', baseURL: 'http://x/v1',
+    modelEfforts: { m1: { low: 'low', high: 'high' } },
+    reasoningCompat: true,
+  }
+  const block7c = providerBlock(preset7, [{ id: 'm1' }, { id: 'm2', name: 'N' }])
+  check('7c providerBlock：声明模型带 reasoningEfforts、未声明的不带',
+    JSON.stringify(block7c.models[0].reasoningEfforts) === JSON.stringify({ low: 'low', high: 'high' })
+      && block7c.models[1].reasoningEfforts === undefined,
+    JSON.stringify(block7c.models))
+  check('7d providerBlock：reasoningCompat → compat.supportsReasoningEffort',
+    JSON.stringify(block7c.compat) === JSON.stringify({ thinkingFormat: 'openai', supportsReasoningEffort: true })
+      && providerBlock({ id: 'mock-up', displayName: 'Mock', baseURL: 'http://x/v1' }, [{ id: 'm1' }]).compat === undefined,
+    JSON.stringify(block7c.compat))
+  const block7e = providerBlock(preset7, [{ id: 'm1' }])
+  check('7e 刷新（缩减/重建清单）后声明按 id 保留',
+    JSON.stringify(block7e.models[0].reasoningEfforts) === JSON.stringify({ low: 'low', high: 'high' })
+      && block7e.models.length === 1,
+    JSON.stringify(block7e.models))
 }
 
 // 8: shipped presets
@@ -171,6 +196,59 @@ const GOOD = 'sk-good-key'
   const err = await adapter.fetchModels('sk-bad').then(() => null, (e) => e)
   check('9c staticCatalog 坏 key（chat 401）：拒绝', !!err && /认证拒绝|401/.test(err.message), String(err))
   server.close()
+}
+
+// 10: refresh 重建接缝（0.19.0 修）：refreshExtraProviderModels 用重建的 adapter
+//     重铺 provider 块，preset 的档位声明（modelEfforts/reasoningCompat）必须
+//     随行。refresh 在组合根内且 PROVIDER_PRESETS 模块私有——shipped preset 也
+//     无一实际声明档位（踩坑 #42 纪律不臆造）⇒ 全链路 mock 造不出带声明的条目，
+//     故在此按 refresh 的实际序列（entry+preset 重建 adapter → fetchModels →
+//     modelBlock）打 mock 上游做功能断言；index.js 调用点用源级断言锁住
+//     （verify-desktop-acceptance §4a 同口径）。
+{
+  const preset10 = {
+    id: 'mock-up', displayName: 'Mock', baseURL: 'http://unused.example/v1',
+    modelEfforts: { 'm-a': { low: 'low', high: 'high' } },
+    reasoningCompat: true,
+  }
+  const { server, base } = await mockUpstream({
+    models: [200, { object: 'list', data: [{ id: 'm-a' }, { id: 'm-b' }] }],
+    chat: [200, { choices: [] }],
+  })
+  // refresh 的序列：registry entry（添加时快照打底）+ preset 先验 → 重建
+  // adapter → 实拉目录 → 重铺 provider 块。baseURL 由 entry 供给（merged 对象），
+  // preset10 的 baseURL 不参与（与线上 refresh 同构）。
+  const entry10 = { id: 'mock-up', displayName: 'Mock', baseURL: base, preset: 'mock-up', keyRef: 'MOCK_UP_API_KEY', addedAt: 1 }
+  const adapter10 = rebuildAdapterForEntry(entry10, preset10)
+  const models10 = await adapter10.fetchModels(GOOD)
+  const block10 = adapter10.modelBlock(models10)
+  check('10a refresh 序列（重建 adapter → fetchModels → 重铺块）后声明仍在',
+    models10.length === 2
+      && JSON.stringify(block10.models[0].reasoningEfforts) === JSON.stringify({ low: 'low', high: 'high' })
+      && block10.models[1].reasoningEfforts === undefined
+      && JSON.stringify(block10.compat) === JSON.stringify({ thinkingFormat: 'openai', supportsReasoningEffort: true }),
+    JSON.stringify(block10))
+  server.close()
+  const block10b = rebuildAdapterForEntry({ ...entry10, baseURL: 'http://x/v1' }, null).modelBlock([{ id: 'm-a' }])
+  check('10b 重建接缝：custom 条目（preset 未命中）不投毒声明',
+    block10b.models[0].reasoningEfforts === undefined && block10b.compat === undefined,
+    JSON.stringify(block10b))
+
+  const tapSrc = readFileSync(new URL('../index.js', import.meta.url), 'utf8')
+  const fnSrc = (name) => {
+    const at = tapSrc.indexOf(`async function ${name}`)
+    return at < 0 ? '' : tapSrc.slice(at, at + tapSrc.slice(at).indexOf('\n}'))
+  }
+  const refreshSrc = fnSrc('refreshExtraProviderModels')
+  const callLine = 'const adapter = rebuildAdapterForEntry(entry, presetHit)'
+  check('10c index.js refresh 调用点：走共用接缝并重铺 provider 块（防漏传回归）',
+    refreshSrc.includes(callLine)
+      && refreshSrc.includes('writeProviderBlock(id, adapter.modelBlock(models))')
+      && !refreshSrc.includes('createOpenAICompatProvider({ ...entry'),
+    'refreshExtraProviderModels 未走接缝或未重铺块')
+  check('10d index.js test 调用点：与 refresh 同参（接缝唯一出处）',
+    fnSrc('testExtraProvider').includes(callLine),
+    'testExtraProvider 未走接缝')
 }
 
 console.log(failures ? `\n${failures} FAIL` : '\nall green')

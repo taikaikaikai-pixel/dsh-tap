@@ -18,6 +18,7 @@
 1. 长期分支只有 `main`；需要新线就开短命分支，合完即删，别让分支名停在旧版本号上（“v0.8.3 装着 0.10.1”曾让默认分支落后 85 提交两个月）。
 2. 每次 `chore(release)` 提交**当场**打 annotated tag `vX.Y.Z` 并随分支一起 push；**永不 rebase 已推送历史**——CHANGELOG 引用提交 SHA，且 0.8.x 的 tag 就是因历史被改写而无法补。
 3. 新增离线验证脚本时同步加进 `.github/workflows/node.js.yml`（CI 只跑离线套件；带真实凭据的 probe-* 与不带 `--list` 的 verify-models 永不进 CI）。
+4. **发版前跑一次 `node scripts/probe-effort-gaps.mjs`**（宿主实例活着时，免凭据）：对账「插件声明的思考档位」×「路由条目实况」，确认没有"声明没走到宿主选择器"的缺口（踩坑 #64 的回归眼；缺口 = exit 1）。路由/档位声明改动后尤其要跑。
 
 ## 桥端口宿主分流 goal（2026-10-03 立项并一轮落地，docs/goals/bridge-port-host-split.md）
 

@@ -44,6 +44,8 @@
 - **`off` 必须逐模型裁**：pi-ai 对 anthropic 方言的 off 线值就是发 `thinking:{type:disabled}`（`anthropic-messages.js:902`）——给拒 disabled 的模型声明 off 等于摆一个必然 400 的档位；`off` 键缺省时 `map.off` 为 null、不发 disabled，退化为"不带 thinking 参数"= 上游默认（照常思考），安全。
 - **边界（未定论）**：Ark 侧档位映射 pi-ai 预算表（low 2048 / medium 8192 / high 16384 / max 夹到 high），而这些模型是**自适应思考**——2 采样/档位下多数看不到单调差异（`glm-5.3` 2048→1713 / 16384→2219 有；`glm-5.3-flash`、`kimi-k3`、`doubao-seed-2.1-lite` 无）⇒ 档位更像"上限"而非"强度旋钮"；`disabled` 是硬效果。
 - 备份 `cordis.patch.yml.pre-effort-20261004.bak`；生效 = **重启桌面应用**（profile patch 属启动期加载）。补齐后 volces 7/7 出档。
+- **不必再手工做一遍（2026-10-04 固化）**：同一套三臂判据已固化成 `node scripts/probe-ark-thinking.mjs`——`--emit yaml` 打印可粘贴的 `reasoningEfforts` 块，`--write <patch.yml>` 直接写进 profile patch（YAML 文档级读-改-写、留 `.bak`），`--from <证据.json>` 复用既有证据不打上游。**Ark 新模型进选择器 = 跑这一条命令**；证据 `docs/probes/ark-thinking-*.json`（本次 7 模型结论与上表逐字一致）。
+- **写入注意**：宿主镜像会重写这个 profile patch（实测 11:00 一次重写把 models 数组**内联注释**丢掉、**值保留**）——所以脚本写的是"值"，别指望内联注释长存；顶层块注释会被保留。
 
 ## 顶层未知数（探测先行，勿凭记忆动手）
 

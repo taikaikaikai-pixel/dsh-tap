@@ -1,0 +1,152 @@
+{
+  "at": "2026-10-04T03:15:50.354Z",
+  "model": "glm-5.3",
+  "levels": [
+    "light",
+    "high",
+    "extra_high"
+  ],
+  "repeat": 2,
+  "prompt": "一个笼子里有鸡和兔共 10 只，脚共 28 只。鸡兔各几只？只给最终数字。",
+  "baselineMean": 0,
+  "verdicts": {
+    "light": {
+      "vals": [
+        0,
+        0
+      ],
+      "mean": 0,
+      "verdict": "INCONCLUSIVE"
+    },
+    "high": {
+      "vals": [
+        0,
+        0
+      ],
+      "mean": 0,
+      "verdict": "INCONCLUSIVE"
+    },
+    "extra_high": {
+      "vals": [
+        0,
+        0
+      ],
+      "mean": 0,
+      "verdict": "INCONCLUSIVE"
+    }
+  },
+  "arms": [
+    {
+      "arm": "baseline#1",
+      "level": null,
+      "http": 200,
+      "reasoningChars": 0,
+      "textChars": 0,
+      "reasoningHead": "",
+      "providerModel": null,
+      "finish": "stop",
+      "usage": null,
+      "inband": null,
+      "bytes": 498,
+      "rawHead": "id:1\nevent:error\ndata:{\"code\":3003,\"message\":\"model service is unavailable\\nerror, status code: 400, message: Unknown error: code = 400 Bad Request, err = \\\"{\\\\\\\"error\\\\\\\":{\\\\\\\"code\\\\\\\":\\\\\\\"InvalidParameter\\\\\\\",\\\\\\\"message\\\\\\\":\\\\\\\"Invalid combination of reasoning_effort and thinking type: high + disabled Request id: 02179108374840409e0a16557304aef5859915cd52ca63736c543\\\\\\\",\\\\\\\"param\\\\\\\":\\\\\\\"\\\\\\\",\\\\\\\"type\\\\\\\":\\\\\\\"BadRequest\\\\\\\"}}\\\"\",\"extra\":null}\n\nid:2\nevent:done\ndata:{\"finish_reason\":\"stop\"}\n\n"
+    },
+    {
+      "arm": "light#1",
+      "level": "light",
+      "http": 200,
+      "reasoningChars": 0,
+      "textChars": 0,
+      "reasoningHead": "",
+      "providerModel": null,
+      "finish": "stop",
+      "usage": null,
+      "inband": null,
+      "bytes": 498,
+      "rawHead": "id:1\nevent:error\ndata:{\"code\":3003,\"message\":\"model service is unavailable\\nerror, status code: 400, message: Unknown error: code = 400 Bad Request, err = \\\"{\\\\\\\"error\\\\\\\":{\\\\\\\"code\\\\\\\":\\\\\\\"InvalidParameter\\\\\\\",\\\\\\\"message\\\\\\\":\\\\\\\"Invalid combination of reasoning_effort and thinking type: high + disabled Request id: 02179108374865537f68e330dda79132432c30fe8fcccefe9fd29\\\\\\\",\\\\\\\"param\\\\\\\":\\\\\\\"\\\\\\\",\\\\\\\"type\\\\\\\":\\\\\\\"BadRequest\\\\\\\"}}\\\"\",\"extra\":null}\n\nid:2\nevent:done\ndata:{\"finish_reason\":\"stop\"}\n\n"
+    },
+    {
+      "arm": "high#1",
+      "level": "high",
+      "http": 200,
+      "reasoningChars": 0,
+      "textChars": 0,
+      "reasoningHead": "",
+      "providerModel": null,
+      "finish": "stop",
+      "usage": null,
+      "inband": null,
+      "bytes": 498,
+      "rawHead": "id:1\nevent:error\ndata:{\"code\":3003,\"message\":\"model service is unavailable\\nerror, status code: 400, message: Unknown error: code = 400 Bad Request, err = \\\"{\\\\\\\"error\\\\\\\":{\\\\\\\"code\\\\\\\":\\\\\\\"InvalidParameter\\\\\\\",\\\\\\\"message\\\\\\\":\\\\\\\"Invalid combination of reasoning_effort and thinking type: high + disabled Request id: 0217910837488855f3c08bde6ee7bc61159b503e67494fe312750\\\\\\\",\\\\\\\"param\\\\\\\":\\\\\\\"\\\\\\\",\\\\\\\"type\\\\\\\":\\\\\\\"BadRequest\\\\\\\"}}\\\"\",\"extra\":null}\n\nid:2\nevent:done\ndata:{\"finish_reason\":\"stop\"}\n\n"
+    },
+    {
+      "arm": "extra_high#1",
+      "level": "extra_high",
+      "http": 200,
+      "reasoningChars": 0,
+      "textChars": 0,
+      "reasoningHead": "",
+      "providerModel": null,
+      "finish": "stop",
+      "usage": null,
+      "inband": null,
+      "bytes": 498,
+      "rawHead": "id:1\nevent:error\ndata:{\"code\":3003,\"message\":\"model service is unavailable\\nerror, status code: 400, message: Unknown error: code = 400 Bad Request, err = \\\"{\\\\\\\"error\\\\\\\":{\\\\\\\"code\\\\\\\":\\\\\\\"InvalidParameter\\\\\\\",\\\\\\\"message\\\\\\\":\\\\\\\"Invalid combination of reasoning_effort and thinking type: high + disabled Request id: 021791083749170df84d29ab7537fe21646717cf695ef3e210eca\\\\\\\",\\\\\\\"param\\\\\\\":\\\\\\\"\\\\\\\",\\\\\\\"type\\\\\\\":\\\\\\\"BadRequest\\\\\\\"}}\\\"\",\"extra\":null}\n\nid:2\nevent:done\ndata:{\"finish_reason\":\"stop\"}\n\n"
+    },
+    {
+      "arm": "baseline#2",
+      "level": null,
+      "http": 200,
+      "reasoningChars": 0,
+      "textChars": 0,
+      "reasoningHead": "",
+      "providerModel": null,
+      "finish": "stop",
+      "usage": null,
+      "inband": null,
+      "bytes": 498,
+      "rawHead": "id:1\nevent:error\ndata:{\"code\":3003,\"message\":\"model service is unavailable\\nerror, status code: 400, message: Unknown error: code = 400 Bad Request, err = \\\"{\\\\\\\"error\\\\\\\":{\\\\\\\"code\\\\\\\":\\\\\\\"InvalidParameter\\\\\\\",\\\\\\\"message\\\\\\\":\\\\\\\"Invalid combination of reasoning_effort and thinking type: high + disabled Request id: 02179108374947550f970e6b52efea9fef12df94c1881c0434d77\\\\\\\",\\\\\\\"param\\\\\\\":\\\\\\\"\\\\\\\",\\\\\\\"type\\\\\\\":\\\\\\\"BadRequest\\\\\\\"}}\\\"\",\"extra\":null}\n\nid:2\nevent:done\ndata:{\"finish_reason\":\"stop\"}\n\n"
+    },
+    {
+      "arm": "light#2",
+      "level": "light",
+      "http": 200,
+      "reasoningChars": 0,
+      "textChars": 0,
+      "reasoningHead": "",
+      "providerModel": null,
+      "finish": "stop",
+      "usage": null,
+      "inband": null,
+      "bytes": 498,
+      "rawHead": "id:1\nevent:error\ndata:{\"code\":3003,\"message\":\"model service is unavailable\\nerror, status code: 400, message: Unknown error: code = 400 Bad Request, err = \\\"{\\\\\\\"error\\\\\\\":{\\\\\\\"code\\\\\\\":\\\\\\\"InvalidParameter\\\\\\\",\\\\\\\"message\\\\\\\":\\\\\\\"Invalid combination of reasoning_effort and thinking type: high + disabled Request id: 021791083749696b2cfa89c260b9f81b8ea4e20bdedf10fd77c45\\\\\\\",\\\\\\\"param\\\\\\\":\\\\\\\"\\\\\\\",\\\\\\\"type\\\\\\\":\\\\\\\"BadRequest\\\\\\\"}}\\\"\",\"extra\":null}\n\nid:2\nevent:done\ndata:{\"finish_reason\":\"stop\"}\n\n"
+    },
+    {
+      "arm": "high#2",
+      "level": "high",
+      "http": 200,
+      "reasoningChars": 0,
+      "textChars": 0,
+      "reasoningHead": "",
+      "providerModel": null,
+      "finish": "stop",
+      "usage": null,
+      "inband": null,
+      "bytes": 498,
+      "rawHead": "id:1\nevent:error\ndata:{\"code\":3003,\"message\":\"model service is unavailable\\nerror, status code: 400, message: Unknown error: code = 400 Bad Request, err = \\\"{\\\\\\\"error\\\\\\\":{\\\\\\\"code\\\\\\\":\\\\\\\"InvalidParameter\\\\\\\",\\\\\\\"message\\\\\\\":\\\\\\\"Invalid combination of reasoning_effort and thinking type: high + disabled Request id: 021791083749994783c7a6c3b1b89064bd33af8cabace69462804\\\\\\\",\\\\\\\"param\\\\\\\":\\\\\\\"\\\\\\\",\\\\\\\"type\\\\\\\":\\\\\\\"BadRequest\\\\\\\"}}\\\"\",\"extra\":null}\n\nid:2\nevent:done\ndata:{\"finish_reason\":\"stop\"}\n\n"
+    },
+    {
+      "arm": "extra_high#2",
+      "level": "extra_high",
+      "http": 200,
+      "reasoningChars": 0,
+      "textChars": 0,
+      "reasoningHead": "",
+      "providerModel": null,
+      "finish": "stop",
+      "usage": null,
+      "inband": null,
+      "bytes": 498,
+      "rawHead": "id:1\nevent:error\ndata:{\"code\":3003,\"message\":\"model service is unavailable\\nerror, status code: 400, message: Unknown error: code = 400 Bad Request, err = \\\"{\\\\\\\"error\\\\\\\":{\\\\\\\"code\\\\\\\":\\\\\\\"InvalidParameter\\\\\\\",\\\\\\\"message\\\\\\\":\\\\\\\"Invalid combination of reasoning_effort and thinking type: high + disabled Request id: 021791083750265792fe4871af481096c93250cde632fb55b01dd\\\\\\\",\\\\\\\"param\\\\\\\":\\\\\\\"\\\\\\\",\\\\\\\"type\\\\\\\":\\\\\\\"BadRequest\\\\\\\"}}\\\"\",\"extra\":null}\n\nid:2\nevent:done\ndata:{\"finish_reason\":\"stop\"}\n\n"
+    }
+  ]
+}

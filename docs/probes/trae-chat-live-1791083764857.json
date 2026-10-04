@@ -1,0 +1,48 @@
+{
+  "at": "2026-10-04T03:16:04.857Z",
+  "request": {
+    "url": "https://trae-api-cn.mchost.guru/api/agent/v3/llm_utils_chat",
+    "body": {
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "只回复两个字：收到"
+            }
+          ]
+        }
+      ],
+      "model": "glm-5.3",
+      "function": "inline_chat",
+      "request_id": "ee1b182f-e5a3-47f1-b906-aa64c0c09541",
+      "session_id": "probe-live",
+      "stream": true
+    }
+  },
+  "response": {
+    "status": 200,
+    "contentType": "text/event-stream",
+    "headers": {
+      "cache-control": "no-cache",
+      "connection": "keep-alive",
+      "content-type": "text/event-stream",
+      "date": "Sun, 04 Oct 2026 03:16:04 GMT",
+      "eagleid": "7544543517910837645337748e",
+      "server": "Tengine",
+      "server-timing": "inner; dur=226, cdn-cache;desc=MISS,edge;dur=20,origin;dur=282",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "timing-allow-origin": "*",
+      "transfer-encoding": "chunked",
+      "via": "cache16.l2nu20-17[282,0], ens-dynamic1.cn8728[302,0]",
+      "x-tt-logid": "20261004111604E0E9AD53806173FFDAC5",
+      "x-tt-timestamp": "1791083764.818",
+      "x-tt-trace-host": "01f8df4ca2e799916b44603ef21dbab42a96c8f131df9942a2d7b7611bc00fda64a6bfec8374e2a1f94cde57633f4b5aac695ea482b86b296407349ca84d80428afbaeb8676459a4aad94a306ca51e828970d50c99ca1b7bbeb142b74c4d609647",
+      "x-tt-trace-id": "00-261004111604E0E9AD53806173FFDAC5-5F0AC5EA70BEECD9-00",
+      "x-tt-trace-tag": "id=03;cdn-cache=miss;type=dyn"
+    },
+    "bodyHead": "id:1\nevent:error\ndata:{\"code\":3003,\"message\":\"model service is unavailable\\nerror, status code: 400, message: Unknown error: code = 400 Bad Request, err = \\\"{\\\\\\\"error\\\\\\\":{\\\\\\\"code\\\\\\\":\\\\\\\"InvalidParameter\\\\\\\",\\\\\\\"message\\\\\\\":\\\\\\\"Invalid combination of reasoning_effort and thinking type: high + disabled Request id: 0217910837646929cb2d05fdea3c460afef8c14d56932fc426ab9\\\\\\\",\\\\\\\"param\\\\\\\":\\\\\\\"\\\\\\\",\\\\\\\"type\\\\\\\":\\\\\\\"BadRequest\\\\\\\"}}\\\"\",\"extra\":null}\n\nid:2\nevent:done\ndata:{\"finish_reason\":\"stop\"}\n\n",
+    "bodyBytes": 498
+  }
+}

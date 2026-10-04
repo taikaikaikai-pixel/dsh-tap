@@ -60,7 +60,7 @@ import { CREDENTIAL_UNAVAILABLE_MESSAGE } from './providers/codebuddy/errors.js'
 import { UNROUTABLE_MODELS } from './providers/codebuddy/catalog.js'
 import { createTraeProvider } from './providers/trae/index.js'
 import { TRAE_CREDENTIAL_UNAVAILABLE_MESSAGE } from './providers/trae/errors.js'
-import { PROVIDER_ID_RE, createOpenAICompatProvider } from './providers/openai-compat.js'
+import { PROVIDER_ID_RE, createOpenAICompatProvider, rebuildAdapterForEntry } from './providers/openai-compat.js'
 import { QODER_CLIENT_ID } from './providers/qoder/oauth.js'
 import { createQoderProvider } from './providers/qoder/index.js'
 import { applyQoderContextVariant } from './providers/qoder/catalog.js'
@@ -791,7 +791,7 @@ async function testExtraProvider(id) {
   const key = resolveEnvKey(entry.keyRef, DSH_CREDENTIALS_PATH)
   if (!key) throw new Error(`凭据 ${entry.keyRef} 不在环境或 .credentials.yaml 里`)
   const presetHit = PROVIDER_PRESETS.find((p) => p.id === entry.preset)
-  const adapter = createOpenAICompatProvider({ ...entry, fallbackModels: presetHit?.fallbackModels, staticCatalog: presetHit?.staticCatalog })
+  const adapter = rebuildAdapterForEntry(entry, presetHit)
   const models = await adapter.fetchModels(key)
   return { id, modelCount: models.length }
 }
@@ -802,10 +802,13 @@ async function refreshExtraProviderModels(id) {
   if (!entry) throw new Error(`${id} 不在注册表里`)
   const key = resolveEnvKey(entry.keyRef, DSH_CREDENTIALS_PATH)
   if (!key) throw new Error(`凭据 ${entry.keyRef} 不在环境或 .credentials.yaml 里`)
-  // preset 条目带上 fallbackModels/staticCatalog：无 /models 或静态目录的
-  // 上游刷新 = 探针复验 + 沿用兜底/内置清单。
+  // preset 条目经共用接缝重建（与 provider-test 同参）：fallbackModels/
+  // staticCatalog 与档位声明（modelEfforts/reasoningCompat）一起合并 ⇒ 无
+  // /models 或静态目录上游刷新 = 探针复验 + 沿用兜底/内置清单 + **档位声明
+  // 不丢**（providerBlock 按模型 id 重新合并）。0.19.0 修：此前此处裸调
+  // createOpenAICompatProvider 漏传声明字段，每次刷新洗掉「推理等级」档位表。
   const presetHit = PROVIDER_PRESETS.find((p) => p.id === entry.preset)
-  const adapter = createOpenAICompatProvider({ ...entry, fallbackModels: presetHit?.fallbackModels, staticCatalog: presetHit?.staticCatalog })
+  const adapter = rebuildAdapterForEntry(entry, presetHit)
   const models = await adapter.fetchModels(key)
   await writeProviderBlock(id, adapter.modelBlock(models))
   return { id, modelCount: models.length }

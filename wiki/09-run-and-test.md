@@ -79,6 +79,9 @@ TraeWork CN / Qoder CN：各自区块的**区块头右侧勾选框**就是启用
 | `probe-qoder-quota.mjs [--read-only]` | 用量计数器差分（quota/heatmap/summary 前后对比，--read-only 只读） |
 | `probe-qoder-attribution.mjs [--arm N]` | 用量归因梯度实验（裸体/信封/business块/finish/tracking 逐臂判定） |
 | `probe-trae-model-routing.mjs --round 2\|evidence\|3\|4` / `probe-trae-3003-diagnosis.mjs` | Trae 模型改派矩阵（四轮合并，轮次对应原 model-routing/routing-evidence/routing3/routing4） / 3003 故障定位取证 |
+| `probe-trae-efforts.mjs [--model id] [--levels light,high,extra_high] [--repeat N]` | 【真实上游】Trae `reasoning_effort` 方言判定（多臂多采样，证据 docs/probes/trae-efforts-*.json）——2026-10-04 结论：inline_chat 面全臂 3003（内层 `Invalid combination of reasoning_effort and thinking type`）⇒ 暂不出档 |
+| `probe-ark-thinking.mjs [--full-matrix] [--models a,b] [--levels …] [--repeat N] [--emit yaml] [--write <patch.yml>] [--from <证据.json>]` | 【真实上游·只读】Ark `/api/plan` 逐模型思考面实测 → 产出 `reasoningEfforts` 声明：**默认省额度两臂**（baseline+enabled；off 视为未测不臆造，`--write` 保留 patch 既有 off 档），`--full-matrix` 才跑旧三臂全矩阵（baseline/enabled/disabled，可证 off）；`--repeat N` 每臂 N 次聚合 min/mean/max；`--emit` 打印、`--write` 直接写 profile patch（留 `.bak`）、`--from` 复用既有证据不打上游。新 Ark 模型进选择器 = 先省额度跑这条，要 off 结论再加 `--full-matrix`（证据 docs/probes/ark-thinking-*.json） |
+| `probe-effort-gaps.mjs [--url …] [--patch <cordis.patch.yml>]` | **免凭据**缺口检测：插件侧声明（`model-list` / `qoder.models.efforts`）× 路由条目实况（宿主配置层）对账，报「声明了却没到条目」与「缺 compat」；只对账**已启用**模型（停用项不算缺口）。发版前跑一次（踩坑 #64 的回归眼） |
 | `trae-model-catalog.mjs` | Trae 目录提取 CLI（纯函数可作库导入，import.meta 守卫） |
 | `hermes-probe-dev-role.mjs --round 1\|2\|3` | developer 角色事件取证（三轮合并，轮次对应原 -role/-role2/-role3） |
 

@@ -57,14 +57,37 @@ export async function fetchOpenAIModels(baseURL, apiKey, { timeoutMs = 15000 } =
  * 组装 llm-pi-ai provider 块（写 settings.yaml 的形状）。
  * apiKeyEnv 指向 ~/.dsh/.credentials.yaml 里的 keyRef；sizes 不给就吃
  * dsh 默认值（defaultContextWindow 262144 / defaultMaxTokens 32768）。
+ *
+ * **思考档位（0.19.0）**：preset 可用 `modelEfforts`（`{ '<模型 id>': { <档位>: <线值> } }`）
+ * 声明逐模型档位表——写入时按模型 id 合并进条目的 `reasoningEfforts`，宿主
+ * 「推理等级」据此出档；`provider-refresh`（GET /models 重建清单）走同一函数，
+ * **声明不丢**。两条纪律：
+ *   a) **必须逐条有实测/厂商文档依据**（踩坑 #42：能力声明 ≠ 线值，不批量臆造；
+ *      上游没验证过的 provider 就保持不声明 = 不出档，而不是摆假档位）；
+ *   b) 档位拼写逐上游不同（OpenAI 官方 `low/medium/high`、OpenRouter 走
+ *      `reasoning:{effort}` 另一方言…）——本函数只透传声明，不做拼写映射；
+ *      OpenRouter 这类需要换 `thinkingFormat` 的上游要单独给 preset 加 compat。
+ * `reasoningCompat: true` 时块带 `compat.supportsReasoningEffort`：**缺它 pi-ai
+ * 出站不会把选中档位写成 `reasoning_effort`**（选择器出档但请求里没这个键）。
  */
 export function providerBlock(preset, models) {
+  const efforts = preset.modelEfforts && typeof preset.modelEfforts === 'object' ? preset.modelEfforts : {}
+  const entries = models.map((m) => {
+    const declared = efforts[m.id]
+    return {
+      ...(m.name ? { id: m.id, name: m.name } : { id: m.id }),
+      ...(declared && typeof declared === 'object' && Object.keys(declared).length ? { reasoningEfforts: declared } : {}),
+    }
+  })
   return {
     displayName: preset.displayName,
     api: 'openai-completions',
     baseURL: preset.baseURL,
     apiKeyEnv: keyRefFor(preset.id),
-    models: models.map((m) => (m.name ? { id: m.id, name: m.name } : { id: m.id })),
+    ...(preset.reasoningCompat === true
+      ? { compat: { thinkingFormat: 'openai', supportsReasoningEffort: true } }
+      : {}),
+    models: entries,
   }
 }
 
@@ -132,4 +155,23 @@ export function createOpenAICompatProvider(preset) {
     },
     modelBlock: (models) => providerBlock({ ...preset }, models),
   }
+}
+
+/**
+ * 登记册条目重建 adapter（index.js 的 test/refresh 两路共用接缝）：registry
+ * entry 打底（displayName/baseURL 用添加时快照），preset 命中时合并先验
+ * 清单（fallbackModels/staticCatalog）与思考档位声明（modelEfforts/
+ * reasoningCompat）。refresh 拿重建的 adapter 重铺 provider 块——档位声明
+ * 必须随行，漏带 = 每次刷新把宿主「推理等级」的档位表洗掉（0.19.0 修：
+ * 此前 refresh 裸调 createOpenAICompatProvider 漏传两个声明字段；
+ * 回归 verify-providers 第 10 节）。
+ */
+export function rebuildAdapterForEntry(entry, preset) {
+  return createOpenAICompatProvider({
+    ...entry,
+    fallbackModels: preset?.fallbackModels,
+    staticCatalog: preset?.staticCatalog,
+    modelEfforts: preset?.modelEfforts,
+    reasoningCompat: preset?.reasoningCompat,
+  })
 }
