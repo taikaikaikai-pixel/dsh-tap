@@ -210,14 +210,16 @@ flowchart TB
 
 ## 逐模型调节（qoderModelPrefs，2026-09-22）
 
-设置卡 Qoder 区每行两个 select（控件仿 Qoder 官方客户端）：**思考强度**（档位 off/low/medium/high/max，默认=不注入）与**上下文长度**（选项 = 目录 `context_config` 变体，如 Qwen3.8-Max 的 200K/400K/1M；无变体的模型不出该控件）。
+设置卡 Qoder 区每行两个 select（控件仿 Qoder 官方客户端）：**思考强度**（选项 = **该模型目录声明的档位**，默认=不注入）与**上下文长度**（选项 = 目录 `context_config` 变体，如 Qwen3.8-Max 的 200K/400K/1M；无变体的模型不出该控件）。
 
 - **存储**：文件层 `qoderModelPrefs`（`~/.dsh/codebuddy-plugin.json`）——`{[id]: {effort?, contextVariant?}}`，只存已设键；**完整替换语义**（patch 发全量期望态，`{}` = 删记录回默认）；校验严格（未知键/非法档位/未知变体/目录外 id 一律 400 带中文原因，踩坑 #7）。
+- **思考档位真源 = 目录声明（0.19.0）**：`thinking_config.enabled.efforts` 的键 ∪（声明了 `disabled` 时的 `off`），经 `qoderEffortTiers()`（catalog.js）逐模型给出；**各上游拼写不同**（Qoder 有 `xhigh`、CodeBuddy 有 `max`、Trae 是 `light/high`），所以卡里不再有固定表。目录**没声明命名档位**的模型（如 `auto`/`qmodel`）**不出该 select**，写入也拒（宁可不给控件，也不摆假档位，踩坑 #42 同纪律）。
+- **写入校验按模型**（`setQoderModelPrefs`）：允许集 = 该模型声明档位 ∪ 其**存量值**（R3 兼容——UI 发的是全量期望态，目录不再声明的旧拼写（如 `qmodel_38max` 的 `max`）不该在只改上下文长度时被判非法）；**新设**未声明档位仍 400，报错列出该模型自己的档位表。读侧同样保留「声明 ∪ 旧固定表」内的存量值，不静默丢。
 - **写路径**：patch action `qoderModelSetPrefs` → `setQoderModelPrefs` → 写文件层 → `syncQoderModelsToDshSettings` 镜像。
 - **镜像**：settings.yaml 的 `providers.qoder.models` 条目仅在选中变体时改 `contextWindow`（= 变体 token_count）；未选/变体消失回落目录默认档；`variants` 不进 settings.yaml（镜像形状零扰动）。
-- **读侧契约**：GET /dsh-tap/settings 的 `qoder.models` 带 `modelPrefs`（当前值）与 `variants`（`[{name,tokenCount,isDefault}]`，无变体 → 缺省/空数组）——UI 唯一数据源。
+- **读侧契约**：GET /dsh-tap/settings 的 `qoder.models` 带 `modelPrefs`（当前值）、`variants`（`[{name,tokenCount,isDefault}]`，无变体 → 缺省/空数组）与 `efforts`（`{id: [档位]}`，未声明 → 空数组）——UI 唯一数据源（`qoder-model-list` action 的 `view` 同源同形）。
 - **出站**：见 handleChat 第 5 步（补默认注入，客户端带值不覆盖）。
-- **宿主选择器入口（2026-10-04）**：目录的 `thinking_config` 经 `qoderReasoningEfforts()`（catalog.js）投影进镜像条目的 `reasoningEfforts`，镜像块另带 `compat: {thinkingFormat:'openai', supportsReasoningEffort:true}` ⇒ 宿主输入框的「推理等级」对**目录声明了命名档位**的模型出档（实测 9/14：`qmodel_38max`/`qfmodel` = off/low/medium/xhigh、`dmodel`/`gm51model` = off/high/max、`gmodel`/`kmodel`/`kmodel_latest` = low/high/max、`gfmodel` = high/max、`dfmodel` = off/low/high/max；`auto`/`qmodel`/`qmodel_latest`/`q37fmodel`/`mmodel` 目录没声明命名档位 → 不出，不臆造）。两条口径分清：**设置卡 select** = 逐模型**持久默认**（写 `qoderModelPrefs`，网关"客户端未带时补默认"），**宿主「推理等级」** = **本会话选择**（显式带 `reasoning_effort`，网关不覆盖）——客户端带值恒赢。设置卡选项表仍是固定 `off/low/medium/high/max`，与目录声明的档位名（含 `xhigh`）不逐一对应；**档位真源是目录声明**，宿主选择器按它出档。生效方式：镜像属启动期组合根，**重启 dsh**（desktop = 退出并重启桌面应用）后可见。
+- **宿主选择器入口（2026-10-04）**：目录的 `thinking_config` 经 `qoderReasoningEfforts()`（catalog.js）投影进镜像条目的 `reasoningEfforts`，镜像块另带 `compat: {thinkingFormat:'openai', supportsReasoningEffort:true}` ⇒ 宿主输入框的「推理等级」对**目录声明了命名档位**的模型出档（实测 9/14：`qmodel_38max`/`qfmodel` = off/low/medium/xhigh、`dmodel`/`gm51model` = off/high/max、`gmodel`/`kmodel`/`kmodel_latest` = low/high/max、`gfmodel` = high/max、`dfmodel` = off/low/high/max；`auto`/`qmodel`/`qmodel_latest`/`q37fmodel`/`mmodel` 目录没声明命名档位 → 不出，不臆造）。两条口径分清：**设置卡 select** = 逐模型**持久默认**（写 `qoderModelPrefs`，网关"客户端未带时补默认"），**宿主「推理等级」** = **本会话选择**（显式带 `reasoning_effort`，网关不覆盖）——客户端带值恒赢。0.19.0 起**卡与宿主同一真源**（同一份目录声明，`efforts` 字段就是它），不再各写一套拼写。生效方式：镜像属启动期组合根，**重启 dsh**（desktop = 退出并重启桌面应用）后可见；卡侧再刷新页面。
 
 ## 错误处理（无独立 errors.js——归网关内联映射）
 

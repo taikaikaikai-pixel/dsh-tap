@@ -45,6 +45,19 @@ export function qoderReasoningEfforts(entry) {
   return table
 }
 
+/**
+ * 该模型**展示用**档位清单——设置卡 select 与宿主「推理等级」的共同真源。
+ * = 线值表的键（顺序随目录声明）；含 `off` 仅当目录声明了 `disabled`。
+ * 目录没声明命名档位（如 auto/qmodel）→ `[]`：卡里不出该 select，也不接受
+ * effort 写入（宁可不给控件，也不摆假档位，踩坑 #42 同纪律）。
+ * @param {object} entry 目录原始条目
+ * @returns {string[]} 档位名数组（可能为空）
+ */
+export function qoderEffortTiers(entry) {
+  const table = qoderReasoningEfforts(entry)
+  return table ? Object.keys(table) : []
+}
+
 /** 目录条目 → dsh profile。 */
 export function projectQoderModel(entry) {
   if (!entry || typeof entry.key !== 'string' || !entry.key) return null
@@ -120,9 +133,13 @@ export async function fetchQoderCatalog(cosy, cred, inferBaseURL) {
   // 上下文变体清单逐模型保留（不进 profiles——镜像块形状不变，见 index.js 镜像纪律）
   const variants = {}
   for (const e of entries) variants[e.key] = projectQoderVariants(e)
+  // 展示用档位清单逐模型保留（同 variants：不进 profiles——镜像里的档位表由
+  // projectQoderModel 的 reasoningEfforts 决定；这里只服务设置卡 select）。
+  const efforts = {}
+  for (const e of entries) efforts[e.key] = qoderEffortTiers(e)
   // 原始条目按键索引（网关出站信封的 model_config 需要 is_vl/is_reasoning/
   // max_input_tokens 等未投影字段，2026-09-22 用量归因信封对齐官方客户端）
   const byKey = {}
   for (const e of entries) byKey[e.key] = e
-  return { profiles, sources, variants, entries: byKey, raw: body }
+  return { profiles, sources, variants, efforts, entries: byKey, raw: body }
 }

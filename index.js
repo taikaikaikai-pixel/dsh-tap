@@ -1012,10 +1012,33 @@ function readQoderModelState() {
 
 // 逐模型偏好：{ [id]: { effort?, contextVariant? } }，与 qoderModelState 并列的
 // 独立文件层键（其形状是 disabled 集合字典，与 prefs 记录不对称，故不扩它）。
-// 只存已设置的键、空记录不落盘（= 默认）。effort 档位拼写 off/low/medium/high/
-// max（cordis.patch.yml verified 表）；contextVariant 是目录 context_config 变体名，
-// 镜像时换成 contextWindow（applyQoderContextVariant）。
+// 只存已设置的键、空记录不落盘（= 默认）。effort 的**真源是目录逐模型声明**
+// （providers/qoder/catalog.js 的 qoderEffortTiers ← thinking_config.enabled.efforts
+// ∪ disabled→off）；contextVariant 是目录 context_config 变体名，镜像时换成
+// contextWindow（applyQoderContextVariant）。
+//
+// QODER_EFFORT_LEVELS 不再是 UI/校验真源，只作**存量兼容网**（R3）：0.17 及以前
+// 写下的、目录未声明的拼写（如 qmodel_38max 的 max）读侧保留、不静默丢；目录未
+// 同步的启动窗口内也仍认这五个拼写。新写入一律以目录声明为准（qoderEffortScope）。
 const QODER_EFFORT_LEVELS = ['off', 'low', 'medium', 'high', 'max']
+
+/** 目录为该模型声明的档位（未同步 / 未声明命名档位 → []）。 */
+function qoderDeclaredTiers(id) {
+  const tiers = qoderProvider.catalogView()?.efforts?.[id]
+  return Array.isArray(tiers) ? tiers : []
+}
+
+/**
+ * 写入校验的允许集 = 目录声明 ∪ {该模型当前存量值}。
+ * 含存量值是为 R3：UI 提交的是**全量期望态**（effort + contextVariant 一起发），
+ * 若目录不再声明存量档位（如 max），只改上下文长度也会被误判非法。新设一个
+ * 目录未声明的档位仍然拒（允许集里没有它）。
+ */
+function qoderEffortScope(id) {
+  const declared = qoderDeclaredTiers(id)
+  const stored = readQoderModelPrefs()[id]?.effort
+  return stored ? [...new Set([...declared, stored])] : declared
+}
 
 function readQoderModelPrefs() {
   const raw = readFileLayer().qoderModelPrefs
@@ -1024,7 +1047,12 @@ function readQoderModelPrefs() {
   for (const [id, v] of Object.entries(raw)) {
     if (!v || typeof v !== 'object' || Array.isArray(v)) continue
     const rec = {}
-    if (typeof v.effort === 'string' && QODER_EFFORT_LEVELS.includes(v.effort)) rec.effort = v.effort
+    // 读侧保留规则：非空字符串且（目录声明了它 ∪ 旧固定表认得它）。前者覆盖
+    // xhigh 这类上游专有拼写，后者是存量兼容网（R3）；两者之外的手改垃圾丢弃。
+    if (typeof v.effort === 'string' && v.effort
+      && (qoderDeclaredTiers(id).includes(v.effort) || QODER_EFFORT_LEVELS.includes(v.effort))) {
+      rec.effort = v.effort
+    }
     if (typeof v.contextVariant === 'string' && v.contextVariant) rec.contextVariant = v.contextVariant
     if (Object.keys(rec).length) out[id] = rec
   }
@@ -1086,7 +1114,8 @@ async function setQoderModelEnabled({ id, enabled }) {
 /**
  * qoderModelSetPrefs 写路径（UI 契约：patch.qoderModelSetPrefs = { id, prefs }）。
  * prefs 是该模型记录的**完整替换**——只存已设置的键，空对象 = 删记录回默认。
- * effort 校验档位拼写；contextVariant 必须命中该模型目录变体（无变体模型拒收）。
+ * effort 校验按**该模型的目录声明**（qoderDeclaredTiers）∪ 其存量值（R3 兼容）；
+ * contextVariant 必须命中该模型目录变体（无变体模型拒收）。
  */
 async function setQoderModelPrefs({ id, prefs }) {
   if (typeof id !== 'string' || !id.trim()) throw new Error('qoderModelSetPrefs 需要 id')
@@ -1098,8 +1127,11 @@ async function setQoderModelPrefs({ id, prefs }) {
   if (unknown.length) throw new Error(`prefs 不支持的键：${unknown.join(', ')}`)
   const rec = {}
   if (prefs.effort !== undefined) {
-    if (!QODER_EFFORT_LEVELS.includes(prefs.effort)) {
-      throw new Error(`effort 档位必须是 ${QODER_EFFORT_LEVELS.join('/')} 之一`)
+    const declared = qoderDeclaredTiers(id)
+    if (!qoderEffortScope(id).includes(prefs.effort)) {
+      throw new Error(declared.length
+        ? `effort 档位必须是该模型目录声明的 ${declared.join('/')} 之一`
+        : `该模型目录未声明思考档位，effort 只能清除不能新设`)
     }
     rec.effort = prefs.effort
   }
@@ -1443,6 +1475,10 @@ function settingsView(resolveNow) {
         // 每模型上下文变体清单（目录 context_config；无变体 = []，UI 据此隐藏
         // 该模型的上下文选择）。
         variants: qoderProvider.catalogView()?.variants ?? {},
+        // 每模型**目录声明的思考档位**（thinking_config → qoderEffortTiers；
+        // 未声明命名档位 = []）。设置卡 select 的选项真源——与宿主「推理等级」
+        // 同一份声明，UI 不再用固定表（0.19.0）。
+        efforts: qoderProvider.catalogView()?.efforts ?? {},
         sync: qoderProvider.catalogView()
           ? { at: qoderProvider.catalogView().at, count: qoderProvider.catalogView().count }
           : null,

@@ -645,7 +645,7 @@ console.log('\n[18] 出站 tool 配对 + 可见性修复（sanitizeToolPairing +
 console.log('\n[15] 目录投影（fetchQoderCatalog）')
 {
   const { createCosyRuntime } = await import('../providers/qoder/cosy.js')
-  const { fetchQoderCatalog, applyQoderContextVariant, qoderReasoningEfforts } = await import('../providers/qoder/catalog.js')
+  const { fetchQoderCatalog, applyQoderContextVariant, qoderReasoningEfforts, qoderEffortTiers } = await import('../providers/qoder/catalog.js')
   const { fileURLToPath } = await import('node:url')
   const wasmPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'providers', 'qoder', 'qoder_auth.wasm')
   const cosy = createCosyRuntime({ wasmPath })
@@ -673,6 +673,9 @@ console.log('\n[15] 目录投影（fetchQoderCatalog）')
   ok(qoderReasoningEfforts({ key: 'x', thinking_config: { disabled: {}, enabled: { is_default: true } } }) === null, 'enabled 无命名档位 → null（不摆空档位）')
   ok(qoderReasoningEfforts({ key: 'x' }) === null && qoderReasoningEfforts(null) === null, '无 thinking_config / 空条目 → null')
   ok(qoderReasoningEfforts({ key: 'x', thinking_config: { enabled: { efforts: { high: {}, max: { is_default: true } } } } })?.off === undefined, 'enabled 无 disabled → 无 off 档（不臆造关思考）')
+  ok(JSON.stringify(result.efforts.qmodel_38max) === JSON.stringify(['off', 'low', 'medium', 'xhigh']), '展示档位清单（设置卡 select 真源）= 线值表的键')
+  ok(Array.isArray(result.efforts.auto) && result.efforts.auto.length === 0, '无 thinking_config → 展示档位空数组（不出控件）')
+  ok(JSON.stringify(qoderEffortTiers({ key: 'x', thinking_config: { enabled: { efforts: { light: {}, high: {} } } } })) === JSON.stringify(['light', 'high']), '档位拼写照抄目录（Trae/其他上游专有拼写也不改写）')
   ok(result.sources.qmodel_38max === 'system', 'sources 映射保留')
   ok(JSON.stringify(result.variants.qmodel_38max) === JSON.stringify([
     { name: '200K', tokenCount: 200000, isDefault: true },
@@ -862,6 +865,8 @@ console.log('\n[17] qoderModelSetPrefs 全链路：apply() 起真组合根，moc
     { name: '1M', tokenCount: 1000000, isDefault: false },
   ]), 'GET 契约：qoder.models.variants 逐模型清单')
   ok(Array.isArray(g.qoder.models.variants.auto) && g.qoder.models.variants.auto.length === 0, 'GET 契约：无变体模型 → 空数组')
+  ok(JSON.stringify(g.qoder.models.efforts.qmodel_38max) === JSON.stringify(['off', 'low', 'medium', 'xhigh']), 'GET 契约：qoder.models.efforts 逐模型档位（设置卡 select 真源）')
+  ok(Array.isArray(g.qoder.models.efforts.auto) && g.qoder.models.efforts.auto.length === 0, 'GET 契约：目录未声明命名档位 → 空数组（不出控件）')
   ok(JSON.stringify(g.qoder.models.modelPrefs) === '{}', 'GET 契约：初始 modelPrefs 为空字典')
   ok(!JSON.stringify(g).includes('dt-e2e'), 'GET 响应脱敏：access token 不进设置视图（审计 [26] 同纪律）')
 
@@ -873,16 +878,16 @@ console.log('\n[17] qoderModelSetPrefs 全链路：apply() 起真组合根，moc
   ok(JSON.stringify(block.compat) === JSON.stringify({ thinkingFormat: 'openai', supportsReasoningEffort: true }), '镜像块声明 compat（pi-ai 才会把选中档位写成 reasoning_effort）')
   ok(block.models.find((m) => m.id === 'qmodel_38max').contextWindow === 200000, '未选变体 → contextWindow 维持目录默认档')
 
-  let r = await call('POST', { patch: { qoderModelSetPrefs: { id: 'qmodel_38max', prefs: { effort: 'high', contextVariant: '1M' } } } })
-  ok(r.status === 200 && r.json.ok === true, 'qoderModelSetPrefs → 200 ok')
-  ok(JSON.stringify(readJson(FILE_LAYER).qoderModelPrefs) === JSON.stringify({ qmodel_38max: { effort: 'high', contextVariant: '1M' } }), '写文件层 qoderModelPrefs（只存已设置键）')
+  let r = await call('POST', { patch: { qoderModelSetPrefs: { id: 'qmodel_38max', prefs: { effort: 'xhigh', contextVariant: '1M' } } } })
+  ok(r.status === 200 && r.json.ok === true, 'qoderModelSetPrefs → 200 ok（目录声明的档位 xhigh）')
+  ok(JSON.stringify(readJson(FILE_LAYER).qoderModelPrefs) === JSON.stringify({ qmodel_38max: { effort: 'xhigh', contextVariant: '1M' } }), '写文件层 qoderModelPrefs（只存已设置键）')
   doc = YAML.parse(readFileSync(SETTINGS_YAML, 'utf8'))
   ok(doc['llm-pi-ai'].providers.qoder.models.find((m) => m.id === 'qmodel_38max').contextWindow === 1000000, '镜像 contextWindow = 选中变体 token_count')
   ok(r.json.qoder.models.modelPrefs.qmodel_38max.contextVariant === '1M', 'POST 响应回带 qoder 区读侧一致')
 
   const yamlBefore = readFileSync(SETTINGS_YAML, 'utf8')
   const layerBefore = readFileSync(FILE_LAYER, 'utf8')
-  r = await call('POST', { patch: { qoderModelSetPrefs: { id: 'qmodel_38max', prefs: { effort: 'high', contextVariant: '1M' } } } })
+  r = await call('POST', { patch: { qoderModelSetPrefs: { id: 'qmodel_38max', prefs: { effort: 'xhigh', contextVariant: '1M' } } } })
   ok(r.json.ok === true, '重复提交同值 → ok')
   ok(readFileSync(SETTINGS_YAML, 'utf8') === yamlBefore && readFileSync(FILE_LAYER, 'utf8') === layerBefore, '幂等：settings.yaml 与文件层逐字节不变')
 
@@ -895,7 +900,10 @@ console.log('\n[17] qoderModelSetPrefs 全链路：apply() 起真组合根，moc
   ok(r.json.ok === true && JSON.stringify(readJson(FILE_LAYER).qoderModelPrefs ?? {}) === '{}', '空 prefs = 删记录回默认')
 
   r = await call('POST', { patch: { qoderModelSetPrefs: { id: 'qmodel_38max', prefs: { effort: 'ultra' } } } })
-  ok(r.status === 400 && /effort 档位必须是/.test(r.json?.error ?? ''), '非法档位 → 400 带原因')
+  ok(r.status === 400 && /effort 档位必须是该模型目录声明的/.test(r.json?.error ?? ''), '非法档位 → 400 且报错列出该模型自己的档位表')
+  ok(/off\/low\/medium\/xhigh/.test(r.json?.error ?? ''), '错误消息里的档位表 = 目录声明（不是固定五档）')
+  r = await call('POST', { patch: { qoderModelSetPrefs: { id: 'qmodel_38max', prefs: { effort: 'max' } } } })
+  ok(r.status === 400, '目录未声明的档位（max）新设被拒（存量兼容不放行新值）')
   r = await call('POST', { patch: { qoderModelSetPrefs: { id: 'qmodel_38max', prefs: { contextVariant: '404K' } } } })
   ok(r.status === 400 && /没有名为/.test(r.json?.error ?? ''), '未知变体名 → 400 带原因')
   r = await call('POST', { patch: { qoderModelSetPrefs: { id: 'ghost', prefs: { effort: 'high' } } } })
@@ -903,7 +911,17 @@ console.log('\n[17] qoderModelSetPrefs 全链路：apply() 起真组合根，moc
   r = await call('POST', { patch: { qoderModelSetPrefs: { id: 'auto', prefs: { contextVariant: '200K' } } } })
   ok(r.status === 400, '无变体模型拒收 contextVariant')
   r = await call('POST', { patch: { qoderModelSetPrefs: { id: 'auto', prefs: { effort: 'low' } } } })
-  ok(r.json.ok === true, '无变体模型可设 effort')
+  ok(r.status === 400 && /未声明思考档位/.test(r.json?.error ?? ''), '目录未声明档位的模型：effort 拒收（不出控件也不收写入）')
+
+  // R3 存量兼容：旧版本写下的、目录未声明的档位（如 max）不静默丢，且可随全量
+  // 期望态重发（只改上下文长度不该被判非法）。
+  writeJson(FILE_LAYER, { ...readJson(FILE_LAYER), qoderModelPrefs: { qmodel_38max: { effort: 'max' } } })
+  g = (await call('GET')).json
+  ok(g.qoder.models.modelPrefs.qmodel_38max?.effort === 'max', 'R3：存量未声明档位读侧保留（不静默丢）')
+  r = await call('POST', { patch: { qoderModelSetPrefs: { id: 'qmodel_38max', prefs: { effort: 'max', contextVariant: '1M' } } } })
+  ok(r.status === 200 && r.json.ok === true, 'R3：存量值可随全量期望态重发（不被判非法）')
+  r = await call('POST', { patch: { qoderModelSetPrefs: { id: 'qmodel_38max', prefs: { effort: 'medium', contextVariant: '1M' } } } })
+  ok(r.status === 200 && readJson(FILE_LAYER).qoderModelPrefs.qmodel_38max.effort === 'medium', 'R3：改成目录声明档位正常（存量值不锁死）')
 
   if (disposeFn) disposeFn()
   ui.close()

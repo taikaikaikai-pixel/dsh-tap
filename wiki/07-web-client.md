@@ -36,7 +36,7 @@ window.__ModuleLoader__.load({
 |---|---|---|
 | CodeBuddy | `login` / `models` / `tools` / `bridge` | 凭据（登录方式、多 Key 管理与脱敏列表、env 引用、失败冷却）、模型（同步目录 + 筛选 + 逐模型启停 + ctx/输出幽灵输入 + 思考档位 select）、工具（搜索与抓取开关/条数/正文上限、生图开关/模型）、网关（流式桥开关、端口、会话头归因、会话头格式、每会话并发上限）、高级（`baseURL`） |
 | TraeWork CN | `trae` | 凭据（OAuth 登录/登出 + 令牌状态行 + **余额行**（IDE/work 双池，0.11.0））、模型（同步目录 + 筛选 + 逐模型启停）、网关（:3902 端口、聊天传输、首字节超时）、高级（认证 / 聊天 / 登录域）。**启用开关只在区块头** |
-| Qoder CN | `qoder` | 凭据（设备流登录/登出，pending 3s 轮询收敛、needsRelogin 引导重登 + **余额行**（附加/订阅配额，0.11.0））、模型（同步目录 + 筛选 + 启停 + 思考强度/上下文变体两个 select）、网关（:3903 端口）、高级（登录域 / OpenAPI / infer / client_id）。**启用开关只在区块头** |
+| Qoder CN | `qoder` | 凭据（设备流登录/登出，pending 3s 轮询收敛、needsRelogin 引导重登 + **余额行**（附加/订阅配额，0.11.0））、模型（同步目录 + 筛选 + 启停 + 思考强度/上下文变体两个 select——**思考档位选项来自服务端 `qoder.models.efforts`（= 目录逐模型声明），无声明不出控件**，0.19.0）、网关（:3903 端口）、高级（登录域 / OpenAPI / infer / client_id）。**启用开关只在区块头** |
 | 通用 | `usage` / `providers` / `hostrecon` | 额度与用量（hero 大数字 + 周期进度条、资源包聚合、今日/累计统计卡、轮次表、手动「刷新」与时间戳）、服务商（preset/自定义添加、刷新模型、删除、本机凭据扫描导入）、宿主实况（0.11.0：镜像/web 钉选对账，自身零请求） |
 
 除上表外每个 schema 字段都有落点：`keyCooldownMs` 在 CodeBuddy·凭据、`quotaTotalManual` 在通用·额度与用量（api-key 估算语境）。
