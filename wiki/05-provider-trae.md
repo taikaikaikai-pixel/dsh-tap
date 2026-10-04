@@ -28,10 +28,11 @@ const provider = createTraeProvider({
 })
 ```
 
-返回 provider：`{ id, oauth, gateway, syncCatalog({dbPath}), catalogView(), catalogIds(), credentialView() }`。
+返回 provider：`{ id, oauth, gateway, syncCatalog({dbPath}), catalogView(), syncView(), catalogIds(), credentialView() }`。
 
-- `syncCatalog`：从本机 state.vscdb 拉一次目录（单飞语义在调用方），成功换新 `catalogState`；
-- `catalogView()`：`{ at, count, candidate, profiles } | null`；
+- `syncCatalog`：从本机 state.vscdb 拉一次目录（单飞语义在调用方），成功换新 `catalogState`、清 `lastSyncError`；失败记 `lastSyncError`（返回 `{ok:false, error, kept}`）；
+- `catalogView()`：`{ at, count, candidate, profiles, efforts } | null`（`efforts` = 逐模型目录声明档位原文拼写，设置卡 select 与 `traeModelSetPrefs` 校验的真源）；
+- `syncView()`：设置卡模型区的同步状态——成功 `{at,count,candidate}`，失败附 `error`（kept 场景连同旧计数；从未成功则只有 `error`）——失败原因由此浮到 UI（G2）；
 - `credentialView()`：OAuth 视图（设置卡）。
 
 ## oauth.js — 自持设备密钥的 OAuth 设备流
@@ -83,8 +84,8 @@ export function fetchLocalCatalog({ dbPath }) // { profiles, catalog, fetchedAt,
 ```
 
 - 纯函数复用 `scripts/trae-model-catalog.mjs`（`discoverStateDbs` / `copySqliteForRead` / `readModelListCandidates` / `selectDefaultCandidate` / `normalizeCatalog`——该脚本 CLI 入口带 import.meta 守卫，作为库导入不执行 main）。
-- 映射规则：只收 **preset 型**条目（`provider` 为空的；deepseek//… BYOK 条目路由到用户自己的 provider 会失败）；`contextWindow` 取 `contextWindowDefault` 回落 `contextWindowMax`（数组取最大档）；`maxTokens` 取 `maxOutputTokens`；`multimodal → input: [text, image]`。
-- 提取过程：发现 state.vscdb → **临时副本**读 SQLite（不碰活库）→ 临时目录用后即删。
+- 映射规则：只收 **preset 型**条目（`provider` 为空的；deepseek//… BYOK 条目路由到用户自己的 provider 会失败）；`contextWindow` 取 `contextWindowDefault` 回落 `contextWindowMax`（数组取最大档）；`maxTokens` 取 `maxOutputTokens`；`multimodal → input: [text, image]`；目录逐模型 `reasoning_effort_config:{support_thinking,options,default_level}` → `reasoningEfforts`（**键 = 宿主枚举映射 light→low/high→high/extra_high→xhigh，值 = 声明拼写**——宿主 schema 对键有固定枚举，直抄会被整块拒收，踩坑 #66）。
+- 提取过程：发现 state.vscdb（**win32 无参直查 `os.homedir()/AppData/Roaming/{产品目录}/…`，WSL 扫 `/mnt/c/Users/*/…`**，踩坑 #67）→ **临时副本**读 SQLite（不碰活库）→ 临时目录用后即删。
 
 ## gateway.js — OpenAI↔Trae 翻译网关（:3902）
 
@@ -180,4 +181,4 @@ flowchart TB
 - inline 传输模型恒为账户默认；需要真实模型选择请切 remote（设置卡"聊天传输"）。
 - remote 不支持 dsh tools；带 tools 请求会被明确拒绝。
 - raw 面限流 4011 紧；remote 面有排队。
-- `reasoning_effort` 方言未对 Trae 网关验证（patch 的 trae 路由不带 compat 声明）。
+- ~~`reasoning_effort` 方言未对 Trae 网关验证~~（2026-10-04 G3 已出档）：remote 通道 `custom_model.reasoning_effort` 是官方线缆字段（bundle 取证 + 探针接受面证实），宿主选择器经镜像 `reasoningEfforts` + `compat.supportsReasoningEffort` 出档，设置卡逐模型 prefs（`traeModelSetPrefs`）与宿主选择器平行生效（网关出站：客户端带值优先、prefs 补默认）；**inline 面终局不可控**（scene 钉死 thinking=disabled，客户端字段无法翻转，全臂 3003——见 docs/diagnosis-trae-3003.md 补记与 docs/probes/trae-thinking-scene-*.json）。档位效果方向性未定论（2 采样 INCONCLUSIVE），用户不应期待高档位必然思考更多。
