@@ -23,7 +23,7 @@
 
 import { createHash } from 'node:crypto'
 import { mkdtempSync, mkdirSync, copyFileSync, existsSync, statSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { join, dirname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
@@ -34,6 +34,8 @@ import { DatabaseSync } from 'node:sqlite'
 const MODEL_LIST_KEY_SUFFIX = 'AI.agent.model.model_list_map'
 // Windows product dirs known to host the same layout; discovery scans both.
 const PRODUCT_DIRS = ['TRAE SOLO CN', 'TraeWork CN']
+// WSL 默认扫描根。Windows 原生进程里 /mnt/c 不存在——win32 无参发现走 homedir
+// 直查（见 discoverStateDbs）。
 const DEFAULT_USERS_ROOT = '/mnt/c/Users'
 
 const DEFAULT_OUT_JSON = 'docs/probes/trae-model-catalog.json'
@@ -166,27 +168,42 @@ export function findForbiddenKeys(value, path = '$') {
 // ---------------------------------------------------------------------------
 // db discovery / copy / read
 
-/** Scan /mnt/c/Users/&lt;user&gt;/AppData/Roaming/&lt;product&gt;/User/globalStorage for
+/** Scan &lt;userDir&gt;/AppData/Roaming/&lt;product&gt;/User/globalStorage for
  *  state.vscdb files. Returns [{dbPath, mtimeMs}] sorted newest-first; [] when
- *  nothing matches. */
-export function discoverStateDbs(usersRoot = DEFAULT_USERS_ROOT) {
+ *  nothing matches.
+ *
+ *  无参调用的默认扫描按平台分路（桌面 dsh 是 Windows 原生进程，无 /mnt/c）：
+ *    - win32：当前用户主目录即"用户目录"，直查 home/AppData/Roaming/<产品>/…；
+ *    - 其他（WSL）：扫 usersRoot（默认 /mnt/c/Users）下逐用户目录。
+ *  显式传 usersRoot 时两平台同行为（逐用户扫描）。 */
+export function discoverStateDbs(usersRoot, { platform = process.platform, home = homedir() } = {}) {
   const found = []
-  let users
-  try {
-    users = readdirSync(usersRoot, { withFileTypes: true })
-  } catch {
-    return [] // no /mnt/c (not WSL) or unreadable root — not an error
+  const pushIfFile = (dbPath) => {
+    try {
+      const st = statSync(dbPath)
+      if (st.isFile()) found.push({ dbPath, mtimeMs: st.mtimeMs })
+    } catch {
+      // absent — skip
+    }
   }
-  for (const entry of users) {
-    if (!entry.isDirectory()) continue
+  const scanUserDir = (userDir) => {
     for (const product of PRODUCT_DIRS) {
-      const dbPath = join(usersRoot, entry.name, 'AppData', 'Roaming', product, 'User', 'globalStorage', 'state.vscdb')
-      try {
-        const st = statSync(dbPath)
-        if (st.isFile()) found.push({ dbPath, mtimeMs: st.mtimeMs })
-      } catch {
-        // absent — skip
-      }
+      pushIfFile(join(userDir, 'AppData', 'Roaming', product, 'User', 'globalStorage', 'state.vscdb'))
+    }
+  }
+  if (usersRoot === undefined && platform === 'win32') {
+    if (home) scanUserDir(home)
+  } else {
+    const root = usersRoot ?? DEFAULT_USERS_ROOT
+    let users
+    try {
+      users = readdirSync(root, { withFileTypes: true })
+    } catch {
+      return [] // no /mnt/c (not WSL) or unreadable root — not an error
+    }
+    for (const entry of users) {
+      if (!entry.isDirectory()) continue
+      scanUserDir(join(root, entry.name))
     }
   }
   found.sort((a, b) => b.mtimeMs - a.mtimeMs)
@@ -467,7 +484,7 @@ export function renderMarkdown(catalog) {
 function usage() {
   return [
     '用法：node scripts/trae-model-catalog.mjs [选项]',
-    '  --db <path>     指定 state.vscdb（默认自动扫描 /mnt/c/Users，取 mtime 最新）',
+    '  --db <path>     指定 state.vscdb（默认自动扫描，取 mtime 最新；win32 查 %APPDATA%，WSL 扫 /mnt/c/Users）',
     '  --out <path>    JSON 输出路径（默认 docs/probes/trae-model-catalog.json）',
     '  --md <path>     Markdown 输出路径（默认 docs/probes/trae-model-catalog.md）',
     '  --pretty        格式化 JSON 输出',
@@ -513,7 +530,10 @@ async function main() {
   } else {
     const found = discoverStateDbs()
     if (!found.length) {
-      console.error('未发现 state.vscdb（可用 --db 指定路径）。扫描位置：/mnt/c/Users/*/AppData/Roaming/{TRAE SOLO CN,TraeWork CN}/User/globalStorage/')
+      const where = process.platform === 'win32'
+        ? `${homedir()}\\AppData\\Roaming\\{TRAE SOLO CN,TraeWork CN}\\User\\globalStorage\\`
+        : '/mnt/c/Users/*/AppData/Roaming/{TRAE SOLO CN,TraeWork CN}/User/globalStorage/'
+      console.error(`未发现 state.vscdb（可用 --db 指定路径）。扫描位置：${where}`)
       process.exit(1)
     }
     dbPath = found[0].dbPath

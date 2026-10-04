@@ -165,7 +165,6 @@ try {
     && catalog.functions.solo_work_lite?.length === 2
     && Array.isArray(catalog.functions.assistant) && catalog.functions.assistant.length === 0)
   check('空 provider 归一为 null', glm?.provider === null)
-
   const warnText = catalog.warnings.join('\n')
   check('warnings 记录非数组分类', warnText.includes('broken_category'))
   check('warnings 记录无 id 条目跳过', warnText.includes('无法确定 id'))
@@ -207,6 +206,18 @@ try {
   utimesSync(fakeDbB, new Date('2026-02-01T00:00:00Z'), new Date('2026-02-01T00:00:00Z'))
   const discovered = discoverStateDbs(fakeRoot)
   check('发现伪数据库且按 mtime 降序', discovered.length === 2 && discovered[0].dbPath === fakeDbB)
+
+  console.log('== 平台分路（win32 无参发现直查 homedir）==')
+  // win32 下无 /mnt/c：无参调用必须直查 <home>/AppData/Roaming/<产品>/…（显式
+  // usersRoot 的逐用户扫描行为不受平台影响）。
+  const winHome = join(workDir, 'win-home')
+  const winDb = join(winHome, 'AppData', 'Roaming', 'TRAE SOLO CN', 'User', 'globalStorage', 'state.vscdb')
+  mkdirSync(join(winDb, '..'), { recursive: true })
+  writeFileSync(winDb, 'x')
+  const winFound = discoverStateDbs(undefined, { platform: 'win32', home: winHome })
+  check('win32 无参发现命中 homedir 产品目录', winFound.length === 1 && winFound[0].dbPath === winDb, JSON.stringify(winFound))
+  check('win32 home 下无库返回空数组且不抛', discoverStateDbs(undefined, { platform: 'win32', home: join(workDir, 'no-such-home') }).length === 0)
+  check('win32 显式 usersRoot 仍按逐用户扫描', discoverStateDbs(fakeRoot, { platform: 'win32', home: winHome }).length === 2)
 
   const copyDir = join(workDir, 'copy')
   const copied = copySqliteForRead(dbPath, copyDir)
