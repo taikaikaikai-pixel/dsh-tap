@@ -17,7 +17,7 @@
  *   3. 缺口 = 插件声明了档位而路由条目没有（或路由缺 compat）⇒ exit 1。
  *
  * 用法：
- *   node scripts/probe-effort-gaps.mjs [--url http://127.0.0.1:19387] [--patch <cordis.patch.yml>]
+ *   node scripts/probe-effort-gaps.mjs [--url http://127.0.0.1:19387] [--token <web token>] [--patch <cordis.patch.yml>]
  * Trae：本机无 state.vscdb 时目录不可用，如实报 SKIP（不伪造）。
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
@@ -28,14 +28,16 @@ import YAML from 'yaml'
 const args = process.argv.slice(2)
 const argOf = (n, d) => { const i = args.indexOf(n); return i >= 0 && args[i + 1] !== undefined ? args[i + 1] : d }
 const BASE = argOf('--url', 'http://127.0.0.1:19387').replace(/\/+$/, '')
+const TOKEN = argOf('--token', '')
+const withToken = (u) => (TOKEN ? u + (u.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN) : u)
 
 async function getView() {
-  const res = await fetch(`${BASE}/dsh-tap/settings`, { signal: AbortSignal.timeout(15000) })
+  const res = await fetch(withToken(`${BASE}/dsh-tap/settings`), { signal: AbortSignal.timeout(15000) })
   if (!res.ok) throw new Error(`GET /dsh-tap/settings HTTP ${res.status}`)
   return res.json()
 }
 async function action(name) {
-  const res = await fetch(`${BASE}/dsh-tap/settings`, {
+  const res = await fetch(withToken(`${BASE}/dsh-tap/settings`), {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: name }),
     signal: AbortSignal.timeout(60000),
   })
@@ -111,8 +113,10 @@ const modelList = await action('model-list')
 // 拿"声明"全集去比会把停用项误报成缺口。
 check('codebuddy', modelList?.efforts ?? null, routeBlock(patchPath, 'codebuddy'), view?.models?.effectiveIds)
 check('qoder', view?.qoder?.models?.efforts ?? null, routeBlock(patchPath, 'qoder'), null)
-const traeView = view?.trae?.models?.sync
-console.log(`\n[trae] ${traeView ? '目录已同步' : '目录未同步 / 通道未启用'} → 无声明可对账（0.19.0 起 Trae 有意不出档，见 gateway-facts）`)
+// Trae（G3 起出档）：声明 = 目录 reasoning_effort_config 原文拼写；镜像键是
+// 宿主枚举映射（light→low/extra_high→xhigh），对账只看「有表 + 有 compat」，
+// 键名单不同属预期形态。
+check('trae', view?.trae?.models?.efforts ?? null, routeBlock(patchPath, 'trae'), null)
 
 if (notes.length) {
   console.log('\n=== 提示（不是档位缺口，是配置分歧）===')
