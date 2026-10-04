@@ -1,0 +1,1042 @@
+{
+  "at": "2026-10-04T07:10:00.341Z",
+  "endpoint": "https://ark.cn-beijing.volces.com/api/plan/v1/messages",
+  "mode": "levels-as-arms",
+  "repeat": 3,
+  "levels": [
+    "low",
+    "medium",
+    "high",
+    "max"
+  ],
+  "levelBudget": {
+    "low": 2048,
+    "medium": 8192,
+    "high": 16384,
+    "max": 16384
+  },
+  "maxTokens": 32768,
+  "prompt": "一个农夫有 17 只羊，除了 9 只以外都跑了，还剩几只？只给最终数字。",
+  "models": [
+    {
+      "model": "glm-5.3-flash",
+      "mode": "levels-as-arms",
+      "thinksByDefault": true,
+      "acceptsEnabled": true,
+      "offAccepted": null,
+      "table": {
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "max": "max"
+      },
+      "arms": {
+        "baseline": {
+          "runs": 3,
+          "status": 200,
+          "thinkingChars": {
+            "min": 144,
+            "mean": 193.7,
+            "max": 227
+          },
+          "textChars": {
+            "min": 1,
+            "mean": 1,
+            "max": 1
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 227,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 38,
+                "output_tokens": 72,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 144,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 38,
+                "output_tokens": 47,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 210,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 38,
+                "output_tokens": 69,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            }
+          ]
+        },
+        "low": {
+          "runs": 3,
+          "status": 200,
+          "thinkingChars": {
+            "min": 180,
+            "mean": 276.3,
+            "max": 327
+          },
+          "textChars": {
+            "min": 1,
+            "mean": 2.3,
+            "max": 5
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 180,
+              "textChars": 5,
+              "usage": {
+                "input_tokens": 38,
+                "output_tokens": 57,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 322,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 38,
+                "output_tokens": 92,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 327,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 38,
+                "output_tokens": 100,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            }
+          ]
+        },
+        "medium": {
+          "runs": 3,
+          "status": 200,
+          "thinkingChars": {
+            "min": 134,
+            "mean": 211.3,
+            "max": 353
+          },
+          "textChars": {
+            "min": 1,
+            "mean": 2.3,
+            "max": 5
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 147,
+              "textChars": 5,
+              "usage": {
+                "input_tokens": 38,
+                "output_tokens": 48,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 134,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 38,
+                "output_tokens": 41,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 353,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 38,
+                "output_tokens": 109,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            }
+          ]
+        },
+        "high": {
+          "runs": 3,
+          "status": 200,
+          "thinkingChars": {
+            "min": 126,
+            "mean": 239,
+            "max": 342
+          },
+          "textChars": {
+            "min": 1,
+            "mean": 1,
+            "max": 1
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 126,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 38,
+                "output_tokens": 40,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 342,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 38,
+                "output_tokens": 105,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 249,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 38,
+                "output_tokens": 78,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            }
+          ]
+        },
+        "max": {
+          "runs": 3,
+          "status": 200,
+          "thinkingChars": {
+            "min": 204,
+            "mean": 265,
+            "max": 297
+          },
+          "textChars": {
+            "min": 1,
+            "mean": 1,
+            "max": 1
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 204,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 38,
+                "output_tokens": 64,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 297,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 38,
+                "output_tokens": 104,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 294,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 38,
+                "output_tokens": 96,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "model": "kimi-k3",
+      "mode": "levels-as-arms",
+      "thinksByDefault": true,
+      "acceptsEnabled": true,
+      "offAccepted": null,
+      "table": {
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "max": "max"
+      },
+      "arms": {
+        "baseline": {
+          "runs": 3,
+          "status": 200,
+          "thinkingChars": {
+            "min": 232,
+            "mean": 283.3,
+            "max": 334
+          },
+          "textChars": {
+            "min": 1,
+            "mean": 1,
+            "max": 1
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 232,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 111,
+                "output_tokens": 87,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 334,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 111,
+                "output_tokens": 114,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 284,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 111,
+                "output_tokens": 97,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            }
+          ]
+        },
+        "low": {
+          "runs": 3,
+          "status": 200,
+          "thinkingChars": {
+            "min": 164,
+            "mean": 227,
+            "max": 274
+          },
+          "textChars": {
+            "min": 1,
+            "mean": 1,
+            "max": 1
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 274,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 111,
+                "output_tokens": 115,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 164,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 111,
+                "output_tokens": 73,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 243,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 111,
+                "output_tokens": 83,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            }
+          ]
+        },
+        "medium": {
+          "runs": 3,
+          "status": 200,
+          "thinkingChars": {
+            "min": 140,
+            "mean": 189.3,
+            "max": 227
+          },
+          "textChars": {
+            "min": 1,
+            "mean": 1,
+            "max": 1
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 140,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 111,
+                "output_tokens": 108,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 201,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 111,
+                "output_tokens": 76,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 227,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 111,
+                "output_tokens": 95,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            }
+          ]
+        },
+        "high": {
+          "runs": 3,
+          "status": 200,
+          "thinkingChars": {
+            "min": 139,
+            "mean": 253.3,
+            "max": 344
+          },
+          "textChars": {
+            "min": 1,
+            "mean": 1,
+            "max": 1
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 139,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 111,
+                "output_tokens": 72,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 277,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 111,
+                "output_tokens": 100,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 344,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 111,
+                "output_tokens": 132,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            }
+          ]
+        },
+        "max": {
+          "runs": 3,
+          "status": 200,
+          "thinkingChars": {
+            "min": 200,
+            "mean": 265.3,
+            "max": 380
+          },
+          "textChars": {
+            "min": 1,
+            "mean": 1,
+            "max": 1
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 216,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 111,
+                "output_tokens": 82,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 200,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 111,
+                "output_tokens": 73,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 380,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 111,
+                "output_tokens": 142,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "model": "doubao-seed-2.1-lite",
+      "mode": "levels-as-arms",
+      "thinksByDefault": true,
+      "acceptsEnabled": true,
+      "offAccepted": null,
+      "table": {
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "max": "max"
+      },
+      "arms": {
+        "baseline": {
+          "runs": 3,
+          "status": 200,
+          "thinkingChars": {
+            "min": 32,
+            "mean": 94,
+            "max": 150
+          },
+          "textChars": {
+            "min": 1,
+            "mean": 1,
+            "max": 1
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 100,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 60,
+                "output_tokens": 360,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 32,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 60,
+                "output_tokens": 149,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 150,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 60,
+                "output_tokens": 467,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            }
+          ]
+        },
+        "low": {
+          "runs": 3,
+          "status": 200,
+          "thinkingChars": {
+            "min": 31,
+            "mean": 190.3,
+            "max": 275
+          },
+          "textChars": {
+            "min": 1,
+            "mean": 9,
+            "max": 25
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 265,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 60,
+                "output_tokens": 314,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 275,
+              "textChars": 25,
+              "usage": {
+                "input_tokens": 60,
+                "output_tokens": 212,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 31,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 60,
+                "output_tokens": 104,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            }
+          ]
+        },
+        "medium": {
+          "runs": 3,
+          "status": 200,
+          "thinkingChars": {
+            "min": 69,
+            "mean": 83,
+            "max": 107
+          },
+          "textChars": {
+            "min": 1,
+            "mean": 1,
+            "max": 1
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 73,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 60,
+                "output_tokens": 270,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 69,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 60,
+                "output_tokens": 44,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 107,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 60,
+                "output_tokens": 69,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            }
+          ]
+        },
+        "high": {
+          "runs": 3,
+          "status": 200,
+          "thinkingChars": {
+            "min": 44,
+            "mean": 68.3,
+            "max": 88
+          },
+          "textChars": {
+            "min": 1,
+            "mean": 1,
+            "max": 1
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 73,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 60,
+                "output_tokens": 391,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 44,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 60,
+                "output_tokens": 133,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 88,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 60,
+                "output_tokens": 366,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            }
+          ]
+        },
+        "max": {
+          "runs": 3,
+          "status": 200,
+          "thinkingChars": {
+            "min": 35,
+            "mean": 170.7,
+            "max": 319
+          },
+          "textChars": {
+            "min": 1,
+            "mean": 1,
+            "max": 1
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 35,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 60,
+                "output_tokens": 144,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 158,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 60,
+                "output_tokens": 92,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "blockTypes": [
+                "thinking",
+                "text"
+              ],
+              "thinkingChars": 319,
+              "textChars": 1,
+              "usage": {
+                "input_tokens": 60,
+                "output_tokens": 163,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+              },
+              "error": null
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

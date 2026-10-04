@@ -30,11 +30,12 @@
  *   node scripts/probe-ark-thinking.mjs --models a,b,c        # 指定模型
  *   node scripts/probe-ark-thinking.mjs --emit yaml           # 打印可粘贴的 reasoningEfforts 块
  *   node scripts/probe-ark-thinking.mjs --write <patch.yml>   # 直接写进 profile patch（留 .bak）
- *   node scripts/probe-ark-thinking.mjs --levels low,medium,high,max   # 档位拼写（只影响声明，不加调用量）
+ *   node scripts/probe-ark-thinking.mjs --levels low,medium,high,max   # 档位拼写（--levels-as-arms 下每档位各加一臂）
+ *   node scripts/probe-ark-thinking.mjs --levels-as-arms --repeat 3  # 档位臂模式：每声明档位一个 enabled 臂（budget=pi-ai 映射 low 2048/medium 8192/high 16384/max 16384；max_tokens=32768=真实宿主 defaultMaxTokens），baseline 保留 → 定论「档位是否单调（真旋钮 vs 只是 budget 上限）」
  *   node scripts/probe-ark-thinking.mjs --repeat 3            # 每臂 3 次并聚合（min/mean/max），默认 1
  *   node scripts/probe-ark-thinking.mjs --from <证据.json>    # 复用证据，不打上游只 emit/write
  *
- * 额度账：每模型上游调用 = 两臂（默认）或三臂（--full-matrix）× --repeat；7 模型默认 14 次。
+ * 额度账：每模型上游调用 = 两臂（默认）或三臂（--full-matrix）或 1+档位数 臂（--levels-as-arms）× --repeat；7 模型默认 14 次。
  *
  * 凭据：`~/.dsh/.credentials.yaml` 的 `refs.VOLCES_API_KEY`（或环境变量 VOLCES_API_KEY）。
  * 证据 → docs/probes/ark-thinking-<ts>.json
@@ -60,6 +61,16 @@ const EMIT = args.includes('--emit')
 const WRITE = argOf('--write', null)
 const REPEAT = Number(argOf('--repeat', '1')) || 1
 const FULL_MATRIX = args.includes('--full-matrix')
+const LEVELS_AS_ARMS = args.includes('--levels-as-arms')
+// pi-ai 档位→budget_tokens 映射（0.18.0 诚实边界①，docs/goals/desktop-adaptation.md：max 夹到 high）；
+// 未知档位回落 2048 = enabled 臂默认 budget。
+const LEVEL_BUDGET = { low: 2048, medium: 8192, high: 16384, max: 16384 }
+// 档位臂的 max_tokens 用真实宿主线值（desktop patch volces defaultMaxTokens）：
+// budget 8192/16384 若仍配 probe 旧的 max_tokens 2048，思考会被 max_tokens 钳死（甚至被上游拒），
+// budget 就不再是臂间唯一变量。仅 levels-as-arms 模式生效，其余模式保持 2048 不动。
+const LEVELS_AS_ARMS_MAX_TOKENS = 32768
+const MODE = LEVELS_AS_ARMS ? (FULL_MATRIX ? 'levels-as-arms+full-matrix' : 'levels-as-arms') : FULL_MATRIX ? 'full-matrix' : 'eco'
+const MODE_LABEL = LEVELS_AS_ARMS ? '档位臂（levels-as-arms）' : FULL_MATRIX ? '全矩阵' : '省额度（默认）'
 
 const USAGE = `probe-ark-thinking.mjs — Ark /api/plan 逐模型思考面实测 → reasoningEfforts 声明
 
@@ -71,7 +82,12 @@ patch 里已有的 off 档。只有 --full-matrix 才跑 disabled 臂、才能�
 
   --full-matrix        恢复全矩阵：baseline/enabled/disabled 三臂 × --repeat
   --models a,b,c       指定模型（默认静态清单 7 个）
-  --levels a,b,c       档位拼写，只影响产出的声明拼写，不影响上游调用次数（默认 low,medium,high,max）
+  --levels a,b,c       档位拼写，只影响产出的声明拼写，不影响上游调用次数（默认 low,medium,high,max；
+                       但 --levels-as-arms 下每个档位各加一臂）
+  --levels-as-arms     档位臂模式：每个声明档位各开一个 enabled 臂，budget_tokens=pi-ai 映射
+                       （low 2048/medium 8192/high 16384/max 16384），baseline 保留；max_tokens 用
+                       32768=真实宿主 defaultMaxTokens（否则 budget>2048 会被钳/拒）。定论「档位是否
+                       单调（真旋钮还是只是 budget 上限）」用；与 --repeat 正常组合
   --repeat N           每臂重复 N 次并聚合（thinkingChars 给 min/mean/max，状态/错误归并）；默认 1
   --emit               打印可粘贴的 reasoningEfforts 块
   --write <patch.yml>  直接写进 profile patch 的 volces.models（留 .bak）
@@ -80,7 +96,7 @@ patch 里已有的 off 档。只有 --full-matrix 才跑 disabled 臂、才能�
 
 凭据：~/.dsh/.credentials.yaml 的 refs.VOLCES_API_KEY（或环境变量 VOLCES_API_KEY）。
 证据 → docs/probes/ark-thinking-<ts>.json。
-额度账：每模型上游调用 = 两臂（默认）或三臂（--full-matrix）× --repeat；7 模型默认 14 次。`
+额度账：每模型上游调用 = 两臂（默认）或三臂（--full-matrix）或 1+档位数 臂（--levels-as-arms）× --repeat；7 模型默认 14 次。`
 
 if (args.includes('--help') || args.includes('-h')) {
   console.log(USAGE)
@@ -101,13 +117,13 @@ if (!key) {
   process.exit(2)
 }
 
-async function call(model, thinking) {
+async function call(model, thinking, maxTokens = 2048) {
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
       model,
-      max_tokens: 2048,
+      max_tokens: maxTokens,
       messages: [{ role: 'user', content: PROMPT }],
       ...(thinking === undefined ? {} : { thinking }),
     }),
@@ -162,30 +178,48 @@ if (FROM) {
   report.push(...(ev.models ?? []))
   console.log(`复用证据 ${FROM}（${report.length} 个模型，本次不打上游）`)
 } else {
-  const ARM_DEFS = FULL_MATRIX
+  const ARM_DEFS = LEVELS_AS_ARMS
     ? [
         ['baseline', undefined],
-        ['enabled', { type: 'enabled', budget_tokens: 2048 }],
-        ['disabled', { type: 'disabled' }],
+        ...LEVELS.map((l) => {
+          const budget = LEVEL_BUDGET[l]
+          if (budget === undefined) console.error(`警告：档位 ${l} 不在 pi-ai 映射表（low/medium/high/max）内，budget 回落 2048`)
+          return [l, { type: 'enabled', budget_tokens: budget ?? 2048 }]
+        }),
+        ...(FULL_MATRIX ? [['disabled', { type: 'disabled' }]] : []),
       ]
-    : [
-        ['baseline', undefined],
-        ['enabled', { type: 'enabled', budget_tokens: 2048 }],
-      ]
+    : FULL_MATRIX
+      ? [
+          ['baseline', undefined],
+          ['enabled', { type: 'enabled', budget_tokens: 2048 }],
+          ['disabled', { type: 'disabled' }],
+        ]
+      : [
+          ['baseline', undefined],
+          ['enabled', { type: 'enabled', budget_tokens: 2048 }],
+        ]
+  const armMaxTokens = LEVELS_AS_ARMS ? LEVELS_AS_ARMS_MAX_TOKENS : 2048
   console.log(
-    `${FULL_MATRIX ? '全矩阵' : '省额度（默认）'}：${MODELS.length} 模型 × ${ARM_DEFS.length} 臂 × ${REPEAT} repeat = ${MODELS.length * ARM_DEFS.length * REPEAT} 次上游调用` +
-      (FULL_MATRIX ? '' : '（disabled 臂不跑；需要 off 结论请加 --full-matrix）'),
+    `${MODE_LABEL}：${MODELS.length} 模型 × ${ARM_DEFS.length} 臂 × ${REPEAT} repeat = ${MODELS.length * ARM_DEFS.length * REPEAT} 次上游调用` +
+      (LEVELS_AS_ARMS
+        ? `（档位臂 budget=pi-ai 映射 low ${LEVEL_BUDGET.low}/medium ${LEVEL_BUDGET.medium}/high ${LEVEL_BUDGET.high}/max ${LEVEL_BUDGET.max}，max_tokens=${armMaxTokens}=真实宿主 defaultMaxTokens）`
+        : FULL_MATRIX
+          ? ''
+          : '（disabled 臂不跑；需要 off 结论请加 --full-matrix）'),
   )
   for (const model of MODELS) {
     const arms = {}
     for (const [name, thinking] of ARM_DEFS) {
       const samples = []
-      for (let i = 0; i < REPEAT; i++) samples.push(await call(model, thinking))
+      for (let i = 0; i < REPEAT; i++) samples.push(await call(model, thinking, armMaxTokens))
       arms[name] = aggregateArm(samples)
     }
-    const { baseline, enabled, disabled } = arms
+    const { baseline, disabled } = arms
+    // levels-as-arms 下没有单一 enabled 臂：每个档位臂都要 200 才出档。
+    const levelArms = LEVELS_AS_ARMS ? LEVELS.map((l) => [l, arms[l]]) : null
+    const enabledArms = levelArms ? levelArms.map(([, a]) => a) : [arms.enabled]
     const thinksByDefault = baseline.samples.some((s) => s.thinkingChars > 0 || s.blockTypes.includes('thinking'))
-    const acceptsEnabled = enabled.samples.every((s) => s.status === 200)
+    const acceptsEnabled = enabledArms.every((a) => a.samples.every((s) => s.status === 200))
     // off 只在 full-matrix 实测 disabled 后才能下结论；省额度模式记 null（未测），不臆造（踩坑 #42）。
     const offAccepted = disabled
       ? disabled.samples.every((s) => s.status === 200) && Math.max(...disabled.samples.map((s) => s.thinkingChars)) === 0
@@ -194,15 +228,18 @@ if (FROM) {
     const table = acceptsEnabled
       ? { ...(offAccepted ? { off: null } : {}), ...Object.fromEntries(LEVELS.map((l) => [l, l])) }
       : null
-    report.push({ model, mode: FULL_MATRIX ? 'full-matrix' : 'eco', thinksByDefault, acceptsEnabled, offAccepted, table, arms })
+    report.push({ model, mode: MODE, thinksByDefault, acceptsEnabled, offAccepted, table, arms })
     const verdict = !acceptsEnabled
-      ? 'ENABLED-REJECTED（不出档）'
+      ? LEVELS_AS_ARMS
+        ? 'ARM-REJECTED（某档位臂非 200，不出档）'
+        : 'ENABLED-REJECTED（不出档）'
       : offAccepted === null
-        ? 'OK（off 未测：省额度默认不跑 disabled 臂，--full-matrix 可证 off）'
+        ? 'OK（off 未测：未跑 disabled 臂，--full-matrix 可证 off）'
         : offAccepted ? 'OK（含 off）' : 'OK（无 off：上游拒 disabled）'
     console.log(`\n### ${model} → ${verdict}`)
     console.log(`  baseline : ${fmtArm(baseline)}`)
-    console.log(`  enabled  : ${fmtArm(enabled)}`)
+    if (levelArms) for (const [l, a] of levelArms) console.log(`  ${l.padEnd(8)} : ${fmtArm(a)}`)
+    else console.log(`  enabled  : ${fmtArm(arms.enabled)}`)
     if (disabled) console.log(`  disabled : ${fmtArm(disabled)}`)
     console.log(`  → reasoningEfforts: ${table ? JSON.stringify(table) : '（不出）'}`)
   }
@@ -257,5 +294,5 @@ if (WRITE) {
 
 mkdirSync('docs/probes', { recursive: true })
 const out = `docs/probes/ark-thinking-${Date.now()}.json`
-writeFileSync(out, JSON.stringify({ at: new Date().toISOString(), endpoint: ENDPOINT, mode: FULL_MATRIX ? 'full-matrix' : 'eco', repeat: REPEAT, levels: LEVELS, prompt: PROMPT, models: report }, null, 2))
+writeFileSync(out, JSON.stringify({ at: new Date().toISOString(), endpoint: ENDPOINT, mode: MODE, repeat: REPEAT, levels: LEVELS, ...(LEVELS_AS_ARMS ? { levelBudget: LEVEL_BUDGET, maxTokens: LEVELS_AS_ARMS_MAX_TOKENS } : {}), prompt: PROMPT, models: report }, null, 2))
 console.log('\n证据 →', out)
