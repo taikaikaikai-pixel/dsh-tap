@@ -1181,6 +1181,123 @@ try {
   fbMock.server.close()
 
   // =========================================================================
+  // [18b] agent 传输（function=solo_work_lite，2026-10-05 探针校准锁：
+  // 证据 docs/probes/trae-agent-v3-*.jsonl）
+  console.log('== agent 传输（solo_work_lite，探针形态锁）==')
+  const agentMock = await mockTraeChat({ authedToken: 'tok-live', providerModel: 'glm-5.2' })
+  const rtA = { running: false, port: null, lastError: null }
+  const meterA = []
+  const gatewayA = createTraeGateway({
+    settings: () => ({ ...settings, traeChatBaseURL: agentMock.base, maxConcurrentPerSession: 4, traeChatTransport: 'agent' }),
+    withCredentials: async (attempt) => {
+      try { return { cred: cred3, res: await attempt(cred3), err: null } } catch (err) { return { cred: cred3, res: null, err } }
+    },
+    readAuthDevice: () => null,
+    readAuthMeta: () => ({ uid: 'u-001' }),
+    meter: { record: (r) => meterA.push(r) },
+    runtime: rtA,
+    getCatalogIds: () => ids,
+  })
+  const stopA = gatewayA.listen(0)
+  await sleep(80)
+
+  // [18b-1] 纯聊天：function=solo_work_lite 出站 + 钉死模型改派诚实披露
+  const aChat = await fetch(`http://127.0.0.1:${rtA.port}/v1/chat/completions`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'glm-5.3', stream: true, messages: [{ role: 'user', content: 'hi' }] }),
+  })
+  const aChatText = await aChat.text()
+  const aOutReq = agentMock.state.requests.at(-1)
+  check('agent：出站 function=solo_work_lite 且路径不变', aOutReq?.body?.function === 'solo_work_lite'
+    && aOutReq?.url === '/api/agent/v3/llm_utils_chat')
+  check('agent：模型改派诚实披露（钉死 glm-5.2，SSE 注释行）',
+    aChatText.includes(': trae-reroute requested=glm-5.3 actual=glm-5.2')
+    && meterA.some((m) => m.model === 'glm-5.2'))
+
+  // [18b-2] 带 tools：出站 tools 透传 + 历史 assistant.tool_calls 用 function_call 键
+  const aToolRes = await fetch(`http://127.0.0.1:${rtA.port}/v1/chat/completions`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'glm-5.3', stream: true, tool_choice: 'auto',
+      messages: [
+        { role: 'user', content: '几点？' },
+        { role: 'assistant', content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'get_x', arguments: '{}' } }] },
+        { role: 'tool', tool_call_id: 'c1', name: 'get_x', content: '14:30' },
+      ],
+      tools: [{ type: 'function', function: { name: 'get_x', parameters: { type: 'object' } } }],
+    }),
+  })
+  await aToolRes.text()
+  const aToolReq = agentMock.state.requests.at(-1)
+  const aHistCall = aToolReq?.body?.messages?.find((m) => m.role === 'assistant')?.tool_calls?.[0]
+  check('agent：历史 assistant.tool_calls 出站键=function_call（proto 层硬要求，A3 臂实测）',
+    aHistCall && typeof aHistCall.function_call === 'object' && aHistCall.function_call.name === 'get_x'
+    && aHistCall.function === undefined)
+  check('agent：role:tool 回传块化透传（tool_call_id 保留）',
+    aToolReq?.body?.messages?.find((m) => m.role === 'tool')?.tool_call_id === 'c1'
+    && aToolReq.body.messages.find((m) => m.role === 'tool').content?.[0]?.text === '14:30')
+  check('agent：tools 声明透传且 parameters 序列化字符串 + tool_choice 透传',
+    aToolReq?.body?.tools?.[0]?.function?.name === 'get_x'
+    && typeof aToolReq.body.tools[0].function.parameters === 'string'
+    && aToolReq.body.tool_choice === 'auto')
+
+  // [18b-3] reasoning_effort 如实照发（A5 臂实测被忽略但不报错——不虚标能力，
+  // 出站层不做拦截，事实表/docs 标注未生效）
+  const aEff = await fetch(`http://127.0.0.1:${rtA.port}/v1/chat/completions`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'glm-5.3', stream: true, reasoning_effort: 'high', messages: [{ role: 'user', content: 'hi' }] }),
+  })
+  await aEff.text()
+  check('agent：reasoning_effort 照发（上游忽略不报错；不虚标生效）',
+    agentMock.state.requests.at(-1)?.body?.reasoning_effort === 'high')
+
+  // [18b-4] agent 面 3003 不触发 chat_v3 回退（agent 本身就是出路）
+  agentMock.state.requests.length = 0
+  const agentErrMock = await mockTraeChat({ authedToken: 'tok-live', sseError: { code: 3003, message: 'all models failed', extra: null } })
+  const rtAE = { running: false, port: null, lastError: null }
+  const gatewayAE = createTraeGateway({
+    settings: () => ({ ...settings, traeChatBaseURL: agentErrMock.base, maxConcurrentPerSession: 4, traeChatTransport: 'agent' }),
+    withCredentials: async (attempt) => {
+      try { return { cred: cred3, res: await attempt(cred3), err: null } } catch (err) { return { cred: cred3, res: null, err } }
+    },
+    readAuthDevice: () => null,
+    readAuthMeta: () => ({ uid: 'u-001' }),
+    meter: { record: () => {} },
+    runtime: rtAE,
+    getCatalogIds: () => [],
+  })
+  const stopAE = gatewayAE.listen(0)
+  await sleep(80)
+  const aeRes = await fetch(`http://127.0.0.1:${rtAE.port}/v1/chat/completions`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'glm-5.3', messages: [{ role: 'user', content: 'hi' }] }),
+  })
+  const aeBody = await aeRes.json()
+  check('agent：3003 不回退 chat_v3（终局错误透传，一次上游调用）',
+    aeRes.status === 502 && aeBody.error?.code === 3003
+    && agentErrMock.state.requests.length === 1)
+  stopAE()
+  agentErrMock.server.closeAllConnections?.()
+  agentErrMock.server.close()
+  stopA()
+  agentMock.server.closeAllConnections?.()
+  agentMock.server.close()
+
+  // 错误码表扩充锁（2026-10-05 探针实测：2001 function 未注册/proto 形态错、
+  // 4023 chat 模型未知、9074 agent task 注册表空、4001/4011 raw 面）
+  check('错误码表：探针实测新码入表（2001/4023/9074/4001/4011）',
+    normalizeTraeError(200, { code: 2001, message: '' }).message.includes('function')
+    && normalizeTraeError(200, { code: 4023, message: '' }).message.includes('model unknown')
+    && normalizeTraeError(200, { code: 9074, message: '' }).message.includes('config item')
+    && normalizeTraeError(200, { code: 4001, message: '' }).message.includes('参数绑定')
+    && normalizeTraeError(200, { code: 4011, message: '' }).message.length > 0)
+  check('错误提示：2001 带 function_call 键指引、4023 带模型路由指引',
+    formatTraeErrorMessage(2001, 'x').includes('function_call')
+    && formatTraeErrorMessage(4023, 'x').includes('同步目录'))
+  check('错误提示：3003 指引含 agent 传输出路（2026-10-05 闭环）',
+    formatTraeErrorMessage(3003, 'all models failed').includes('agent'))
+
+  // =========================================================================
   // [18] 组合根端到端（DSH_HOME 隔离 + USERPROFILE 重定向 fixture home）：
   // apply() 起真 index.js —— 目录同步 → 镜像 compat/档位表 → traeModelSetPrefs
   // 全链路 → 失败路径 syncView.error。终审 Important：组合根新增路径（镜像

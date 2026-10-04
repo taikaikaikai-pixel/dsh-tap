@@ -292,3 +292,11 @@ Trae 业务码 3003。
 - **后续课题（未决）**：inline 全臂 3003 已 6 周，`traeChatTransport` 默认值
   `inline` 是否改 `remote` 属产品决策（remote 耗 work 池、不支持工具环、会话
   ~20s 慢启动），需用户拍板，本轮不动默认值。
+
+## 13. 销案（2026-10-05）：agent 面（solo_work_lite）探针证实可用并落地——「插件侧无解」结论终结
+
+- **结论更新**：§12 的「带 dsh 工具环的 agent 对话在 Trae 通道当前整体不可用，插件侧无解」在 2026-10-05 被推翻——同一端点 `llm_utils_chat` 的 `function=solo_work_lite` 面（社区参照：dsh-connect-trae SOLO_ROUTE_DECISION / Trae2api-cn build_llm_chat_body）经 8 臂真实探针（`scripts/probe-trae-agent-v3.mjs`，证据 `docs/probes/trae-agent-v3-*.jsonl`）证实：**纯聊天 200 流式、接受 OpenAI tools + tool_choice=auto、返回结构化 tool_calls（function_call 键、按 index 增量）、并行调用单事件双发、role:tool 回传后产出最终回答**。决策门（纯聊天臂 + 两轮工具闭环臂）PASS。
+- **落地**：`traeChatTransport` 新增第三档 `'agent'`（设置卡可选，逐请求热读取免重启）；出站历史 assistant.tool_calls 键=function_call（该面 proto 硬要求，误用 OpenAI function 键报 2001「required field Name is not set」）；3003 事故回退不适用于 agent 面（不回退 chat_v3）；错误码表补 2001/4001/4011/4023/9074；verify-trae-provider 131→**141** 断言。
+- **如实标注的边界（不虚标，踩坑 #42 纪律）**：①**模型路由仍被 function 位钉死**——agent 面任何 model 名都 200 但 timing_cost.provider_model_name 恒为 glm-5.2（A6 臂 kimi-k2.6/DeepSeek-V4-Flash 实测），改派由 SSE 注释行/message.note 诚实披露；「模型可用」在该面 = 「目录模型名可发、实际由 glm-5.2 服务」。②**reasoning_effort 被忽略**（A5 臂与 A2 同形态）——档位注入仅保留在 remote 面。③E1 错模型名/E2 坏参数被静默容忍（该面宽容）。④**inline 面 3003 本身未愈**（本日未复测，第 6 周+）——agent 面是绕路而非修复。
+- **额度**：token_usage SSE 事件携带真实计数（含 reasoning_tokens / cache_read_input_tokens）如实计量；pay 池差分分辨率（0.01 credit）对小探测不可见（前=后=430.394），与 Qoder 族「小额探测取整吞掉」同现象，扣费事实以 token_usage 计数为准。
+- **后续课题（未决更新）**：§12 的「默认值是否改 remote」问题现在有了第三选项 agent（支持工具环）；默认值决策仍需用户拍板，本 goal 不动默认值。

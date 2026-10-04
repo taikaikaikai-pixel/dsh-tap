@@ -22,6 +22,15 @@
  *     "cannot unmarshal string …LLMRawMessageContent"）；assistant.tool_calls 与
  *     tool 角色原生透传。function 必填（缺则 2001 "function is empty, cannot
  *     resolve model by usage="）
+ *   agent 传输（function=solo_work_lite，2026-10-05 探针校准，证据
+ *     docs/probes/trae-agent-v3-*.jsonl）：同一端点的第二面——接受 OpenAI 风格
+ *     tools（parameters 序列化字符串）+ tool_choice=auto + **并行 tool_calls**
+ *     （A4 臂单事件双调用），历史 assistant.tool_calls 的出站键必须是
+ *     **function_call**（function 键被 proto 层拒：「required field Name is not
+ *     set」，A3 臂一轮/二轮对照）；reasoning_effort 字段被服务端忽略（A5 臂与
+ *     A2 同形态，如实照发不虚标）；模型路由被 function 位钉死（A6 臂 kimi-k2.6/
+ *     DeepSeek-V4-Flash 的 timing_cost.provider_model_name 恒为 glm-5.2——
+ *     改派由 SSE 注释行/message.note 诚实披露，同 inline/chat_v3 面纪律）。
  *   SSE（事件名在 event: 行或 data.event 字段）：
  *     error → 抛错（1001 未认证 / 4011 限流 / 2001 模型解析失败）
  *     request_wait_in_queue / data.position → 排队提示（位置变化才发）
@@ -103,8 +112,13 @@ function toTextBlocks(content) {
   return [{ type: 'text', text: '' }]
 }
 
-/** OpenAI 工具调用 → Trae 原生（形态同构，arguments 归一为字符串）。 */
-function nativeToolCalls(toolCalls) {
+/** OpenAI 工具调用 → Trae 原生（arguments 归一为字符串）。
+ *  fnKey='function'（默认，inline/chat_v3 面线缆形态，2026-08-24 校准）；
+ *  fnKey='function_call'（solo_work_lite 面——2026-10-05 A3 臂实测：OpenAI 风格
+ *  `function` 键被 proto 层拒绝「ToolCall read field 4 'FunctionCall' error:
+ *  required field Name is not set」；该面 SSE 出站的 tool_calls[i] 同样以
+ *  function_call 为键，入站出站同构）。 */
+function nativeToolCalls(toolCalls, { fnKey = 'function' } = {}) {
   if (!Array.isArray(toolCalls)) return undefined
   const out = []
   for (const c of toolCalls) {
@@ -113,7 +127,7 @@ function nativeToolCalls(toolCalls) {
     out.push({
       id: typeof c.id === 'string' && c.id ? c.id : `trae-call-${out.length}`,
       type: 'function',
-      function: {
+      [fnKey]: {
         name: String(fn?.name ?? ''),
         arguments: typeof fn?.arguments === 'string' ? fn.arguments : JSON.stringify(fn?.arguments ?? {}),
       },
@@ -123,7 +137,7 @@ function nativeToolCalls(toolCalls) {
 }
 
 /** OpenAI messages → Trae native messages（content 块化；tool_calls/tool 角色原生）。 */
-function toNativeMessages(messages) {
+function toNativeMessages(messages, opts) {
   const out = []
   for (const m of (Array.isArray(messages) ? messages : [])) {
     if (!m || typeof m !== 'object') continue
@@ -138,7 +152,7 @@ function toNativeMessages(messages) {
       continue
     }
     const native = { role, content: toTextBlocks(m.content) }
-    const calls = nativeToolCalls(m.tool_calls)
+    const calls = nativeToolCalls(m.tool_calls, opts)
     if (role === 'assistant' && calls) native.tool_calls = calls
     out.push(native)
   }
@@ -172,14 +186,14 @@ function nativeTools(tools) {
  * OpenAI chat payload → Trae llm_utils_chat 请求体（2026-08-24 实测校准形态）。
  * 返回 {body, requestId}（requestId 同时用于 x-request-id 头）。
  */
-export function buildChatRequest(payload, sessionId) {
+export function buildChatRequest(payload, sessionId, { fnKey } = {}) {
   const requestId = randomUUID()
   // 出站 tool 配对体检（踩坑 #39，与 Qoder 网关同一不变量）：pi-ai 会删掉
   // stopReason=error/aborted 的 assistant 却留下其 toolResult，孤儿 tool 消息在
   // 严格上游会被拒；trae 侧同样不能假设宿主序列化器输出合法。
   const pair = sanitizeToolPairing(payload.messages)
   const body = {
-    messages: toNativeMessages(pair.messages),
+    messages: toNativeMessages(pair.messages, { fnKey }),
     model: typeof payload.model === 'string' ? payload.model : 'glm-5.3',
     function: DEFAULT_FUNCTION,
     request_id: requestId,
@@ -572,11 +586,17 @@ export function createTraeGateway(deps) {
     const t0 = Date.now()
 
     // 传输选择：remote（chat_sessions，真模型路由、耗 work 池、无 tools）|
+    // agent（llm_utils_chat+solo_work_lite，原生 tools/并行/tool 回传，模型位钉死
+    //   glm-5.2、reasoning_effort 被忽略——2026-10-05 探针 A1-A6 校准）|
     // inline（默认，llm_utils_chat+inline_chat，模型恒为账户默认、原生 tools）。
     if (s.traeChatTransport === 'remote') {
       await handleRemoteChat(res, payload, model, wantStream, sessionId, t0)
       return
     }
+    // agent 面与 inline 面共享同一个 SSE 循环，差别只在：function 值、历史
+    // tool_calls 出站键（function_call）、无 3003→chat_v3 回退（agent 面本身
+    // 就是出路）。
+    const isAgent = s.traeChatTransport === 'agent'
 
     const release = await limiter.acquire(sessionId, s.maxConcurrentPerSession ?? 4)
     // inline 面事故回退（2026-08-24 实测：服务端故障期 inline_chat 对一切模型名
@@ -587,7 +607,7 @@ export function createTraeGateway(deps) {
     let fallbackUsed = false
 
     async function attemptInline(fnValue, streamStarted) {
-      const { body, requestId } = buildChatRequest(payload, sessionId)
+      const { body, requestId } = buildChatRequest(payload, sessionId, isAgent ? { fnKey: 'function_call' } : undefined)
       body.function = fnValue
       // 首字节护栏（2026-08-24 故障取证：本地代理/边缘对 POST 偶发"收下请求不
       // 回应"，无超时会令用户请求无限挂死）。fetch 在响应头到达即 resolve，
@@ -665,7 +685,8 @@ export function createTraeGateway(deps) {
       const outcome = await forEachSseEvent(upstream.body, parser, (ev) => {
         if (ev.error) {
           // 3003 且尚未降级且无 tools 且未下发任何可见内容 → 换 chat_v3 重试
-          if (ev.error.code === 3003 && !fallbackUsed && !hasTools && !streamStarted.v) return 'fallback'
+          //（仅 inline 面事故回退；agent 面（solo_work_lite）本身就是出路，不回退）
+          if (!isAgent && ev.error.code === 3003 && !fallbackUsed && !hasTools && !streamStarted.v) return 'fallback'
           const msg = formatTraeErrorMessage(ev.error.code, ev.error.message)
           if (!res.headersSent) {
             res.writeHead(502, { 'Content-Type': 'application/json' })
@@ -738,7 +759,7 @@ export function createTraeGateway(deps) {
 
     try {
       const streamStarted = { v: false }
-      let fnValue = 'inline_chat'
+      let fnValue = isAgent ? 'solo_work_lite' : 'inline_chat'
       for (;;) {
         const outcome = await attemptInline(fnValue, streamStarted)
         if (outcome === 'fallback') {

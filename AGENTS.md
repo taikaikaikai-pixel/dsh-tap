@@ -54,6 +54,7 @@
 `#65` 确定性安全门按通用Web建模误拦回环网关·git门须留豁免通道
 `#66` 宿主reasoningEfforts键固定枚举·越界键静默整块拒收·写后读回/lastError
 `#67` 环境探测路径勿写死单平台形态·发现空结果须配原因出口
+`#68` 同端点不同function面各有出站方言·历史tool_calls键按面实测·proto错念proto字段名
 
 ## 常用命令（probe/联调/取证脚本的用法注释见 wiki/09-run-and-test.md）
 
