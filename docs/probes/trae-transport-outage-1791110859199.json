@@ -1,0 +1,58 @@
+{
+  "at": "2026-10-04T10:44:37.064Z",
+  "model": "glm-5.3",
+  "prompt": "只回复两个字：成功",
+  "note": "inline 3003 持续故障下的传输出路探测；判读见 docs/diagnosis-trae-3003.md",
+  "accountUidMasked": "211***",
+  "arms": [
+    {
+      "arm": "R",
+      "transport": "remote(chat_sessions)",
+      "createHttp": 200,
+      "eventsHttp": 200,
+      "textChars": 2,
+      "textHead": "成功",
+      "actualModel": "glm-5.3",
+      "bytes": 25642,
+      "ms": 21456
+    },
+    {
+      "arm": "C2",
+      "fn": "chat_v3",
+      "tools": 0,
+      "status": 200,
+      "rawBytes": 3254,
+      "errors": [
+        {
+          "ev": "error",
+          "code": 3003,
+          "message": "model service is unavailable\nerror, status code: 400, message: Unknown error: code = 500 Internal Server Error, err = \"{\\\"error\\\":{\\\"code\\\":\\\"ModelLoading\\\",\\\"message\\\":\\\"The request cannot be processed at this time because the model is currently being loaded, please retry later or contact with administrator if not work afterwards. Request id: 021791110718755a55614fe92e65ad1c369f322845ca4d82cc688\\\",\\\"param\\\":\\\"\\\",\\\"type\\\":\\\"InternalServerError\\\"}}\"",
+          "hasToolCalls": false
+        }
+      ],
+      "providerModels": [],
+      "hasText": false,
+      "hasToolCalls": false,
+      "ms": 60304
+    },
+    {
+      "arm": "C3",
+      "fn": "chat_v3",
+      "tools": 1,
+      "status": 200,
+      "rawBytes": 3254,
+      "errors": [
+        {
+          "ev": "error",
+          "code": 3003,
+          "message": "model service is unavailable\nerror, status code: 400, message: Unknown error: code = 500 Internal Server Error, err = \"{\\\"error\\\":{\\\"code\\\":\\\"ModelLoading\\\",\\\"message\\\":\\\"The request cannot be processed at this time because the model is currently being loaded, please retry later or contact with administrator if not work afterwards. Request id: 0217911107990988764f7237933d9cd64c1505a1609d6e0c10437\\\",\\\"param\\\":\\\"\\\",\\\"type\\\":\\\"InternalServerError\\\"}}\"",
+          "hasToolCalls": false
+        }
+      ],
+      "providerModels": [],
+      "hasText": false,
+      "hasToolCalls": false,
+      "ms": 60345
+    }
+  ]
+}

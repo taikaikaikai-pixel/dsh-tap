@@ -1041,6 +1041,8 @@ try {
     formatTraeErrorMessage(3003, 'all models failed').includes('聊天传输')
     && formatTraeErrorMessage(9999, 'x') === 'trae 9999 x'
     && formatTraeErrorMessage(null, 'HTTP 403') === 'trae HTTP 403')
+  check('formatTraeErrorMessage：3003 提示含 remote 工具环边界（2026-10-04 复诊补，防文案回退丢边界）',
+    formatTraeErrorMessage(3003, 'all models failed').includes('不支持 dsh 工具环'))
 
   const errMock = await mockTraeChat({ sseError: { code: 3003, message: 'all models failed', extra: null } })
   const rt6 = { running: false, port: null, lastError: null }

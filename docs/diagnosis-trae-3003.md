@@ -264,3 +264,31 @@ Trae 业务码 3003。
   `docs/probes/trae-chat-live-1791083764857.json`；事实表见
   docs/rules/gateway-facts.md「TraeWork CN 通道事实」。后续课题 = 找能把
   thinking 置 enabled 的 scene/参数组合。
+
+## 12. 第十二轮：用户复报「还是不能用」（2026-10-04 复诊）——inline 仍 3003，三传输出路实测
+
+- **复现**：用户桌面实例主聊天报 3003（内层同款 `high + disabled`，Request id
+  `0217911103827…`）。规范化诊断重跑（`docs/probes/` 当日落盘）：inline_chat 对
+  glm-5.3 与默认 kimi-k2.6 全臂 3003——**自 08-24 起第 6 周仍未自愈**（scene
+  thinking=disabled × 模型默认档 high 的组合非法，与请求内容无关）。
+- **三传输出路探测**（`scripts/probe-trae-transport-outage.mjs`，证据
+  `docs/probes/trae-transport-outage-1791110859199.json`）：
+  - **remote 面（chat_sessions）：健康**——create/events 双 200、真实文本、
+    `actualModel=glm-5.3`（真模型路由），21s；
+  - **chat_v3 面：本次也 3003**——内层 500 `ModelLoading`（60s 慢失败，glm-5.3
+    服务端加载故障），8 月「唯一活面」结论**不持续**，该面时好时坏；
+  - **chat_v3 + tools：同样 ModelLoading**——tools 行为无从判定。
+- **用户侧真实处境（本轮澄清的结构性边界）**：dsh 主聊天恒带 agent 工具表 ⇒
+  ① inline=3003（服务端）；② remote=网关诚实拒（`remote-no-tools` 400——云端
+  沙箱 agent 无法驱动本地工具环，放开只会静默断工具）；③ chat_v3=时坏。
+  **带工具环的 agent 对话在 Trae 通道当前整体不可用，插件侧无解**；纯文本会话
+  切 remote 即恢复。
+- **本轮处置**：①用户文件层 `traeChatTransport` 已由 inline 切 **remote**
+  （逐请求热读取，免重启；经运行网关实测：无 tools → 200 真实流式回答，
+  带 tools → 400 remote-no-tools）；②3003 处置提示文案补上 remote 工具环边界
+  （`providers/trae/errors.js`，避免「切了 remote 还是不能用」的二次困惑——
+  errors.js 属服务端代码，**重启 dsh 后生效**；verify-trae-provider 109 项全绿
+  含新断言锁）。
+- **后续课题（未决）**：inline 全臂 3003 已 6 周，`traeChatTransport` 默认值
+  `inline` 是否改 `remote` 属产品决策（remote 耗 work 池、不支持工具环、会话
+  ~20s 慢启动），需用户拍板，本轮不动默认值。

@@ -31,7 +31,7 @@ export const TRAE_ERROR_CODES = {
 
 /** 已知错误码的可操作处置提示（追加在透传消息之后，帮助用户自助而非只看裸码）。 */
 const TRAE_ERROR_HINTS = {
-  3003: '（Trae 服务端 inline 通道当前对该模型名返回此错——非凭据/配额问题；需要真实模型选择或服务端持续故障时，请在插件设置卡把「聊天传输」切为 remote，详见 docs/diagnosis-trae-3003.md）',
+  3003: '（Trae 服务端 inline 通道当前对该模型名返回此错——非凭据/配额问题；纯文本会话可在插件设置卡把「聊天传输」切为 remote 恢复（真实模型路由；耗 work 额度池）。注意：remote 通道不支持 dsh 工具环——带工具的 agent 对话切过去仍会被拒（remote-no-tools），此类对话只能等服务端 inline 面恢复，详见 docs/diagnosis-trae-3003.md）',
   991502: '（remote 并发额度被存活会话占满：等待沙箱 TTL 自灭或在 Trae 端停止会话后重试）',
 }
 
