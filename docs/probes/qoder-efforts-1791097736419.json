@@ -1,0 +1,344 @@
+{
+  "at": "2026-10-04T07:08:56.420Z",
+  "endpoint": "http://127.0.0.1:3913/v1",
+  "purpose": "reasoning_effort 档位单调性实测（0.18.0/0.19.0 未定论的复核：显式档位 × 多采样）",
+  "prompt": "一个农夫有 17 只羊，除了 9 只以外都跑了，还剩几只？只给最终数字。",
+  "maxTokens": 1024,
+  "repeat": 3,
+  "armDesign": "臂 = 显式 reasoning_effort（网关透传不覆盖，绕开 prefs 注入）；off 臂跳过（省略参数会触发 prefs 注入）",
+  "declaredTiersSource": "providers/qoder/catalog.js qoderReasoningEfforts 的 2026-10-04 目录快照（docs/probes/qoder-thinking-config-*.json）",
+  "verdictRule": "档位语义序（off<low<medium<high<xhigh<max）上 reasoningChars 均值单调不减 → MONOTONIC；任一下降或臂报错 → INCONCLUSIVE（踩坑 #42）",
+  "models": [
+    {
+      "model": "qmodel_38max",
+      "declaredTiers": [
+        "off",
+        "low",
+        "medium",
+        "xhigh"
+      ],
+      "armsRun": [
+        "low",
+        "medium",
+        "xhigh"
+      ],
+      "offSkipped": true,
+      "verdict": "INCONCLUSIVE",
+      "verdictReason": "非单调（#42）：low mean 273.7 → medium mean 248 下降，不下结论",
+      "arms": {
+        "low": {
+          "runs": 3,
+          "status": 200,
+          "reasoningChars": {
+            "min": 253,
+            "mean": 273.7,
+            "max": 286
+          },
+          "completionTokens": {
+            "min": 100,
+            "mean": 102.7,
+            "max": 104
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "reasoningChars": 253,
+              "textChars": 1,
+              "completionTokens": 100,
+              "finishReason": "stop",
+              "usage": {
+                "prompt_tokens": 88,
+                "completion_tokens": 100,
+                "total_tokens": 188,
+                "credit": 0.10345632
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "reasoningChars": 282,
+              "textChars": 1,
+              "completionTokens": 104,
+              "finishReason": "stop",
+              "usage": {
+                "prompt_tokens": 88,
+                "completion_tokens": 104,
+                "total_tokens": 192,
+                "credit": 0.10665599999999999
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "reasoningChars": 286,
+              "textChars": 1,
+              "completionTokens": 104,
+              "finishReason": "stop",
+              "usage": {
+                "prompt_tokens": 88,
+                "completion_tokens": 104,
+                "total_tokens": 192,
+                "credit": 0.10665599999999999
+              },
+              "error": null
+            }
+          ]
+        },
+        "medium": {
+          "runs": 3,
+          "status": 200,
+          "reasoningChars": {
+            "min": 241,
+            "mean": 248,
+            "max": 256
+          },
+          "completionTokens": {
+            "min": 95,
+            "mean": 97.7,
+            "max": 101
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "reasoningChars": 247,
+              "textChars": 1,
+              "completionTokens": 95,
+              "finishReason": "stop",
+              "usage": {
+                "prompt_tokens": 88,
+                "completion_tokens": 95,
+                "total_tokens": 183,
+                "credit": 0.09945672
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "reasoningChars": 241,
+              "textChars": 1,
+              "completionTokens": 97,
+              "finishReason": "stop",
+              "usage": {
+                "prompt_tokens": 88,
+                "completion_tokens": 97,
+                "total_tokens": 185,
+                "credit": 0.10105655999999999
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "reasoningChars": 256,
+              "textChars": 1,
+              "completionTokens": 101,
+              "finishReason": "stop",
+              "usage": {
+                "prompt_tokens": 88,
+                "completion_tokens": 101,
+                "total_tokens": 189,
+                "credit": 0.10425624
+              },
+              "error": null
+            }
+          ]
+        },
+        "xhigh": {
+          "runs": 3,
+          "status": 200,
+          "reasoningChars": {
+            "min": 201,
+            "mean": 229,
+            "max": 254
+          },
+          "completionTokens": {
+            "min": 79,
+            "mean": 91.3,
+            "max": 101
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "reasoningChars": 201,
+              "textChars": 1,
+              "completionTokens": 79,
+              "finishReason": "stop",
+              "usage": {
+                "prompt_tokens": 88,
+                "completion_tokens": 79,
+                "total_tokens": 167,
+                "credit": 0.08665799999999999
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "reasoningChars": 232,
+              "textChars": 1,
+              "completionTokens": 94,
+              "finishReason": "stop",
+              "usage": {
+                "prompt_tokens": 88,
+                "completion_tokens": 94,
+                "total_tokens": 182,
+                "credit": 0.0986568
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "reasoningChars": 254,
+              "textChars": 1,
+              "completionTokens": 101,
+              "finishReason": "stop",
+              "usage": {
+                "prompt_tokens": 88,
+                "completion_tokens": 101,
+                "total_tokens": 189,
+                "credit": 0.10425624
+              },
+              "error": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "model": "dmodel",
+      "declaredTiers": [
+        "off",
+        "high",
+        "max"
+      ],
+      "armsRun": [
+        "high",
+        "max"
+      ],
+      "offSkipped": true,
+      "verdict": "INCONCLUSIVE",
+      "verdictReason": "非单调（#42）：high mean 790 → max mean 381.3 下降，不下结论",
+      "arms": {
+        "high": {
+          "runs": 3,
+          "status": 200,
+          "reasoningChars": {
+            "min": 522,
+            "mean": 790,
+            "max": 965
+          },
+          "completionTokens": {
+            "min": 171,
+            "mean": 268.3,
+            "max": 329
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "reasoningChars": 522,
+              "textChars": 1,
+              "completionTokens": 171,
+              "finishReason": "stop",
+              "usage": {
+                "prompt_tokens": 122,
+                "completion_tokens": 171,
+                "total_tokens": 293,
+                "credit": 0.1269873
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "reasoningChars": 883,
+              "textChars": 1,
+              "completionTokens": 305,
+              "finishReason": "stop",
+              "usage": {
+                "prompt_tokens": 122,
+                "completion_tokens": 305,
+                "total_tokens": 427,
+                "credit": 0.20737925999999998
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "reasoningChars": 965,
+              "textChars": 1,
+              "completionTokens": 329,
+              "finishReason": "stop",
+              "usage": {
+                "prompt_tokens": 122,
+                "completion_tokens": 329,
+                "total_tokens": 451,
+                "credit": 0.22177782
+              },
+              "error": null
+            }
+          ]
+        },
+        "max": {
+          "runs": 3,
+          "status": 200,
+          "reasoningChars": {
+            "min": 210,
+            "mean": 381.3,
+            "max": 552
+          },
+          "completionTokens": {
+            "min": 79,
+            "mean": 139,
+            "max": 201
+          },
+          "error": null,
+          "samples": [
+            {
+              "status": 200,
+              "reasoningChars": 210,
+              "textChars": 1,
+              "completionTokens": 79,
+              "finishReason": "stop",
+              "usage": {
+                "prompt_tokens": 122,
+                "completion_tokens": 79,
+                "total_tokens": 201,
+                "credit": 0.07179282
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "reasoningChars": 382,
+              "textChars": 1,
+              "completionTokens": 137,
+              "finishReason": "stop",
+              "usage": {
+                "prompt_tokens": 122,
+                "completion_tokens": 137,
+                "total_tokens": 259,
+                "credit": 0.10658933999999999
+              },
+              "error": null
+            },
+            {
+              "status": 200,
+              "reasoningChars": 552,
+              "textChars": 1,
+              "completionTokens": 201,
+              "finishReason": "stop",
+              "usage": {
+                "prompt_tokens": 122,
+                "completion_tokens": 201,
+                "total_tokens": 323,
+                "credit": 0.1449855
+              },
+              "error": null
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
