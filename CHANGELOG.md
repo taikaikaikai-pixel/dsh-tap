@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.20.0 (2026-10-05)
+
+- **Trae 通道「额度/模型/工具环」在 DSH 闭环——agent 传输档（`traeChatTransport:'agent'`，goal docs/goals/trae-agent-v3.md 的 M1→M3 一轮落地）**：inline 面 3003 第 6 周未愈、remote 面架构性拒绝工具的处境下，探针证实同端点 `llm_utils_chat` 的 `function=solo_work_lite` 面是第三条活路。证据 `docs/probes/trae-agent-v3-*.jsonl`（8 臂 + function 名扫描 ×2）：
+  - **M1 探针（`scripts/probe-trae-agent-v3.mjs`）**：决策门 PASS——A1 纯聊天 200 流式；A2 tools+auto 出结构化 tool_calls；A3 两轮工具闭环（assistant tool_calls + role:tool 回传 → 最终回答）；A4 并行调用单事件双 tool_calls；A5 reasoning_effort 被忽略不报错（如实记录）；E1 错模型名/E2 坏参数静默容忍；A6 kimi-k2.6/DeepSeek-V4-Flash 的 provider_model_name 恒 glm-5.2（模型位钉死证实）。function 名扫描：agent_chat/agent_v3/solo_agent_chat 等均未注册（2001）；chat 已注册但模型不被路由（4023）。新坑 **#68**（同端点不同 function 面各有出站方言：历史 assistant.tool_calls 在 solo_work_lite 面必须 `function_call` 键，OpenAI `function` 键被 proto 层拒 2001「required field Name is not set」）。
+  - **M2 实装（全落 providers/trae/ + index.js，core/ 零 diff）**：`buildChatRequest` 增 `{fnKey}` 选项（`nativeToolCalls`/`toNativeMessages` 按面换键）；`handleChat` 增 agent 分支（function=solo_work_lite、无 3003→chat_v3 回退——agent 面本身就是出路；改派诚实披露/计量记真实模型沿用既有机制）；`errors.js` 码表补 2001（function 未注册/proto 形态错，提示带 function_call 键指引）/4001/4011/4023（chat 模型未知）/9074，3003 提示补 agent 出路；index.js `traeChatTransport` 枚举加 `'agent'`；设置卡「聊天传输」加第三档（标注：支持工具+并行，模型恒 glm-5.2，耗 IDE 额度）。reasoning_effort 照发不虚标（上游忽略）；档位注入维持仅在 remote 面。
+  - **M3 验证**：verify-trae-provider 131→**141** 断言（新增 agent 节 8 断言：出站 function/function_call 键/tool 回传块化/tools 透传/effort 照发/3003 不回退/码表扩充）；离线十一套件全绿；core/ 零 diff；**真实端到端双层**：①临时网关实例（生产代码 + 真实凭据）两轮工具环 PASS；②**真实 DSH 桌面宿主内**（重启加载新码 → 热切 transport=agent → 选择器点选 TraeWork CN/GLM-5.3）：「bash echo + read STATE.md」真实会话端到端成功（轨迹视图双工具执行记录、最终回答正确引用两结果），**IDE 额度池实测扣减** 430.394→482.54（证据 docs/probes/trae-agent-e2e-host-2026-10-05.json）；`probe-effort-gaps` 三通道 11/11 无缺口；card-accordion **204/0** + 跑前后 `codebuddy-plugin.json` md5 一致。
+  - **边界如实标注（不虚标能力）**：agent 面模型路由钉死 glm-5.2（「模型可用」= 目录模型名可发、实际由 glm-5.2 服务）；reasoning_effort 无效；inline 面 3003 未愈（agent 是绕路非修复）。docs/diagnosis-trae-3003.md §13 销案（「插件侧无解」结论终结）。默认传输档未动（inline→remote→agent 的默认值决策留给用户）。
+  - **生效方式**：`traeChatTransport` 逐请求热读取免重启；设置卡（浏览器半）刷新页面即见新档；errors.js 新文案重启生效。
+
+
 ## 0.19.1 (2026-10-04)
 
 - **TraeWork CN 通道修复与档位出档（goal docs/goals/trae-work-cn-repair.md，G1→G4 + 复诊一轮落地）**：桌面端「同步目录」从恒失败到 26 模型可用、思考档位从不出档到宿主「推理等级」出 Default/Low/High/Xhigh；新坑 **#66/#67**；证据 `docs/probes/trae-thinking-scene-*.json` + `trae-transport-outage-*.json`：

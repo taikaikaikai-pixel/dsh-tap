@@ -138,7 +138,12 @@ export const Config = z.object({
   // 原生 tools，耗 IDE 额度池）| remote（chat_sessions——模型选择真实生效，
   // 不支持 tools，每请求起云端沙箱 agent，耗 work 额度池）。2026-08-24 探测
   // 定论见 providers/trae/remote.js 文件头。
-  traeChatTransport: z.union([z.const('inline'), z.const('remote')]).default('inline'),
+  // agent（2026-10-05 探针落地，证据 docs/probes/trae-agent-v3-*.jsonl）：
+  // llm_utils_chat+solo_work_lite——原生 tools + 并行调用 + role:tool 回传
+  // 闭环（历史 assistant.tool_calls 出站键=function_call）；模型位钉死
+  // glm-5.2（timing_cost 真值源，改派诚实披露）；reasoning_effort 被忽略；
+  // 耗 IDE 额度池。
+  traeChatTransport: z.union([z.const('inline'), z.const('remote'), z.const('agent')]).default('inline'),
   // inline 上游首字节护栏（毫秒）：边缘/本地代理"收下请求不回应"时快速失败，
   // 避免用户请求无限挂死（2026-08-24 故障取证 docs/diagnosis-trae-3003.md §8）。
   // 仅约束响应头到达前；SSE 长流在头到达后不受影响。
