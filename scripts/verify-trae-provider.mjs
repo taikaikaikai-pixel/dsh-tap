@@ -522,6 +522,27 @@ try {
   check('profile 字段映射（ctx/maxTokens/多模态）', glm.contextWindow === 200000 && glm.maxTokens === 64000 && !glm.input && kimi.input[1] === 'image')
   check('ctx 缺失回落 max 数组最大档', kimi.contextWindow === 500000)
   check('目录指纹进 view（不泄露 key）', typeof view.candidate === 'string' && view.candidate.startsWith('sha256:'))
+  // syncView（设置卡模型区的同步状态）：失败原因必须随视图带出——此前
+  // catalogView() 失败即 null，UI 只能显示泛化「未同步」（goal: trae-work-cn-repair G2）。
+  const syncOkView = traeProvider.syncView()
+  check('syncView 成功态：计数在、无 error', syncOkView && syncOkView.count === 2 && syncOkView.error === undefined)
+  const syncFail = await traeProvider.syncCatalog({ dbPath: join(workDir, 'no-such.vscdb') })
+  check('syncCatalog 失败 kept=true（旧清单保留）', syncFail.ok === false && syncFail.kept === true && typeof syncFail.error === 'string', JSON.stringify(syncFail))
+  const keptView = traeProvider.syncView()
+  check('syncView kept 场景：带 error 且保留旧计数', keptView && keptView.error === syncFail.error && keptView.count === 2, JSON.stringify(keptView))
+  const freshProvider = createTraeProvider({
+    readAuth: () => ({}),
+    writeAuth: () => {},
+    settings: () => settings,
+    withCredentials: async () => ({ cred: null, res: null, err: null }),
+    meter: { record: () => {} },
+    runtime: { running: false, port: null, lastError: null },
+  })
+  const freshFail = await freshProvider.syncCatalog({ dbPath: join(workDir, 'no-such.vscdb') })
+  const freshView = freshProvider.syncView()
+  check('无旧清单时 syncView 只有 error', freshView && freshView.error === freshFail.error && freshView.count === undefined, JSON.stringify(freshView))
+  const freshOk = await freshProvider.syncCatalog({ dbPath })
+  check('再次成功同步后 error 清空', freshOk.ok === true && freshProvider.syncView().error === undefined)
 
   // catalogToProfiles 纯函数：空目录安全
   check('catalogToProfiles 容忍空输入', catalogToProfiles(null).length === 0 && catalogToProfiles({ models: [] }).length === 0)
@@ -820,7 +841,6 @@ try {
     && rCreate.headers['x-trae-client-type'] === 'web'
     && rCreate.headers['origin'] === 'https://solo.trae.cn')
   check('remote 计量：记 model_config 的真实模型', meterRemote.some((m) => m.model === 'glm-5.3' && m.usage?.total_tokens === 109))
-
   // 非流式聚合
   const rAgg = await fetch(`http://127.0.0.1:${rt5.port}/v1/chat/completions`, {
     method: 'POST',

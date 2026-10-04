@@ -1439,9 +1439,7 @@ function settingsView(resolveNow) {
       },
       models: {
         disabled: Object.keys(readTraeModelState().disabled),
-        sync: traeProvider.catalogView()
-          ? { at: traeProvider.catalogView().at, count: traeProvider.catalogView().count, candidate: traeProvider.catalogView().candidate }
-          : null,
+        sync: traeProvider.syncView(),
       },
     },
     models: {
@@ -1510,6 +1508,7 @@ function settingsView(resolveNow) {
  *   POST {action:'provider-test'|'credential-test'}         → P2-5「测一下」凭据主动验证
  *                                                             （available 布尔即结论，恒 200）
  *   POST {action:'trae-oauth-*'|'trae-model-*'|'trae-quota'（双池余额只读）}
+ *   POST {patch:{traeModelSetEnabled:{id,enabled}}}             → Trae 逐模型启停 → 镜像
  *   POST {action:'qoder-oauth-*'|'qoder-model-*'|'qoder-quota'（配额只读）}
  *   POST {action:'usage'}                                   → usage meter + bridge state + quota snapshot
  *   POST {action:'gateway-retry', channel}                  → P2-3 区块头「重试监听」：

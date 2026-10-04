@@ -36,6 +36,7 @@ export function createTraeProvider(deps) {
 
   // 目录实例状态（模块作用域每插件实例一份，踩坑 #20 纪律）。
   let catalogState = null // { profiles, catalog, fetchedAt, source }
+  let lastSyncError = null // 最近一次同步失败原因（成功即清空；设置卡模型区显示用）
 
   const provider = {
     id: TRAE_PROVIDER_ID,
@@ -46,9 +47,11 @@ export function createTraeProvider(deps) {
       try {
         const result = fetchLocalCatalog({ dbPath })
         catalogState = result
+        lastSyncError = null
         return { ok: true, count: result.profiles.length, fetchedAt: result.fetchedAt, source: result.source }
       } catch (err) {
-        return { ok: false, error: err?.message ?? String(err), kept: catalogState != null }
+        lastSyncError = err?.message ?? String(err)
+        return { ok: false, error: lastSyncError, kept: catalogState != null }
       }
     },
 
@@ -61,6 +64,19 @@ export function createTraeProvider(deps) {
             profiles: catalogState.profiles,
           }
         : null
+    },
+
+    /** 设置卡模型区的同步状态：成功 → {at,count,candidate}；失败 → 附 error
+     * （有旧清单则连同旧计数一起给 = kept 语义；从未成功过则只有 error）。 */
+    syncView() {
+      if (!catalogState) return lastSyncError ? { error: lastSyncError } : null
+      const view = {
+        at: catalogState.fetchedAt,
+        count: catalogState.profiles.length,
+        candidate: catalogState.source.chosen,
+      }
+      if (lastSyncError) view.error = lastSyncError
+      return view
     },
 
     /** 已同步目录 id（/models 端点与镜像同步用）。 */
