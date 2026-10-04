@@ -38,4 +38,4 @@
 ## M4 收尾状态
 
 - docs/rules/gateway-facts.md「agent 面」节、docs/diagnosis-trae-3003.md §13 销案、docs/pitfalls.md #68、AGENTS.md 速查、CHANGELOG 0.20.0、STATE.md——均已写
-- **未做**：发版（版本号 + annotated tag + push）——按 goal 红线等用户确认；默认传输档未动（inline/remote/agent 默认值决策留给用户）；M0（装 dsh-connect-trae 对照）跳过。
+- **已决（2026-10-05 用户拍板「开始做吧」）**：默认传输档 inline→agent（`traeChatTransport` Config 默认 + 设置卡选项顺序同步）；发版 0.20.0 + annotated tag + push 按确认执行。M0（装 dsh-connect-trae 对照）跳过。
