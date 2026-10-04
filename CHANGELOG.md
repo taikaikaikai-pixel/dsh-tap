@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.19.1 (2026-10-04)
+
+- **TraeWork CN 通道修复与档位出档（goal docs/goals/trae-work-cn-repair.md，G1→G4 + 复诊一轮落地）**：桌面端「同步目录」从恒失败到 26 模型可用、思考档位从不出档到宿主「推理等级」出 Default/Low/High/Xhigh；新坑 **#66/#67**；证据 `docs/probes/trae-thinking-scene-*.json` + `trae-transport-outage-*.json`：
+  - **G1 vscdb 发现按平台分支（`fix(trae)` c6e1954）**：`discoverStateDbs()` 此前写死 WSL 形态 `/mnt/c/Users`，Windows 桌面端（原生进程）恒扫空 → 同步恒报「未发现 state.vscdb」。修法 = 无参调用按 `process.platform` 分路（win32 直查 `os.homedir()/AppData/Roaming/{TRAE SOLO CN,TraeWork CN}/…`，WSL 保持逐用户扫描），`{platform, home}` 可注入供离线夹具。验收：:3090 实例 `trae-model-sync` `{ok:true,count:26}`；verify-trae-model-catalog 真实库段实测跑通（3 候选 29 模型）。
+  - **G2 同步失败原因浮到 UI（`feat(trae)` 76381cb）**：失败原因此前只在 POST 响应体、GET 视图恒 `sync:null` ⇒ 模型区永远泛化「未同步」。落地 = provider 记 `lastSyncError` + 新 `syncView()`（kept 场景带旧计数附 error），设置卡 syncbar 显示「同步失败：<真实原因>」/「已同步…｜最近同步失败：…」；顺手修 `syncModels` 不看 `res.d.ok` 的吞错。验收：改名 vscdb → UI 显示「…未发现 TRAE SOLO CN 的 state.vscdb…」，恢复 → 「已同步 26 个模型」（trae-sync-error-check 两模式实测）。
+  - **G3 思考档位出档（`feat(trae)` e1c1d24，探针门控通过）**：官方 bundle 取证 remote 通道 `custom_model.reasoning_effort` 是官方线缆字段；探针 `probe-trae-thinking-scene.mjs` 证实 remote 面 8/8 臂接受 + 真模型路由，inline_chat 面三变体全被忽略恒 3003（**终局销案**）。落地 = 目录归一 `reasoningEffortConfig` → `catalogToProfiles` 投影 `reasoningEfforts`（**键=宿主枚举映射 light→low/high→high/extra_high→xhigh，值=声明拼写**——原拼写做键被宿主 schema 整块静默拒收，坑 #66）→ 镜像 `compat.supportsReasoningEffort`（坑 #64）→ 设置卡逐模型 select（`traeModelSetPrefs`，允许集=声明∪存量）→ 网关 remote 出站注入（客户端带值优先、prefs 补默认）。验收：镜像 26 模型 11 带档位表；宿主「推理等级」出 Default/Low/High/Xhigh；效果方向性 2 采样 INCONCLUSIVE（#42 如实记录）。
+  - **G4 对账加固（`feat(probes)` 73ad7f1）**：`probe-effort-gaps` 补 `--token`（此前打不了带 token 闸的实例）+ Trae 从 SKIP 文案升级为真实三层对账（11/11 ok）。
+  - **Ark 档位臂定论（`feat(probe)` 7f370d9）**：`probe-ark-thinking.mjs --levels-as-arms`（budget=pi-ai 映射、max_tokens=32768 宿主线值），3 模型 ×5 臂 ×3 采样：3/3 非单调，high/max 同线值对照噪声达 2.5 倍 ⇒ **档位=budget 上限非强度旋钮**口径成立。
+  - **Qoder 档位多采样复证（`feat(probe)` 02a425d）**：`probe-qoder-thinking-efforts.mjs` 显式带 `reasoning_effort` 避 prefs 注入，2 模型 ×3 臂 ×3 采样同向非单调（高档位均值反而更低）——与 Ark 互证：**档位入口不报错 ≠ 有单调语义**。
+  - **3003 复诊（`fix(trae)` 87dece0）**：用户复报「还是不能用」→ 三传输出路实测（`probe-trae-transport-outage.mjs`）：inline 全臂 3003（第 6 周未愈）、**remote 面健康**（真模型路由）、chat_v3 本次也 3003（ModelLoading）。结构性结论：**带 dsh 工具环的 agent 对话在 Trae 通道当前不可用**（inline 服务端故障 × remote 架构边界 × chat_v3 时坏），插件侧无解；纯文本会话切 remote 即恢复（用户已切换并实测）。3003 提示文案补 remote 工具环边界（防「切了还是不能用」二次困惑）。
+  - **回归**：离线 11 套件全绿（verify-trae-model-catalog **55**、verify-trae-provider **109**、qoder 171、host-config 36、desktop-acceptance 13ok/4SKIP、models 23/23、bridge/rotation/core-generic/providers PASS、agents-md 踩坑 1..67 连续预算绿）；浏览器 card-accordion **204/0** + 跑前后 `codebuddy-plugin.json` md5 一致。
+  - **生效方式**：G3 镜像/compat 属启动期加载 ⇒ **重启 dsh / 退出并重启桌面应用**；设置卡（浏览器半）刷新页面；3003 新文案随 errors.js 重启生效；`traeChatTransport` 切换逐请求热读取免重启。
+
 ## 0.19.0 (2026-10-04)
 
 - **设置卡思考档位改由目录逐模型声明驱动 + 新模型免人工（B/C 步一轮）**（承接 0.18.0 的 A 步发版；Qoder 卡档位真源化、key 型服务商声明透传不丢、Trae/Ark 探针取证、缺口检测脚本；新坑见 pitfalls #64 同族增补）：
