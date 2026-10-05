@@ -1,0 +1,50 @@
+name: Bug 反馈
+description: 报告插件行为异常
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请先对照 README「[排查与已知问题](https://github.com/taikaikaikai-pixel/dsh-tap#排查与已知问题)」：Trae 通道 3003、缓存命中率低、Qoder provider_error / Flash 不可用等已有专项诊断文档。
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 症状
+      description: 期望行为 vs 实际行为；报错请贴完整错误文案与错误码
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 从哪一步开始、如何稳定触发；附模型名、传输档、所用通道
+    validations:
+      required: true
+  - type: input
+    id: dsh-version
+    attributes:
+      label: dsh 版本
+      description: CLI 版本号，或桌面版（settings → 关于）；≤ 0.1.6 与 ≥ 0.1.7 配置链路不同，必填
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: dsh-tap 版本
+      description: Plugin Manager 中显示的版本，或 `package.json` 的 version
+    validations:
+      required: true
+  - type: textarea
+    id: probe
+    attributes:
+      label: probe 输出
+      description: 浏览器访问 `GET /dsh-tap/settings?probe=host-config` 得到的 JSON（不含任何凭据，可放心粘贴）
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 截图
+      description: 桥日志（`CODEBUDDY_BRIDGE_LOG=/tmp/bridge.jsonl`）或其他佐证；截图请脱敏
+    validations:
+      required: false

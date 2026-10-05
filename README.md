@@ -5,7 +5,67 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%E2%89%A5%2022-blue)
 
-DeepSeek Harness（dsh）的**非官方上游插件包**：把三个模型上游接入 dsh 的对话模型选择器与工具链，并自带 Web UI 设置卡。纯 ESM、无构建步骤，Node ≥ 22。
+中文 | [English](README.en.md)
+
+把 **CodeBuddy（腾讯）/ TRAE SOLO CN（字节）/ Qoder CN（阿里）的订阅额度**，变成 [DeepSeek Harness（dsh）](https://github.com/deepseek-ai/deepseek-harness)对话选择器里的 20+ 个模型——设置卡里点一次浏览器授权即可使用，无需环境变量。另带 7 家 key 型 OpenAI 兼容上游、联网搜索/抓取、生图与逐模型思考强度，全部收进一张四区块手风琴设置卡。
+
+| 浅色 | 深色 |
+|------|------|
+| ![设置卡四区块总览（浅色）](docs/screenshots/settings-card-light.png) | ![设置卡四区块总览（深色）](docs/screenshots/settings-card-dark.png) |
+
+## 这是什么
+
+[dsh（DeepSeek Harness）](https://github.com/deepseek-ai/deepseek-harness)是开源编码 agent 宿主；本插件是它的**非官方上游插件包**。三条通道各自在本地起一个回环网关（流式桥 / OpenAI 翻译网关），主聊天与工具请求经网关统一收口凭据——调用方不自带密钥，凭据只存本机 `~/.dsh/`，永不回传浏览器。纯 ESM、无构建步骤。
+
+### 适合你，如果
+
+- 你在用 dsh（CLI 或桌面版），想让手里已有的国产订阅额度跑编码 agent；
+- 你有 CodeBuddy / TRAE SOLO CN / Qoder CN 任一账号（**三选一即可起步**）；
+- 或者你有任意 OpenAI 兼容服务的 API Key（火山 Ark / 百炼 / DeepSeek / 智谱 BigModel / Moonshot / OpenRouter / Qwen Code，或自定义 baseURL）。
+
+### 不适合你，如果
+
+- 你不用 dsh——本插件必须装进 dsh 才有意义（先按官方仓库指引安装 dsh）；
+- 你在找免费模型额度——插件不内置任何账号，只接入**你自己的**订阅与 Key。
+
+## 前置要求
+
+| 依赖 | 要求 |
+|------|------|
+| [DeepSeek Harness（dsh）](https://github.com/deepseek-ai/deepseek-harness) | ≥ 0.1.6（含 Plugin Manager）；安装方式见官方仓库 |
+| Node | ≥ 22 |
+| 上游账号 | CodeBuddy（OAuth 或 API Key）/ TRAE SOLO CN 订阅 / Qoder CN 订阅 三选一；或任意 key 型 OpenAI 兼容上游 |
+
+## 快速开始
+
+```sh
+# 从 GitHub 安装（装进 web profile）
+dsh plugin --profile web add github:taikaikaikai-pixel/dsh-tap
+
+# 或本地路径安装
+dsh plugin --profile web add /path/to/dsh-tap
+```
+
+1. **重启 dsh 进程生效**（desktop 宿主 = 退出并重启桌面应用）。
+2. 打开设置卡：dsh ≥ 0.1.6 在侧栏「插件」→ Plugin Manager → dsh-tap；更旧宿主在 Settings → 插件配置 → dsh-tap。
+3. 在对应通道区块的「凭据」组登录 → 模型自动出现在对话选择器。
+
+| 通道 | 登录方式 | 登录后 |
+|------|----------|--------|
+| CodeBuddy | 区块内选 **OAuth 登录**（浏览器授权，推荐）或填 API Key（可多把，自动轮询 + 失败冷却） | 模型目录自动同步 |
+| TraeWork CN | 区块头启用通道 →「凭据」组浏览器授权（一次） | 模型自动出现（默认 agent 传输档） |
+| Qoder CN | 「凭据」组浏览器授权 → 区块头启用通道 | 模型自动出现 |
+
+**装好即生效的默认行为**：静态补丁把 CodeBuddy provider 路由指向本地流式桥（默认模型 `deepseek-v3`）、`web_search`/`web_fetch` 钉选 CodeBuddy 后端、注册 `image_generate` 生图工具；三家目录在启用/登录后自动同步进选择器。所有主聊天与工具请求经本地网关统一收口凭据。
+
+### 常见疑问
+
+- **会消耗我的订阅额度吗？** 会——插件接入的是你自己的账号，额度消耗与官方客户端同源；通用区块提供精确计量（今日/累计 credit、请求数、最近轮次与缓存命中率）。
+- **凭据存在哪，安全吗？** 只存本机 `~/.dsh/*-plugin-auth.json`，永不回传浏览器（API Key 只回脱敏 `ck_a…5678`）；本地网关只监听 127.0.0.1 回环并做 Host+Origin 双门校验。
+- **模型列表从哪来？** 启动时从上游目录动态同步，网关不可达时无感回落内置静态清单（23 模型），选择器绝不变空。
+- **dsh 内置"获取可用模型"为什么无效？** CodeBuddy 网关没有 OpenAI 风格的 `GET /models`（404），这是宿主功能对本网关的固有限制；目录同步走独立通道，不受影响。
+
+## 三条上游通道
 
 | 上游 | 版本 | 凭据方式 | 本地网关 | 模型目录来源 |
 |------|------|----------|----------|--------------|
@@ -14,32 +74,6 @@ DeepSeek Harness（dsh）的**非官方上游插件包**：把三个模型上游
 | **Qoder CN**（阿里 qoder.cn 订阅额度） | v0.9.7/0.9.8 起 | PKCE S256 设备流 OAuth | OpenAI↔COSY 加密信封翻译网关 `127.0.0.1:3903` | 签名 `GET /algo/api/v2/model/list` |
 
 另含 **key 型 OpenAI 兼容上游注册表**：预设火山引擎 Ark、阿里云百炼、DeepSeek、智谱 BigModel、Moonshot AI、OpenRouter、Qwen Code 7 家，或自定义（id + baseURL）+ API Key，模型统一进对话选择器、免重启。
-
-## 快速开始
-
-### 安装
-
-```sh
-# 本地路径安装（把本插件装进 web profile）
-dsh plugin --profile web add /path/to/dsh-tap
-
-# 或从 GitHub 安装
-dsh plugin --profile web add github:taikaikaikai-pixel/dsh-tap
-```
-
-安装后重启 `dsh` 进程生效。dsh ≥ 0.1.6 在侧栏「插件」→ Plugin Manager → dsh-tap 打开设置卡；更旧宿主在 Settings → 插件配置 → dsh-tap。
-
-### 凭据
-
-- **CodeBuddy**：设置卡 CodeBuddy 区块「凭据」组切换登录方式。**OAuth 登录**（推荐）= 浏览器完成官方登录页授权，无需任何环境变量，令牌自动续期；**API Key** = 卡内添加一把或多把 Key（多把自动轮询 + 失败冷却），或写 `~/.dsh/.credentials.yaml` 的 `CODEBUDDY_API_KEY` / 同名环境变量兜底。
-- **TraeWork CN**：启用通道（区块头开关）→「凭据」组登录（浏览器授权一次）→ 模型自动出现。
-- **Qoder CN**：「凭据」组登录（浏览器授权）→ 区块头启用通道 → 模型自动出现。
-
-三家凭据分别存 `~/.dsh/codebuddy-plugin-auth.json`、`~/.dsh/trae-plugin-auth.json`、`~/.dsh/qoder-plugin-auth.json`，永不回传浏览器；API Key 只回脱敏显示（`ck_a…5678`）。
-
-### 默认行为
-
-装好即生效：静态补丁把 CodeBuddy provider 路由指向本地流式桥（默认模型 `deepseek-v3`）、`web_search`/`web_fetch` 钉选 CodeBuddy 后端、注册 `image_generate` 生图工具；三家目录在启用/登录后自动同步进选择器。所有主聊天与工具请求经本地网关统一收口凭据，调用方不自带密钥。
 
 ## 模型
 
@@ -155,6 +189,8 @@ v0.10.0 起是**四区块通道手风琴**：`CodeBuddy → TraeWork CN → Qode
 
 ## 开发与验证
 
+贡献流程与提交约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
 ### 校验套件（除 `npm run verify` 外全部离线、mock 上游；断言数以各脚本自身输出为准）
 
 | 命令 | 覆盖 |
@@ -199,7 +235,7 @@ v0.10.0 起是**四区块通道手风琴**：`CodeBuddy → TraeWork CN → Qode
 | Qoder 报 provider_error / Flash 不可用 | `docs/diagnosis-qoder-flash.md` |
 | 升级后模型/档位行为异常 | `GET /dsh-tap/settings?probe=host-config` 看宿主配置层选路与 lastError |
 
-其余问题请到 [Issues](https://github.com/taikaikaikai-pixel/dsh-tap/issues) 反馈，附 `?probe=host-config` 输出与复现步骤。
+其余问题请到 [Issues](https://github.com/taikaikaikai-pixel/dsh-tap/issues) 反馈（有 issue 模板），附 `?probe=host-config` 输出与复现步骤。
 
 ## 卸载
 

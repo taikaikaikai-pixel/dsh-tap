@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 排查与已知问题 / Troubleshooting
+    url: https://github.com/taikaikaikai-pixel/dsh-tap#排查与已知问题
+    about: Trae 3003、缓存命中率低、Qoder provider_error 等已有专项诊断文档，请先对照
