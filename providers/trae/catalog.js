@@ -60,6 +60,12 @@ export function catalogToProfiles(catalog) {
         const hostKey = TRAE_EFFORT_TO_HOST_KEY[opt] ?? (HOST_EFFORT_ENUM.has(opt) ? opt : undefined)
         if (hostKey) table[hostKey] = opt
       }
+      // max 档：目录不声明但上游实测接受且产生比 extra_high 更多的推理内容
+      //（2026-10-05 探针 docs/probes/trae-max-effort-1791203547000.json：
+      // glm-5.3 high 2788 < extra_high 3209 < max 4139 推理字符，方向一致）。
+      // 只给声明了 extra_high 的模型追加（extra_high 是目录最高声明档位，
+      // max 作为其上位档；无 extra_high 的模型不加——不臆造未测路径）。
+      if (eff.options.includes('extra_high') && !table.max) table.max = 'max'
       if (Object.keys(table).length) p.reasoningEfforts = table
     }
     list.push(p)

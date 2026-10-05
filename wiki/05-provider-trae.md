@@ -84,7 +84,7 @@ export function fetchLocalCatalog({ dbPath }) // { profiles, catalog, fetchedAt,
 ```
 
 - 纯函数复用 `scripts/trae-model-catalog.mjs`（`discoverStateDbs` / `copySqliteForRead` / `readModelListCandidates` / `selectDefaultCandidate` / `normalizeCatalog`——该脚本 CLI 入口带 import.meta 守卫，作为库导入不执行 main）。
-- 映射规则：只收 **preset 型**条目（`provider` 为空的；deepseek//… BYOK 条目路由到用户自己的 provider 会失败）；`contextWindow` 取 `contextWindowDefault` 回落 `contextWindowMax`（数组取最大档）；`maxTokens` 取 `maxOutputTokens`；`multimodal → input: [text, image]`；目录逐模型 `reasoning_effort_config:{support_thinking,options,default_level}` → `reasoningEfforts`（**键 = 宿主枚举映射 light→low/high→high/extra_high→xhigh，值 = 声明拼写**——宿主 schema 对键有固定枚举，直抄会被整块拒收，踩坑 #66）。
+- 映射规则：只收 **preset 型**条目（`provider` 为空的；deepseek//… BYOK 条目路由到用户自己的 provider 会失败）；`contextWindow` 取 `contextWindowDefault` 回落 `contextWindowMax`（数组取最大档）；`maxTokens` 取 `maxOutputTokens`；`multimodal → input: [text, image]`；目录逐模型 `reasoning_effort_config:{support_thinking,options,default_level}` → `reasoningEfforts`（**键 = 宿主枚举映射 light→low/high→high/extra_high→xhigh，值 = 声明拼写**——宿主 schema 对键有固定枚举，直抄会被整块拒收，踩坑 #66）；声明了 extra_high 的模型追加 `max` 上位档（目录不声明但 remote 面实测接受，2026-10-05 探针 docs/probes/trae-max-effort-*.json）。
 - 提取过程：发现 state.vscdb（**win32 无参直查 `os.homedir()/AppData/Roaming/{产品目录}/…`，WSL 扫 `/mnt/c/Users/*/…`**，踩坑 #67）→ **临时副本**读 SQLite（不碰活库）→ 临时目录用后即删。
 
 ## gateway.js — OpenAI↔Trae 翻译网关（:3902）

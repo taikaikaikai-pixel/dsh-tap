@@ -66,12 +66,18 @@ export function createTraeProvider(deps) {
             // 逐模型目录声明档位（reasoning_effort_config.options 原文拼写，G3）——
             // 设置卡 select 选项与 traeModelSetPrefs 校验的真源（上游词汇；宿主
             // 选择器侧的枚举键映射在 catalogToProfiles 的 reasoningEfforts 里）。
-            // 未声明模型不在场。
+            // 未声明模型不在场。max 不在目录 options 里但上游实测接受且产生
+            // 比 extra_high 更多的推理（docs/probes/trae-max-effort-*.json），
+            // 给声明了 extra_high 的模型追加为上位档。
             efforts: Object.fromEntries(
               (catalogState.catalog?.models ?? [])
                 .filter((m) => m.reasoningEffortConfig?.supportThinking === true
                   && Array.isArray(m.reasoningEffortConfig.options) && m.reasoningEffortConfig.options.length)
-                .map((m) => [m.id, m.reasoningEffortConfig.options])),
+                .map((m) => {
+                  const opts = m.reasoningEffortConfig.options.slice()
+                  if (opts.includes('extra_high') && !opts.includes('max')) opts.push('max')
+                  return [m.id, opts]
+                })),
           }
         : null
     },

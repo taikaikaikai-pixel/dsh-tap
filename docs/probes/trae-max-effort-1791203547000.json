@@ -1,0 +1,49 @@
+{
+  "at": "2026-10-05T20:19:07+08:00",
+  "purpose": "探测 Trae remote 通道是否接受 reasoning_effort=max 拼写，以及 max vs extra_high vs high 的推理量差异",
+  "model": "glm-5.3",
+  "prompt": "一个笼子里有鸡和兔共 10 只，脚共 28 只。鸡兔各几只？只给最终数字。",
+  "base": "https://trae-api-cn.mchost.guru",
+  "method": "POST /api/remote/v1/chat_sessions + GET /events (read to EOF), parse via .event field",
+  "results": [
+    {
+      "effort": "high",
+      "createHttp": 200,
+      "eventsHttp": 200,
+      "reasoningChars": 2788,
+      "textChars": 39,
+      "actualModel": "glm-5.3",
+      "finish": "finish",
+      "bytes": 38800,
+      "plan_item_count": 21,
+      "ms": 28776
+    },
+    {
+      "effort": "extra_high",
+      "createHttp": 200,
+      "eventsHttp": 200,
+      "reasoningChars": 3209,
+      "textChars": 24,
+      "actualModel": "glm-5.3",
+      "finish": "finish",
+      "bytes": 38659,
+      "plan_item_count": 20,
+      "ms": 35399
+    },
+    {
+      "effort": "max",
+      "createHttp": 200,
+      "eventsHttp": 200,
+      "reasoningChars": 4139,
+      "textChars": 27,
+      "actualModel": "glm-5.3",
+      "finish": "finish",
+      "bytes": 40507,
+      "plan_item_count": 21,
+      "ms": 38362
+    }
+  ],
+  "verdict": "DIRECTION-CONSISTENT: high(2788) < extra_high(3209) < max(4139). max 是真实独立档位，不是假档位。上游接受 max 拼写并产生比 extra_high 更多的推理内容。",
+  "note": "deepseek-v4.1-flash 在 remote 通道上未产生 plan_item 事件（0 reasoning chars），但 create 200 + events 200，上游不拒绝。可能是该模型在 remote 通道不推推理内容，或事件结构不同。max 拼写本身被上游接受（无 400/业务错误）。",
+  "discipline": "踩坑 #42：能力声明≠线值。本探测确认 max 线值被上游接受且产生方向一致的更多推理，非臆造。"
+}
