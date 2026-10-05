@@ -28,6 +28,10 @@ Turn your **CodeBuddy (Tencent) / TRAE SOLO CN (ByteDance) / Qoder CN (Alibaba) 
 ## Quick start
 
 ```sh
+# From npm (prebuilt tarball, skips the allowBuilds approval)
+dsh plugin --profile web add dsh-tap
+
+# Or from GitHub (from source)
 dsh plugin --profile web add github:taikaikaikai-pixel/dsh-tap
 ```
 

@@ -39,10 +39,13 @@
 ## 快速开始
 
 ```sh
-# 从 GitHub 安装（装进 web profile）
+# 从 npm 安装（预构建 tarball，免 allowBuilds 构建审批）
+dsh plugin --profile web add dsh-tap
+
+# 或从 GitHub 安装（源码）
 dsh plugin --profile web add github:taikaikaikai-pixel/dsh-tap
 
-# 或本地路径安装
+# 或本地路径安装（开发）
 dsh plugin --profile web add /path/to/dsh-tap
 ```
 
