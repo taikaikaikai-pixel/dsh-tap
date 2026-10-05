@@ -35,6 +35,8 @@ dsh plugin --profile web add github:taikaikaikai-pixel/dsh-tap
 2. Open the settings card: sidebar 「插件」→ Plugin Manager → dsh-tap.
 3. Sign in from the channel block's **Credentials** group → models appear in the conversation model picker automatically.
 
+![CodeBuddy block expanded: credentials / models / tools / gateway groups (account name masked)](docs/screenshots/settings-card-codebuddy-light.png)
+
 Each channel runs a local loopback gateway (streaming bridge / OpenAI translation gateways on `127.0.0.1:3901/3902/3903`) that holds the only copy of your credentials. Tokens and keys are stored on your machine under `~/.dsh/` and are never sent to the browser (API keys only appear masked, `ck_a…5678`).
 
 ## Documentation

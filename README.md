@@ -143,6 +143,8 @@ describe-image:
 
 v0.10.0 起是**四区块通道手风琴**：`CodeBuddy → TraeWork CN → Qoder CN → 通用`，默认全部收起，首屏即四条状态行（登录态 / 模型数 / 网关端口 / 额度与服务商数；warn/err 就地出现在所属区块头，不展开也读得到）。展开后按 `凭据 → 模型 → [工具] → 网关 → 高级` 分组（只有 CodeBuddy 有「工具」组），修改即保存、立即生效。展开才挂载、收起不卸载——草稿与已拉目录跨收起保留。
 
+![CodeBuddy 区块展开：凭据 / 模型 / 工具 / 网关 分组（账号名已脱敏）](docs/screenshots/settings-card-codebuddy-light.png)
+
 设置持久化在 `~/.dsh/codebuddy-plugin.json`（优先级：该文件 > 插件组合配置 > 默认值）。模型启停/上限等宿主侧写入经 `host-config.js` 按宿主版本选路：**dsh 0.1.7+ 写 profile 的 cordis patch**（Settings forms seam），**≤0.1.6 写 `~/.dsh/settings.yaml`**。
 
 ### 登录与凭据（CodeBuddy）

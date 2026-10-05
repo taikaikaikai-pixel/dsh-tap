@@ -26,6 +26,7 @@
     "docs/diagnosis-trae-3003.md",
     "docs/diagnosis-qoder-flash.md",
     "README.md",
+    "README.en.md",
     "LICENSE",
     "CHANGELOG.md",
     "AGENTS.md"
@@ -45,6 +46,8 @@
     "dsh-plugin",
     "deepseek-harness",
     "codebuddy",
+    "trae",
+    "qoder",
     "llm",
     "deepseek",
     "glm",
@@ -52,6 +55,14 @@
     "minimax",
     "hunyuan"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taikaikaikai-pixel/dsh-tap.git"
+  },
+  "bugs": {
+    "url": "https://github.com/taikaikaikai-pixel/dsh-tap/issues"
+  },
+  "homepage": "https://github.com/taikaikaikai-pixel/dsh-tap#readme",
   "license": "MIT",
   "dependencies": {
     "@deepseek-ai/schemastery": "3.18.1",
