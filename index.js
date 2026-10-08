@@ -410,6 +410,30 @@ function catalogReasoningEfforts(m) {
   return table
 }
 
+/**
+ * 已知支持视觉输入的模型白名单（README 模型表「图片」列标 ✔ 的快照，
+ * 2026-09-22 按网关目录对齐）。作用：上游 `/v3/config` 的 `supportsImages`
+ * 字段暴露不全/不可靠，盲信它会让明明能识图的模型在 dsh 核心的
+ * `inputModalities` 检查（api-proxy.ts MODEL_DOES_NOT_SUPPORT_IMAGES）被静默
+ * 拦死。这里在上游没声明时也按白名单投影 `input: ['text','image']`。
+ * 上游显式 `supportsImages: true` 仍优先（见 catalogToProfile），本表只兜底。
+ */
+const VISION_MODEL_IDS = new Set([
+  'deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4.1-flash',
+  'glm-5.1', 'glm-5.2', 'glm-5.3', 'glm-5v-turbo',
+  'kimi-k2.5', 'kimi-k2.6', 'kimi-k2.7', 'kimi-k3-1',
+  'minimax-m2.7', 'minimax-m3',
+  'hy3', 'hy3-x',
+])
+
+/** 给命中视觉白名单的模型补上 image 输入模态（不覆盖上游已声明的更大集合）。 */
+function withVisionInput(p) {
+  if (!p || typeof p.id !== 'string' || !VISION_MODEL_IDS.has(p.id)) return p
+  const input = Array.isArray(p.input) ? [...p.input] : ['text']
+  if (!input.includes('image')) input.push('image')
+  return { ...p, input }
+}
+
 /** 目录条目 → 模型 profile（尺寸/图像来自目录；思考档位表见上）。 */
 function catalogToProfile(m) {
   const p = { id: m.id, name: typeof m.name === 'string' && m.name ? m.name : m.id }
@@ -418,7 +442,8 @@ function catalogToProfile(m) {
   if (m.images === true) p.input = ['text', 'image']
   const efforts = catalogReasoningEfforts(m)
   if (efforts) p.reasoningEfforts = efforts
-  return p
+  // 上游未声明视觉时，按白名单兜底投影 image 模态。
+  return withVisionInput(p)
 }
 
 /**
@@ -502,12 +527,13 @@ function computeEffectiveModels() {
   // G5：应用每模型覆盖值（contextWindow/maxTokens），覆盖随镜像即时生效。
   return list.map((m) => {
     const o = overrides[m.id]
-    if (!o) return m
-    return {
+    const merged = o ? {
       ...m,
       ...(o.contextWindow != null ? { contextWindow: o.contextWindow } : null),
       ...(o.maxTokens != null ? { maxTokens: o.maxTokens } : null),
-    }
+    } : m
+    // 静态/目录回落路径也按视觉白名单兜底投影 image 模态。
+    return withVisionInput(merged)
   })
 }
 
