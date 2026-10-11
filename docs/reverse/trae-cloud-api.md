@@ -80,6 +80,22 @@ TraeWork CN 的聊天面是**任务制私有 RPC**（`/api/agent/v3/*`，SSE）�
   前缀 + `/v1/chat/completions` 组合 + `ak/sk` 字段——BYOK 条目由 harness 直连
   第三方（与 state.vscdb 目录里 `deepseek//…` 条目带 ak/sk 互证），
   这就是目录映射时排除 BYOK 条目的原因。
+- **2026-10-11 函数级复核**（Ghidra 12.1.4 静态分析当前安装版 2026-09-20，
+  harness.dll sha256 `cbb5887e…7bddaf`；证据 docs/probes/
+  trae-harness-apiv3-xref-2026-10-11.txt + trae-harness-route-ctors-decompile-2026-10-11.txt）：
+  二进制里存的是**无前导斜杠**的 `api/agent/v3/…` 连续字符串池（前导斜杠运行时
+  拼接，拿 `/api/agent` 当 needle 会 0 命中）；主路由族 16 条由 `FUN_18625cc60`
+  统一构造（alloc+字节拷贝，Rust 物，`harness\cloud-api\src\` 源路径残留），
+  调用方 `FUN_18625d8f0` 即 TTNetConfig 构建器，内嵌 appId `6eefa01c-…` 获二进制
+  实证。**协议面主体未漂移**，且多出本节原清单没有的端点：
+  `generated_skill/{list,get,dismiss,restore}_pending` 族（`FUN_1861cc5c0`）、
+  `custom_model_connectivity_check`、`api/ide/v1/{agents/runs,intent_detect,
+  query_rewrite,fast_apply,model_list,…}` 族。同日在 ai_agent.dll（sha256
+  `642c88a6…8ccf77`）复证：同一路由池，构造函数为 `FUN_186822b3e`（主族）/
+  `FUN_1859234d4`（generated_skill 族，邻域含权限门禁串 `Agent access is not
+  permitted`）/ `FUN_1868232e3`（connectivity_check+ide/v1），证据
+  docs/probes/trae-ai-agent-apiv3-xref-2026-10-11.txt——两 DLL 同源 Rust crate
+  双编译，协议面跨二进制一致。
 
 ## 3. 本地 harness（备选架构，存档未采用）
 

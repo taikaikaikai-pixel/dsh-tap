@@ -1,0 +1,96 @@
+openjdk version "21.0.2" 2024-01-16
+OpenJDK Runtime Environment (build 21.0.2+13-58)
+OpenJDK 64-Bit Server VM (build 21.0.2+13-58, mixed mode)
+INFO  Using log config file: jar:file:/root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Framework/Generic/lib/Generic.jar!/generic.log4j.xml (LoggingInitialization)  
+INFO  Using log file: /root/targets/ai-dig.log (LoggingInitialization)  
+INFO  Loading user preferences: /root/.config/ghidra/ghidra_12.1.4_PUBLIC/preferences (Preferences)  
+INFO  Searching for classes... (ClassSearcher)  
+INFO  Class search complete (615 ms) (ClassSearcher)  
+INFO  Initializing SSL Context (DefaultSSLContextInitializer)  
+INFO  Initializing Random Number Generator... (SecureRandomFactory)  
+INFO  Random Number Generator initialization complete: NativePRNGNonBlocking (SecureRandomFactory)  
+INFO  Trust manager disabled, cacerts have not been set (DefaultTrustManagerFactory)  
+INFO  Headless startup complete (2009 ms) (AnalyzeHeadless)  
+INFO  Class searcher loaded 59 extension points (20 false positives) (ClassSearcher)  
+INFO  HEADLESS Script Paths:
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Features/BytePatterns/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Debug/Debugger-rmi-trace/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Debug/Debugger/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Features/VersionTracking/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Features/FunctionID/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Processors/PIC/ghidra_scripts
+    /root/scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Features/Decompiler/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Features/FileFormats/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Features/SystemEmulation/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Features/WildcardAssembler/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Features/Base/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Processors/Atmel/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Features/MicrosoftCodeAnalyzer/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Processors/DATA/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Features/SwiftDemangler/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Features/PDB/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Features/PyGhidra/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Features/DecompilerDependent/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Features/GnuDemangler/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Features/BSim/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Processors/8051/ghidra_scripts
+    /root/tools/ghidra_12.1.4_PUBLIC/Ghidra/Processors/JVM/ghidra_scripts (HeadlessAnalyzer)  
+INFO  HEADLESS: execution starts (HeadlessAnalyzer)  
+INFO  Opening existing project: /root/targets/ghidra-proj2/ai (HeadlessAnalyzer)  
+INFO  Opening project: /root/targets/ghidra-proj2/ai (HeadlessProject)  
+INFO  REPORT: Processing read-only project file: /ai_agent.dll (HeadlessAnalyzer)  
+INFO  REPORT: Execute script: DigApiRoutes.java  (HeadlessAnalyzer)  
+INFO  SCRIPT: /root/scripts/DigApiRoutes.java (HeadlessAnalyzer)  
+INFO  DigApiRoutes.java> FUNCTION_COUNT: 725079 (GhidraScript)  
+INFO  DigApiRoutes.java> SYMBOL_COUNT: 2589658 (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a4bd7ef : api/agent/v3/generated_skill/restore_pendingapi/agent/v3/generated_skill/dismiss_pendingapi/agent/v3/generated_skill/get_pendingapi/agent/v3/generated_skill/list_pendingDismissedAgent access is not pe (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 18592358a in FUN_1859234d4 (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 185923591 in FUN_1859234d4 (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a4bd81b : api/agent/v3/generated_skill/dismiss_pendingapi/agent/v3/generated_skill/get_pendingapi/agent/v3/generated_skill/list_pendingDismissedAgent access is not permitted (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 185923565 in FUN_1859234d4 (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 185923591 in FUN_1859234d4 (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a4bd847 : api/agent/v3/generated_skill/get_pendingapi/agent/v3/generated_skill/list_pendingDismissedAgent access is not permitted (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 185923535 in FUN_1859234d4 (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 18592353c in FUN_1859234d4 (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a4bd86f : api/agent/v3/generated_skill/list_pendingDismissedAgent access is not permitted (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 185923502 in FUN_1859234d4 (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 185923509 in FUN_1859234d4 (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a4bd8fd : api/agent/v3/generated_skill (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 18a4bd920 in <no-func> (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a600f08 : api/agent/v3/create_agent_taskapi/agent/v3/commit_toolcall_resultapi/agent/v3/interruptapi/agent/v3/resume_agent_taskapi/agent/v3/get_resume_agent_task_statusapi/agent/v3/query_history_stateapi/agent/ (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186822b5d in FUN_186822b3e (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a600f26 : api/agent/v3/commit_toolcall_resultapi/agent/v3/interruptapi/agent/v3/resume_agent_taskapi/agent/v3/get_resume_agent_task_statusapi/agent/v3/query_history_stateapi/agent/v3/sync_history_stateapi/agent (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186822b74 in FUN_186822b3e (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a600f49 : api/agent/v3/interruptapi/agent/v3/resume_agent_taskapi/agent/v3/get_resume_agent_task_statusapi/agent/v3/query_history_stateapi/agent/v3/sync_history_stateapi/agent/v3/compactapi/agent/v3/llm_utils_c (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186822b8b in FUN_186822b3e (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a600f5f : api/agent/v3/resume_agent_taskapi/agent/v3/get_resume_agent_task_statusapi/agent/v3/query_history_stateapi/agent/v3/sync_history_stateapi/agent/v3/compactapi/agent/v3/llm_utils_chatapi/agent/v3/workfl (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186822ba2 in FUN_186822b3e (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a600f7d : api/agent/v3/get_resume_agent_task_statusapi/agent/v3/query_history_stateapi/agent/v3/sync_history_stateapi/agent/v3/compactapi/agent/v3/llm_utils_chatapi/agent/v3/workflow/startapi/agent/v3/workflow/ (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186822bb9 in FUN_186822b3e (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a600fa6 : api/agent/v3/query_history_stateapi/agent/v3/sync_history_stateapi/agent/v3/compactapi/agent/v3/llm_utils_chatapi/agent/v3/workflow/startapi/agent/v3/workflow/commit_toolcallapi/agent/v3/use_fast_requ (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186822bd0 in FUN_186822b3e (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a600fc6 : api/agent/v3/sync_history_stateapi/agent/v3/compactapi/agent/v3/llm_utils_chatapi/agent/v3/workflow/startapi/agent/v3/workflow/commit_toolcallapi/agent/v3/use_fast_requestapi/agent/v3/generate_summary (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186822be7 in FUN_186822b3e (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a600fe5 : api/agent/v3/compactapi/agent/v3/llm_utils_chatapi/agent/v3/workflow/startapi/agent/v3/workflow/commit_toolcallapi/agent/v3/use_fast_requestapi/agent/v3/generate_summaryapi/agent/v3/dsl/logs/subscribe (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186822bfb in FUN_186822b3e (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a600ff9 : api/agent/v3/llm_utils_chatapi/agent/v3/workflow/startapi/agent/v3/workflow/commit_toolcallapi/agent/v3/use_fast_requestapi/agent/v3/generate_summaryapi/agent/v3/dsl/logs/subscribeapi/agent/v3/dsl/tem (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186822c0f in FUN_186822b3e (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a601014 : api/agent/v3/workflow/startapi/agent/v3/workflow/commit_toolcallapi/agent/v3/use_fast_requestapi/agent/v3/generate_summaryapi/agent/v3/dsl/logs/subscribeapi/agent/v3/dsl/templatesapi/agent/v3/dsl/rend (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186822c23 in FUN_186822b3e (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a60102f : api/agent/v3/workflow/commit_toolcallapi/agent/v3/use_fast_requestapi/agent/v3/generate_summaryapi/agent/v3/dsl/logs/subscribeapi/agent/v3/dsl/templatesapi/agent/v3/dsl/render/resourcesÀ/À (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186822c37 in FUN_186822b3e (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a601054 : api/agent/v3/use_fast_requestapi/agent/v3/generate_summaryapi/agent/v3/dsl/logs/subscribeapi/agent/v3/dsl/templatesapi/agent/v3/dsl/render/resourcesÀ/À (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186822c4b in FUN_186822b3e (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a601071 : api/agent/v3/generate_summaryapi/agent/v3/dsl/logs/subscribeapi/agent/v3/dsl/templatesapi/agent/v3/dsl/render/resourcesÀ/À (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186822c5e in FUN_186822b3e (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a60108e : api/agent/v3/dsl/logs/subscribeapi/agent/v3/dsl/templatesapi/agent/v3/dsl/render/resourcesÀ/À (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186822c72 in FUN_186822b3e (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a6010ad : api/agent/v3/dsl/templatesapi/agent/v3/dsl/render/resourcesÀ/À (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186822c86 in FUN_186822b3e (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a6010c7 : api/agent/v3/dsl/render/resourcesÀ/À (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186822c9a in FUN_186822b3e (GhidraScript)  
+INFO  DigApiRoutes.java> STR 18a60197a : api/agent/v3/custom_model_connectivity_checkapi/ide/v1/super_completion_queryapi/ide/v1/skill_recommendsg (GhidraScript)  
+INFO  DigApiRoutes.java>    REF 186823990 in FUN_1868232e3 (GhidraScript)  
+INFO  DigApiRoutes.java> ANALYSIS_TIMEOUT=false (GhidraScript)  
+INFO  DigApiRoutes.java> DONE strings_found=22 (GhidraScript)  
