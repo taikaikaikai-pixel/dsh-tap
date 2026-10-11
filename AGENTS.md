@@ -87,6 +87,7 @@ CODEBUDDY_BRIDGE_LOG=/tmp/bridge.jsonl dsh web
 - 排查"缓存命中率低/重复提问" → docs/diagnosis-cache-quota.md + docs/diagnosis-cache-decline.md；"trae 3003" → docs/diagnosis-trae-3003.md；Qoder "provider_error / Flash 不可用" → docs/diagnosis-qoder-flash.md
 - 跑命令/测试/浏览器回归 → wiki/09-run-and-test.md + skill `.agents/skills/dsh-ui-regression/`
 - 要原始实测证据 → docs/probes/（历次探测 JSON/JSONL 落盘）
+- 要同类实现对比与改进清单（CodeBuddy/Trae/Qoder 生态调研，2026-10-05 快照）→ docs/research-eco-comparison.md
 - 要架构与模块叙述 → wiki/01-architecture.md ~ 10-provider-qoder.md
 - 要某版本改了什么 → CHANGELOG.md；要课题交接状态 → docs/rules/STATE.md
 

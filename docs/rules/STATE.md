@@ -20,6 +20,10 @@
 3. 新增离线验证脚本时同步加进 `.github/workflows/node.js.yml`（CI 只跑离线套件；带真实凭据的 probe-* 与不带 `--list` 的 verify-models 永不进 CI）。
 4. **发版前跑一次 `node scripts/probe-effort-gaps.mjs`**（宿主实例活着时，免凭据）：对账「插件声明的思考档位」×「路由条目实况」，确认没有"声明没走到宿主选择器"的缺口（踩坑 #64 的回归眼；缺口 = exit 1）。路由/档位声明改动后尤其要跑。
 
+## 生态调研：CodeBuddy/Trae/Qoder 同类实现对比（2026-10-05 完成，docs/research-eco-comparison.md）
+
+> 状态：**调研报告 v1 落盘（本会话）**。GitHub 同类实现撒网 ~55 个、README 级深读 24 个（子 agent 并行两路 + 主线程直查两路；两路 agent 因并发限额失败改主线程补跑）。核心结论：①**认证路线韧性**——workbuddy2api-hub 实证 CodeBuddy 桌面端 2026-09-24 起凭据改 $wbEncrypted 加密存储、"读桌面凭据派"整体死亡，本仓库全通道自持 OAuth 路线得到反向验证；②COSY 签名出现第二实现自述（agent2api/Rust，未核）且其 CN 端点 gateway.qoder.com.cn 与本仓库结论互证；③与生态规范的真实欠账 = 账号池、网关可选共享密钥、SSE 心跳注释、maxTokens 知识表回落链；④**P0 = CodeBuddy 桥接入 sanitizeToolPairing**——hub 自述为 CodeBuddy 上游修 11148 工具史错误，激活了 2026-09-22 待办与踩坑 #63 的既有缺口（先实测复现再接，外部码表不直接采信，#22）；⑤明确不做：签到/成长任务自动化、身份重置类、独立多协议部署（理由在 doc §4「不做」清单）。
+
 ## 桥端口宿主分流 goal（2026-10-03 立项并一轮落地，docs/goals/bridge-port-host-split.md）
 
 > 状态：**已落地（G3–G7 一轮完成，0.16.0）**。驱动：用户要求"window 版本适配，版本控制分 web ui 还有 Gui"；当日用户确认「做分流」。0.15.1 已修诊断口径（借桥报成故障 → 「另一实例代管」，提交 4007c8b，card-accordion [B6] 正向锁 204/0），本 goal 消除借桥本身，已随 0.16.0 收尾。
