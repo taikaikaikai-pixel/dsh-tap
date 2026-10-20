@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.24.0 (2026-10-20)
+
+- **主界面徽标改为「装饰式」：不再接管官方模型标签槽**。0.23.0 用 `priority: -1` 接管 `conversation.input.model.label`（`single` 槽）把徽标塞进模型名，副作用是**对所有 provider 重写标签**——DeepSeek 账号与 key 型服务商上的官方装饰（如官方 1017 勋章）会被一并顶掉。本版改回不侵入的做法：
+  - **实现**：往 `<style data-plugin-css="dsh-tap-credits">` 铺 CSS 规则 `[data-provider-id="<通道>"][data-model-id="<模型>"]::after{content:"x0.51";…}`。依据 = 官方 model-selection README 明示的扩展点「styles can target the enclosing label's `data-provider-id` / `data-model-id` attributes in all three placements」；宿主在 `trigger` / `menu` / `option` 三处都把模型名包在同一组属性里，**且无论标签最终由谁渲染**（fallback 还是官方徽标插件）。
+  - **边界**：只为 `codebuddy` / `trae` / `qoder` 三家生成规则 ⇒ DeepSeek 账号、ark/bailian/deepseek/bigmodel/moonshot/openrouter/qwen 等 key 型服务商的标签**一字不动**，官方勋章原样保留。
+  - **视觉不变**：`::after` 复刻官方 `Tag` 实测规格（999px 胶囊 / `padding:1px 8px` / 11px / 行高 17px / 500 字重），`x0.00` 仍是 success 绿调，配色用同一批 `--dsw-alias-*` token。
+  - **数据与刷新**：仍走 `creditsView()` 合并表（官方压手填）；`publishCredits` 时**重铺样式表**（幂等），设置卡保存手填值当场生效，无需刷新页面。`apply()` 里只多一次 `ensureCredits()`（拿不到就只是没有徽标）。
+  - **删除**：`ModelCreditLabel` 组件、槽注册、`creditListeners` 订阅与 `.cbc-mlabel` 样式（不再需要 React 参与）。
+  - **回归**：离线 9 套件全绿；`credits merge 5/5` 等断言不变。
+
 ## 0.23.0 (2026-10-20)
 
 - **主界面输入框的模型选择器显示倍率勋章**：以前倍率只在设置卡里能看到，选模型时反而看不见——本版把徽标接进了**选择模型那个按钮**与它的下拉菜单。

@@ -38,7 +38,7 @@
 **推翻记录**："credits 是每 1k token 费率"假设被实测单价对比推翻（非线性）。
 **展示落地（0.21.0）**：设置卡 CodeBuddy 模型行显示 `xN.NN` 徽标（宿主官方 `Tag` 原语，`x0.00` 用 success 调）。提取层 = `providers/codebuddy/catalog.js` 的 `parseCredits()`：**只原样取 token，不换算、不排序、不补缺失值**；缺 `credits` 的条目不出徽标。展示层**不得**把它当单价表做成本推算——本规则的非线性结论是硬约束。
 **手填兜底（0.22.0）**：官方目录没标倍率的模型（Trae/Qoder 全量、CodeBuddy 缺字段条目）允许用户在设置卡逐模型手填，存文件层 `manualCredits`（按通道隔离）。这份值是**用户断言、不是网关事实**，与 R-Q4 的官方倍率共用同一展示位置但语义不同：**官方值优先、手填只在官方缺位时渲染，且两者都只用于展示，禁止进入任何计费/额度推算**。归一化口径唯一真源 = `credits.js`（`parseCredits` / `normalizeCredits`）。
-**选择器同源（0.23.0）**：主界面输入框的模型按钮/菜单也显示同一枚徽标——注册槽 `conversation.input.model.label`（`priority: -1` 接管宿主默认 `model.name` 渲染）。数据 = 服务端 `creditsView()` 产出的合并表（`mergeCredits`：官方压手填），与设置卡同源同口径；**该表只走展示通道，不进 profiles/镜像**（踩坑 #12 的 schema 白名单会静默丢键）。
+**选择器同源（0.24.0）**：主界面输入框的模型按钮/菜单也显示同一枚徽标，实现是 **CSS `::after` 装饰**——给 `<style data-plugin-css="dsh-tap-credits">` 铺 `[data-provider-id][data-model-id]::after` 规则（官方 README 认可的三处标签扩展点），**不注册 `conversation.input.model.label` 槽**（0.23.0 曾用 `priority: -1` 接管，因会顶掉 DeepSeek 账号与 key 型服务商上的官方装饰而废弃）。数据 = 服务端 `creditsView()` 产出的合并表（`mergeCredits`：官方压手填），与设置卡同源同口径；**该表只走展示通道，不进 profiles/镜像**（踩坑 #12 的 schema 白名单会静默丢键）。
 
 ### R-Q5 计费正信号：仅 chat SSE 的 usage.credit
 
