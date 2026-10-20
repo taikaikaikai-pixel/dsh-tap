@@ -16,6 +16,7 @@ window.__ModuleLoader__.load({
 
 - 包声明：`dsh.client.inject = ['@deepseek-ai/dsh-client-ui-slots']`，platform web（`@deepseek-ai/dsh-client-runtime` 自 dsh 0.1.6 起不存在，已从 inject 列表删掉，踩坑 #34）。
 - 注册卡：**双槽注册**——dsh ≥ 0.1.6 卡片在 Plugin Manager 的 `plugins.item` 槽（boot 即声明，owner props `{view:'summary'|'page'}`：summary = 标题下一行简介、page = 完整表单，页面自带标题与返回 crumb ⇒ 卡片以 `embedded` 常开且不画自己的折叠头部）；≤0.1.5 回退设置页的 `settings.plugin.item` 槽。两槽都经 `slots.inject(槽名, () => slots.register({ name, id, order, label, inject }, Entry))` **等声明落地再注册**（现注册字段是 `id:"dsh-tap"` + `label` + `order:60`，`key` 是 rc.7 keyed 槽遗产、当前代码已不带）——`slots.inject` 对未声明槽是静默等待，直接 `register` 抢跑会**静默不出现且零报错**（踩坑 #30/#34）。旧槽路径的渲染前提另有宿主半 `settings.register('dsh-tap', Config)` 命名空间声明（见 [02](02-composition-root.md)）。
+- 主界面模型标签（0.23.0）：另一处注册 = `conversation.input.model.label`（`single` 槽，覆盖输入框模型按钮的 `trigger` / 菜单当前值 `menu` / 每个模型行 `option`）。**必须带 `priority: -1`**——宿主默认的 `model.name` 占位者在优先级 0，`single` 槽同优先级注册会直接抛 `already has a registration`，而宿主口径是「数字小者渲染」。既然接管了就必须对**所有** provider 渲染名字（非本插件通道/无数据时与宿主 fallback 等价），绝不能返回空。倍率数据走模块级 `creditCache`（GET `credits` 合并表，官方压手填），失败只意味着没徽标；设置卡保存后 `publishCredits` 当场刷新。
 
 ## 卡片结构（通道手风琴，0.10.0 重设计）
 

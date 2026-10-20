@@ -47,3 +47,30 @@ export function normalizeCredits(input) {
   if (Number(v) > CREDITS_MAX) throw new Error(`倍率不能大于 ${CREDITS_MAX}`)
   return v
 }
+
+/** 本插件拥有倍率语义的通道（= 宿主里的 provider id，验证见 providers/*\/index.js）。 */
+export const CREDIT_CHANNELS = ['codebuddy', 'trae', 'qoder']
+
+/** 只认 plain object，其余一律当空表（防御手改文件塞进数组/字符串）。 */
+const asMap = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {})
+
+/**
+ * 官方目录倍率 ∪ 手填倍率 → 浏览器半可直接查的单表。
+ *
+ * 优先级：**官方盖手填**（PRD：官方有标注就以官方为准、手填只补空缺）。
+ * 实现靠对象展开顺序——手填先铺、官方后盖。
+ * 非本插件通道不出现在结果里，故浏览器半查不到就自然不渲染徽标。
+ *
+ * @param {object} official { codebuddy: { id: token } }
+ * @param {object} manual   { codebuddy|trae|qoder: { id: token } }
+ * @returns {{codebuddy: object, trae: object, qoder: object}}
+ */
+export function mergeCredits(official, manual) {
+  const off = asMap(official)
+  const man = asMap(manual)
+  const out = {}
+  for (const channel of CREDIT_CHANNELS) {
+    out[channel] = { ...asMap(man[channel]), ...asMap(off[channel]) }
+  }
+  return out
+}

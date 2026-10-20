@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.23.0 (2026-10-20)
+
+- **主界面输入框的模型选择器显示倍率勋章**：以前倍率只在设置卡里能看到，选模型时反而看不见——本版把徽标接进了**选择模型那个按钮**与它的下拉菜单。
+  - **接管官方标签槽**：注册 `conversation.input.model.label`，`priority: -1`（宿主源码口径 "lowest renders"；宿主自带的 `model.name` 占位者占着优先级 0，同优先级会直接抛 `single slot … already has a registration`）。组件覆盖 `trigger` / `menu` / `option` 三种 placement，徽标紧贴模型名之后。
+  - **数据通道**：`index.js` 新增模块级 `officialCredits`（/v3/config 同步成功与 `model-list` 各刷新一次），`settingsView()` 增 `credits` = `mergeCredits(官方, 手填)`；**不进 profiles/镜像**（踩坑 #12 的 schema 白名单会静默丢键，故倍率走独立展示通道）。`credits.js` 增 `mergeCredits`（官方压手填）与 `CREDIT_CHANNELS`（通道清单唯一真源）。
+  - **客户端**：模块级 `creditCache` + 订阅，`ensureCredits()` 一次拉取；**失败只意味着没有徽标**，模型名照常渲染（非本插件 provider 行为与宿主 fallback 完全等价）。启动竞态（目录同步未完成）时 5s 补拉一次、不轮询。设置卡保存手填值后 `publishCredits` 用回包的合并表当场刷新按钮——不必刷新页面。
+  - **视觉**：仍是宿主官方 `Tag` 原语（`x0.00` 绿调 success、其余 info），只新增一条排布规则 `.cbc-mlabel`。
+  - **回归**：`verify-models` 增 `assertMergeCredits()` 5 例离线断言；离线套件全绿。
+  - **生效方式**：`index.js` 属宿主半 ⇒ **重启 dsh / 退出并重启桌面应用**；`lib/client.js` 刷新页面。
+
 ## 0.22.0 (2026-10-20)
 
 - **官方没标倍率的模型支持逐模型手填积分倍率**：Trae / Qoder 目录根本不提供逐模型倍率，CodeBuddy 也有缺 `credits` 字段的条目——这些模型现在由用户自己标（0.21.0 只做了「官方标了才显示」）。

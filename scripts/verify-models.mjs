@@ -24,7 +24,7 @@ import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { parseCredits, normalizeCredits } from '../credits.js'
+import { parseCredits, normalizeCredits, mergeCredits, CREDIT_CHANNELS } from '../credits.js'
 
 /**
  * 离线硬闸门：积分倍率提取（catalog.js `parseCredits`）。CI 用 `--list` 跑本脚本，
@@ -91,6 +91,43 @@ function assertCreditsNormalizer() {
   console.log(`credits normalizer ${cases.length + 5}/${cases.length + 5} PASS`)
 }
 assertCreditsNormalizer()
+
+/**
+ * 离线硬闸门：展示用合并表（credits.js `mergeCredits`）——设置卡与输入框模型选择器
+ * 共读这一份。不变量：**官方压手填**、非本插件通道被丢弃、垃圾输入退化为空表。
+ */
+function assertMergeCredits() {
+  const failed = []
+  const eq = (label, got, want) => {
+    if (JSON.stringify(got) !== JSON.stringify(want)) {
+      failed.push(`${label}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`)
+    }
+  }
+  const empty = { codebuddy: {}, trae: {}, qoder: {} }
+
+  eq('两表皆空', mergeCredits(undefined, undefined), empty)
+  eq('官方压手填', mergeCredits(
+    { codebuddy: { a: '0.10' } },
+    { codebuddy: { a: '0.90', b: '0.50' } },
+  ), { codebuddy: { a: '0.10', b: '0.50' }, trae: {}, qoder: {} })
+  eq('非本插件通道丢弃', mergeCredits(
+    { deepseek: { x: '1' }, codebuddy: { y: '0.20' } },
+    { trae: { z: '0.30' } },
+  ), { codebuddy: { y: '0.20' }, trae: { z: '0.30' }, qoder: {} })
+  eq('数组/字符串退化为空', mergeCredits(
+    { codebuddy: ['bad'] },
+    { trae: 'bad' },
+  ), empty)
+  eq('通道清单稳定', CREDIT_CHANNELS, ['codebuddy', 'trae', 'qoder'])
+
+  if (failed.length > 0) {
+    console.error(`credits merge FAIL ${failed.length}`)
+    for (const line of failed) console.error(`  ${line}`)
+    process.exit(1)
+  }
+  console.log('credits merge 5/5 PASS')
+}
+assertMergeCredits()
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const PATCH_FILE = join(ROOT, 'cordis.patch.yml')

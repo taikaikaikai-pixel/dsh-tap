@@ -66,7 +66,7 @@ import { createQoderProvider } from './providers/qoder/index.js'
 import { applyQoderContextVariant } from './providers/qoder/catalog.js'
 import { scanLocalCredentials, readImportCredential } from './local-scan.js'
 import { createHostConfigLayer } from './host-config.js'
-import { normalizeCredits } from './credits.js'
+import { normalizeCredits, mergeCredits, CREDIT_CHANNELS } from './credits.js'
 import arkProvider from './providers/ark/index.js'
 import bailianProvider from './providers/bailian/index.js'
 import deepseekProvider from './providers/deepseek/index.js'
@@ -373,7 +373,27 @@ function assertSafeModelId(id) {
 // ——token 口径见 credits.js。
 // ---------------------------------------------------------------------------
 
-const CREDIT_CHANNELS = ['codebuddy', 'trae', 'qoder']
+/**
+ * 官方目录倍率（最近一次成功拉到的 /v3/config）：`{ [id]: token }`。
+ * 只用于展示（设置卡 + 输入框模型选择器），**不进宿主镜像**——踩坑 #12 的
+ * schema 白名单会把不认识的键静默丢掉，故倍率走独立通道（creditsView）。
+ * 实例状态：模块作用域每插件实例一份（踩坑 #20 纪律同 rotator/meter）。
+ */
+let officialCredits = {}
+
+/** 目录条目 → `{ [id]: token }`（未声明/不可解析的条目直接跳过，不编造）。 */
+function creditsFromCatalog(models) {
+  const out = {}
+  for (const m of models ?? []) {
+    if (typeof m?.credits === 'string' && m.credits) out[m.id] = m.credits
+  }
+  return out
+}
+
+/** 浏览器半用的合并表：官方优先、手填补空缺（口径见 credits.js mergeCredits）。 */
+function creditsView() {
+  return mergeCredits({ codebuddy: officialCredits }, readManualCredits())
+}
 
 /**
  * 手填倍率读侧：只认三通道 + 合法 token，垃圾值静默丢弃
@@ -699,6 +719,8 @@ function syncModelsFromGateway(resolveNow) {
       const profiles = catalog.models.map(catalogToProfile)
       if (!profiles.length) throw new Error('网关目录为空（保持现有清单）')
       dynamicCatalog = { profiles, fetchedAt: catalog.fetchedAt, count: profiles.length }
+      // 官方倍率只喂展示通道（设置卡 + 输入框选择器），不进 profiles/镜像。
+      officialCredits = creditsFromCatalog(catalog.models)
       await syncModelsToDshSettings()
       return { ok: true, fetchedAt: dynamicCatalog.fetchedAt, count: dynamicCatalog.count, source: 'gateway' }
     } catch (err) {
@@ -1555,6 +1577,8 @@ function settingsView(resolveNow) {
     user: maskedUserLayer(user),
     // 手填积分倍率（读侧已归一化）：官方无倍率的模型由用户自己标，仅展示用。
     manualCredits: readManualCredits(),
+    // 展示用合并表（官方优先、手填兜底）：设置卡与输入框模型选择器共读这一份。
+    credits: creditsView(),
     oauth: provider.oauth.oauthStatus(),
     bridge: {
       running: bridgeRuntime.running,
@@ -1706,6 +1730,9 @@ function registerSettingsRoute(ctx, entryConfig, resolveNow, applyLive, retryGat
             if (body?.action === 'model-list') {
               provider.catalog.fetchModelCatalog(resolveNow)
                 .then((catalog) => {
+                  // 卡片每次拉列表都刷新一次官方倍率（与启动同步同一份内存真源）：
+                  // 输入框选择器的徽标靠它，不然同步失败后只有手填值可见。
+                  officialCredits = creditsFromCatalog(catalog.models)
                   // G5：ceilings = 基清单∪extra 的实际上限（校验上限与 title）；
                   // profiles = ceilings 应用覆盖后的有效值（输入框显示值），
                   // 覆盖所有已知 id（含禁用行——禁用不清覆盖值）。
@@ -2118,6 +2145,8 @@ function registerSettingsRoute(ctx, entryConfig, resolveNow, applyLive, retryGat
                 value: settingsView(resolveNow).value,
                 user: maskedUserLayer(after),
                 manualCredits: readManualCredits(),
+                // 合并表回带：输入框选择器的徽标据此当场更新（不必刷新页面）。
+                credits: creditsView(),
               })
               return
             }
