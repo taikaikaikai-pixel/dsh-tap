@@ -51,6 +51,23 @@ export function normalizeCredits(input) {
 /** 本插件拥有倍率语义的通道（= 宿主里的 provider id，验证见 providers/*\/index.js）。 */
 export const CREDIT_CHANNELS = ['codebuddy', 'trae', 'qoder']
 
+/**
+ * 数值倍率 → 展示 token（Qoder 目录的 `price_factor` 就是这种形态，2026-10 起官方提供）。
+ *
+ * 与 `parseCredits` 的差别：那边上游给的是字符串（`"x0.51 credits"`），这边是数字。
+ * 统一产出 token 字符串，展示层照旧拼 `x`。**零值一律归成 `"0.00"`**——展示层用
+ * `token === "0.00"` 判定「零计费/免费」绿调，别的写法会静默丢掉这个语义。
+ *
+ * @param {unknown} n 如 0 / 0.5 / 1.4
+ * @returns {string|null} null = 不是有效数字（不编造）
+ */
+export function creditTokenFromNumber(n) {
+  const v = Number(n)
+  if (!Number.isFinite(v) || v < 0) return null
+  if (v === 0) return '0.00'
+  return String(Number(v.toFixed(2)))
+}
+
 /** 只认 plain object，其余一律当空表（防御手改文件塞进数组/字符串）。 */
 const asMap = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {})
 

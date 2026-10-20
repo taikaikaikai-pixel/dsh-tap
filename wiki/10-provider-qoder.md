@@ -12,7 +12,7 @@
 | 聊天端点 | `POST {infer}/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1`——body 由 WASM 加密 |
 | 出站头组 | 全由 WASM 产出：`Bearer COSY.*` + `Cosy-*` 全家 + `X-Model-Key`/`X-Model-Source` |
 | 入站形态 | SSE 信封 `data:{headers,body,statusCodeValue}`——`body` 是**字符串**，内容为标准 OpenAI `chat.completion.chunk` JSON（增量/tool_calls/finish_reason 全标准）或 `"[DONE]"` |
-| 模型目录 | 签名 `GET /algo/api/v2/model/list?Encode=1`（`.chat[]` 14 个 openai 条目全 enable，2026-09-20 实测） |
+| 模型目录 | 签名 `GET /algo/api/v2/model/list?Encode=1`（`.chat[]` 14 个 openai 条目，2026-09-20 实测全 enable；**2026-10-20 复查：仅 2 条 enable**（qfmodel/dfmodel，均 `is_free`），条目新增逐模型倍率 `price_factor`——规则见 [quota-signals R-Q8](../docs/rules/quota-signals.md)，证据 `docs/probes/qoder-price-factor-2026-10-20.json`） |
 | 计量 | usage 帧 `usage.credits` → 归一为 `usage.credit` 进 usage-meter |
 | 反面事实（勿走） | `api2-v2.qoder.sh` 的 OpenAI 兼容面**裸 Bearer 恒 401**（疑似付费/BYOK 面）——废弃；`prepareRequest` 的 /algo 重写**只用于目录面**，聊天面走它必挂（§5e 实录） |
 
@@ -31,8 +31,8 @@ const provider = createQoderProvider({
 
 返回 provider：`{ id, oauth, cosy, gateway, syncCatalog(), catalogView(), credentialView() }`。
 
-- `syncCatalog()`：签名拉一次网关目录，成功换新 `catalogState`（`{ profiles, sources, fetchedAt }`；未登录报 `ok:false` 且**不清旧目录**）；
-- `catalogView()`：`{ at, count, profiles } | null`；
+- `syncCatalog()`：签名拉一次网关目录，成功换新 `catalogState`（`{ profiles, sources, variants, efforts, credits, entries, fetchedAt }`；未登录报 `ok:false` 且**不清旧目录**）；
+- `catalogView()`：`{ at, count, profiles, variants, efforts, credits } | null`——`credits` = 由条目 `price_factor` 投影的 `{ [key]: token }`（0 → `"0.00"`），**只喂展示**（设置卡徽标 + 输入框选择器装饰），不进 profiles/镜像；
 - `credentialView()`：OAuth 脱敏视图（设置卡；令牌与 machine_id 永不出宿主）；
 - 目录实例状态在工厂闭包内（踩坑 #20 纪律）。
 

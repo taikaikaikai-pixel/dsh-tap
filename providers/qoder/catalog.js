@@ -14,6 +14,8 @@
  * CodeBuddy 侧 catalogReasoningEfforts 的分层：目录声明 → 镜像 → 宿主选择器）。
  */
 
+import { creditTokenFromNumber } from '../../credits.js'
+
 /**
  * thinking_config → dsh `reasoningEfforts` 档位表（键 = 档位名，值 = 出站线值）。
  *
@@ -137,9 +139,17 @@ export async function fetchQoderCatalog(cosy, cred, inferBaseURL) {
   // projectQoderModel 的 reasoningEfforts 决定；这里只服务设置卡 select）。
   const efforts = {}
   for (const e of entries) efforts[e.key] = qoderEffortTiers(e)
+  // 逐模型倍率（`price_factor`，2026-10 官方新增；同期还有 `original_price_factor`
+  // 与 `is_free`，只在其为「限免/促销」时出现）。与 CodeBuddy 的 `credits` 同义，
+  // 只喂展示通道，不进 profiles/镜像（踩坑 #12 的 schema 白名单）。
+  const credits = {}
+  for (const e of entries) {
+    const token = creditTokenFromNumber(e.price_factor)
+    if (token !== null) credits[e.key] = token
+  }
   // 原始条目按键索引（网关出站信封的 model_config 需要 is_vl/is_reasoning/
   // max_input_tokens 等未投影字段，2026-09-22 用量归因信封对齐官方客户端）
   const byKey = {}
   for (const e of entries) byKey[e.key] = e
-  return { profiles, sources, variants, efforts, entries: byKey, raw: body }
+  return { profiles, sources, variants, efforts, credits, entries: byKey, raw: body }
 }

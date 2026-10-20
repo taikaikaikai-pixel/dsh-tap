@@ -24,7 +24,7 @@ import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { parseCredits, normalizeCredits, mergeCredits, CREDIT_CHANNELS } from '../credits.js'
+import { parseCredits, normalizeCredits, mergeCredits, creditTokenFromNumber, CREDIT_CHANNELS } from '../credits.js'
 
 /**
  * 离线硬闸门：积分倍率提取（catalog.js `parseCredits`）。CI 用 `--list` 跑本脚本，
@@ -128,6 +128,38 @@ function assertMergeCredits() {
   console.log('credits merge 5/5 PASS')
 }
 assertMergeCredits()
+
+/**
+ * 离线硬闸门：数值倍率 → 展示 token（credits.js `creditTokenFromNumber`）。
+ * Qoder 目录 2026-10 起用数字 `price_factor`（0 / 0.1 / 0.5 / 1.4），必须与 CodeBuddy
+ * 的字符串 token 同构；**零值统一成 "0.00"**——展示层靠这个字面量判定「零计费」绿调。
+ */
+function assertCreditTokenFromNumber() {
+  const cases = [
+    [0, '0.00'],
+    [0.5, '0.5'],
+    [0.1, '0.1'],
+    [1.4, '1.4'],
+    [2, '2'],
+    [0.333, '0.33'],
+    [NaN, null],
+    [-1, null],
+    [undefined, null],
+    ['abc', null],
+  ]
+  const failed = []
+  for (const [raw, want] of cases) {
+    const got = creditTokenFromNumber(raw)
+    if (got !== want) failed.push(`creditTokenFromNumber(${JSON.stringify(raw)}) = ${JSON.stringify(got)}, want ${JSON.stringify(want)}`)
+  }
+  if (failed.length > 0) {
+    console.error(`credits token FAIL ${failed.length}/${cases.length}`)
+    for (const line of failed) console.error(`  ${line}`)
+    process.exit(1)
+  }
+  console.log(`credits token ${cases.length}/${cases.length} PASS`)
+}
+assertCreditTokenFromNumber()
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const PATCH_FILE = join(ROOT, 'cordis.patch.yml')

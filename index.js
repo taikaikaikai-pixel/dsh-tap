@@ -392,7 +392,15 @@ function creditsFromCatalog(models) {
 
 /** 浏览器半用的合并表：官方优先、手填补空缺（口径见 credits.js mergeCredits）。 */
 function creditsView() {
-  return mergeCredits({ codebuddy: officialCredits }, readManualCredits())
+  return mergeCredits(
+    {
+      codebuddy: officialCredits,
+      // Qoder 目录 2026-10 起自带逐模型 `price_factor`（官方倍率），同步后即有值；
+      // 未同步/旧目录则为空表，回落手填。
+      qoder: qoderProvider.catalogView()?.credits ?? {},
+    },
+    readManualCredits(),
+  )
 }
 
 /**

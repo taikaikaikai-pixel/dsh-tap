@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.25.0 (2026-10-20)
+
+- **Qoder CN 官方开始提供逐模型倍率：`price_factor` 已接入（Qoder 不再只能手填）**。2026-10-20 复查签名目录 `GET /algo/api/v2/model/list?Encode=1`，`chat[]` 条目新增 `price_factor`（数值倍率）/ `original_price_factor`（原价倍率，仅限免条目）/ `is_free`。证据 `docs/probes/qoder-price-factor-2026-10-20.json`（脱敏目录快照，只读拉取、未发聊天请求）。
+  - **实测口径**：14 条 chat 条目里 `price_factor` = 0 / 0.1 / 0.5 / 0.6 / 0.8 / 1.4；**只有 2 条 `enable:true`**（`qfmodel`、`dfmodel`），二者均为 `0` + `original_price_factor:0.1` + `is_free:true`。「`price_factor:0` ⟺ 不耗 credits」与 2026-09 已证的「qfmodel 免费档 `billable:false`」吻合——这是该字段唯一交叉验证过的语义点；其余数值与实测 credit 的线性关系**未验证**，故沿用 R-Q4 纪律：只展示、不换算、不当单价表。
+  - **落地**：`credits.js` 增 `creditTokenFromNumber()`（0 → `"0.00"` 以保证展示层出 success 绿调，其余保留至多两位小数）；`providers/qoder/catalog.js` 投影 `credits` 表随 `catalogView()` 出；`index.js` 的 `creditsView()` 把 qoder 官方值并进合并表（**官方压手填**）。**不进 profiles/镜像**（踩坑 #12）。
+  - **界面**：设置卡 Qoder 模型行——有官方值出只读徽标，缺值才回落手填输入框；输入框模型选择器的 CSS 装饰自动跟着有值。
+  - **回归**：`verify-qoder-provider` 新增 4 断言（0→"0.00"、数字→token、未进 profiles 的条目不出 credits、credits 不进 profiles）= **174 通过 / 1 失败**（唯一失败仍是 2026-10-19 夹具绝对日期过期的既有问题）；`verify-models` 增 `creditTokenFromNumber` 10 例；其余离线套件全绿。
+  - **生效方式**：`providers/qoder/` 与 `index.js` 属宿主半 ⇒ **重启 dsh / 退出并重启桌面应用**；`lib/client.js` 刷新页面。
+
 ## 0.24.0 (2026-10-20)
 
 - **主界面徽标改为「装饰式」：不再接管官方模型标签槽**。0.23.0 用 `priority: -1` 接管 `conversation.input.model.label`（`single` 槽）把徽标塞进模型名，副作用是**对所有 provider 重写标签**——DeepSeek 账号与 key 型服务商上的官方装饰（如官方 1017 勋章）会被一并顶掉。本版改回不侵入的做法：

@@ -653,8 +653,8 @@ console.log('\n[15] 目录投影（fetchQoderCatalog）')
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({
       chat: [
-        { key: 'auto', format: 'openai', source: 'system', enable: true, display_name: 'Auto', is_vl: true, max_input_tokens: 180000 },
-        { key: 'qmodel_38max', format: 'openai', source: 'system', enable: true, display_name: 'Qwen3.8-Max', is_vl: true, context_config: { '200K': { token_count: 200000, is_default: true }, '1M': { token_count: 1000000 } }, thinking_config: { disabled: {}, enabled: { efforts: { low: {}, medium: { is_default: true }, xhigh: {} }, is_default: true } } },
+        { key: 'auto', format: 'openai', source: 'system', enable: true, display_name: 'Auto', is_vl: true, max_input_tokens: 180000, price_factor: 0, is_free: true },
+        { key: 'qmodel_38max', format: 'openai', source: 'system', enable: true, display_name: 'Qwen3.8-Max', is_vl: true, price_factor: 0.5, context_config: { '200K': { token_count: 200000, is_default: true }, '1M': { token_count: 1000000 } }, thinking_config: { disabled: {}, enabled: { efforts: { low: {}, medium: { is_default: true }, xhigh: {} }, is_default: true } } },
         { key: 'disabled-m', format: 'openai', enable: false },
         { key: 'other-fmt', format: 'anthropic', enable: true },
       ],
@@ -685,6 +685,11 @@ console.log('\n[15] 目录投影（fetchQoderCatalog）')
   ok(applyQoderContextVariant(result.profiles[1], '1M', result.variants.qmodel_38max).contextWindow === 1000000, '选中变体 → contextWindow 覆盖')
   ok(applyQoderContextVariant(result.profiles[1], '404K', result.variants.qmodel_38max).contextWindow === 200000, '变体名不在目录 → 维持默认档')
   ok(applyQoderContextVariant(result.profiles[1], undefined, result.variants.qmodel_38max) === result.profiles[1], '未选变体 → profile 原样（镜像形状不变）')
+  // 官方倍率（2026-10 起 price_factor）：只进展示表，不进 profiles/镜像。
+  ok(result.credits.auto === '0.00', 'price_factor 0 → "0.00"（零计费语义，展示层据此出 success 调）')
+  ok(result.credits.qmodel_38max === '0.5', 'price_factor 数字 → token 字符串（不虚增精度）')
+  ok(!('disabled-m' in result.credits) && !('other-fmt' in result.credits), '未进 profiles 的条目不出 credits')
+  ok(result.profiles.every((p) => !('credits' in p)), 'credits 不进 profiles（镜像/选择器形状不变）')
   catServer.close()
 }
 

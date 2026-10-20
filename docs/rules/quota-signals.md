@@ -86,6 +86,13 @@ P-QP3 HIT；P-QP4/P-QP5（"控制台 API 拒绝 Bearer"）**MISS 推翻**——`
 「数值剩余额度——任何端点都没有」**对 OAuth token 作废**；对 `ck_` key 依然成立
 （quota4-resource-ck-key → 401）。插件在 OAuth 模式下可显示真实剩余额度。
 
+### R-Q8 Qoder CN 目录的 `price_factor`：官方逐模型倍率（2026-10 新增）
+
+**规则**：`GET /algo/api/v2/model/list`（COSY 签名）的 `chat[]` 条目新增 `price_factor`（数值 = 逐模型倍率），与 CodeBuddy `/v3/config` 的 `credits` 同义，属**官方标注的倍率**。限免/促销条目另带 `original_price_factor`（原价倍率）与 `is_free:true`。
+**实测**（2026-10-20，证据 `docs/probes/qoder-price-factor-2026-10-20.json`）：14 条 chat 条目里 `price_factor` 取值为 0 / 0.1 / 0.5 / 0.6 / 0.8 / 1.4；**只有两个 `enable:true` 的现售条目**（`qfmodel`、`dfmodel`）为 `0` + `original_price_factor:0.1` + `is_free:true`。同次实测该账号 `enable:false` 的条目达 12 条（Auto / Qwen3.8-Max / DeepSeek-V4-Pro / GLM / Kimi / MiniMax 等），即目录里能进选择器的只有两个免费档模型——这是**账号侧可见集**，不是插件过滤造成的。
+**与已证结论的一致性**：`qfmodel` 免费档「帧 `billable:false`、不耗 credits」在 2026-09 就实测过（docs/diagnosis-qoder-flash.md 同族），与 `price_factor:0` 吻合——这是该字段**唯一被交叉验证**的语义点。其余数值（0.1/0.5/1.4 …）与实测 credit 消耗是否线性**未验证**，故与 R-Q4 同一纪律：**只展示、不换算、不当单价表**。
+**落地**：`providers/qoder/catalog.js` 投影 `credits` 表（`credits.js` 的 `creditTokenFromNumber`：0 → `"0.00"`，其余保留至多两位小数），经 `catalogView()` 出到 `index.js` 的 `creditsView()` 合并表（官方压手填）；**不进 profiles/镜像**（踩坑 #12 的 schema 白名单）。设置卡 Qoder 模型行与输入框模型选择器的装饰随之自动生效。
+
 ## 3. 额度信号完整地图（结论表）
 
 | 端点 | 响应头额度信号 | 响应体额度信号 |
