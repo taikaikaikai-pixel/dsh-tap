@@ -37,6 +37,7 @@
 **验证**：倍率字段本轮发现于 P-Q1b 的体扫描；**P-Q5 预注册命中**——读 `hy3 = x0.00` 后预测"hy3 微调用 usage.credit === 0"，实测 200 / credit=0 / 16 tokens ✓。
 **推翻记录**："credits 是每 1k token 费率"假设被实测单价对比推翻（非线性）。
 **展示落地（0.21.0）**：设置卡 CodeBuddy 模型行显示 `xN.NN` 徽标（宿主官方 `Tag` 原语，`x0.00` 用 success 调）。提取层 = `providers/codebuddy/catalog.js` 的 `parseCredits()`：**只原样取 token，不换算、不排序、不补缺失值**；缺 `credits` 的条目不出徽标。展示层**不得**把它当单价表做成本推算——本规则的非线性结论是硬约束。
+**手填兜底（0.22.0）**：官方目录没标倍率的模型（Trae/Qoder 全量、CodeBuddy 缺字段条目）允许用户在设置卡逐模型手填，存文件层 `manualCredits`（按通道隔离）。这份值是**用户断言、不是网关事实**，与 R-Q4 的官方倍率共用同一展示位置但语义不同：**官方值优先、手填只在官方缺位时渲染，且两者都只用于展示，禁止进入任何计费/额度推算**。归一化口径唯一真源 = `credits.js`（`parseCredits` / `normalizeCredits`）。
 
 ### R-Q5 计费正信号：仅 chat SSE 的 usage.credit
 

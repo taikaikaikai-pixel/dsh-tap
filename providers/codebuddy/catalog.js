@@ -16,6 +16,13 @@
  */
 
 import { USER_AGENT } from './headers.js'
+import { parseCredits } from '../../credits.js'
+
+/**
+ * 积分倍率的解析/归一化口径统一收在 credits.js（provider 无关，可离线测）。
+ * 此处原样再导出：既有 import 路径（scripts/verify-models.mjs）保持不变。
+ */
+export { parseCredits }
 
 /**
  * 「目录在列 ≠ /v2 可路由」的已知死条目（恒 11102 service info not found，
@@ -30,21 +37,6 @@ export const UNROUTABLE_MODELS = {
   'kimi-k2-thinking': '目录在列但 /v2/chat/completions 恒 11102 service info not found',
   'minimax-m2.5': '目录在列但 /v2/chat/completions 恒 11102 service info not found',
   'hy4-preview-x': '目录在列但 /v2/chat/completions 恒 11102 service info not found',
-}
-
-/**
- * 目录积分倍率 `credits`（如 `"x0.51 credits"`）→ 数字 token 字符串（`"0.51"`）。
- * 只做**原样提取**：不换算式、不排序、不补缺失值——展示层负责拼 `x`，故保留
- * 原始 token 而不是 Number()，避免 `x0.00` 被格式化成 `x0`。
- * docs/rules/quota-signals.md R-Q4 已证它是**相对展示倍率**（与实测 credit/1k
- * 不成线性），唯一硬映射是 `x0.00` ⟺ 实测零计费；因此不可当单价表使用。
- * @param {unknown} raw
- * @returns {string|null} null = 目录未声明或形态不可解析
- */
-export function parseCredits(raw) {
-  if (typeof raw !== 'string') return null
-  const m = /x\s*(\d+(?:\.\d+)?)/i.exec(raw)
-  return m ? m[1] : null
 }
 
 /**

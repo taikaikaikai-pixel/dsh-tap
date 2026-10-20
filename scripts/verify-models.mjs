@@ -24,7 +24,7 @@ import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { parseCredits } from '../providers/codebuddy/catalog.js'
+import { parseCredits, normalizeCredits } from '../credits.js'
 
 /**
  * 离线硬闸门：积分倍率提取（catalog.js `parseCredits`）。CI 用 `--list` 跑本脚本，
@@ -54,6 +54,43 @@ function assertCreditsParser() {
   console.log(`credits parser ${cases.length}/${cases.length} PASS`)
 }
 assertCreditsParser()
+
+/**
+ * 离线硬闸门：手填倍率归一化（credits.js `normalizeCredits`）——官方目录
+ * 没有倍率的模型（Trae/Qoder 全量、CodeBuddy 缺字段条目）由用户手填，服务端用它
+ * 做权威校验。非法输入必须抛错（→ HTTP 400），空值必须归一成 null（= 删除记录）。
+ */
+function assertCreditsNormalizer() {
+  const cases = [
+    ['0.5', '0.5'],
+    [' 2 ', '2'],
+    ['0.00', '0.00'],
+    ['999', '999'],
+    ['', null],
+    [null, null],
+    [undefined, null],
+  ]
+  const failed = []
+  for (const [raw, want] of cases) {
+    let got
+    try { got = normalizeCredits(raw) } catch (err) { got = `threw: ${err.message}` }
+    if (got !== want) {
+      failed.push(`normalizeCredits(${JSON.stringify(raw)}) = ${JSON.stringify(got)}, want ${JSON.stringify(want)}`)
+    }
+  }
+  for (const bad of ['abc', '-1', '1.234', '1000', '1e3']) {
+    let threw = false
+    try { normalizeCredits(bad) } catch { threw = true }
+    if (!threw) failed.push(`normalizeCredits(${JSON.stringify(bad)}) 应抛错但通过了`)
+  }
+  if (failed.length > 0) {
+    console.error(`credits normalizer FAIL ${failed.length}`)
+    for (const line of failed) console.error(`  ${line}`)
+    process.exit(1)
+  }
+  console.log(`credits normalizer ${cases.length + 5}/${cases.length + 5} PASS`)
+}
+assertCreditsNormalizer()
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const PATCH_FILE = join(ROOT, 'cordis.patch.yml')

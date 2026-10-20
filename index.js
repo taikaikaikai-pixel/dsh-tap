@@ -66,6 +66,7 @@ import { createQoderProvider } from './providers/qoder/index.js'
 import { applyQoderContextVariant } from './providers/qoder/catalog.js'
 import { scanLocalCredentials, readImportCredential } from './local-scan.js'
 import { createHostConfigLayer } from './host-config.js'
+import { normalizeCredits } from './credits.js'
 import arkProvider from './providers/ark/index.js'
 import bailianProvider from './providers/bailian/index.js'
 import deepseekProvider from './providers/deepseek/index.js'
@@ -362,6 +363,63 @@ function assertSafeModelId(id) {
   if (unsafe) {
     throw new Error(`非法模型 id（保留键 ${JSON.stringify(id)} 拒绝写入）`)
   }
+}
+
+// ---------------------------------------------------------------------------
+// 手填积分倍率：官方目录**没有**标注倍率的模型（Trae/Qoder 全量、CodeBuddy
+// 缺 `credits` 字段的条目）允许用户逐模型手动标一个，只用于设置卡展示。
+// 存文件层 `manualCredits: { codebuddy: {id: token}, trae: {...}, qoder: {...} }`，
+// 按 channel 隔离同名 id。**不进宿主配置层、不参与镜像、不参与任何计费推算**
+// ——token 口径见 credits.js。
+// ---------------------------------------------------------------------------
+
+const CREDIT_CHANNELS = ['codebuddy', 'trae', 'qoder']
+
+/**
+ * 手填倍率读侧：只认三通道 + 合法 token，垃圾值静默丢弃
+ * （同 readQoderModelPrefs 的读侧归一化纪律：手改文件不得让卡片炸）。
+ */
+function readManualCredits() {
+  const out = { codebuddy: {}, trae: {}, qoder: {} }
+  const raw = readFileLayer().manualCredits
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const channel of CREDIT_CHANNELS) {
+    const map = raw[channel]
+    if (!map || typeof map !== 'object' || Array.isArray(map)) continue
+    for (const [id, value] of Object.entries(map)) {
+      try {
+        const token = normalizeCredits(value)
+        if (token !== null) out[channel][id] = token
+      } catch { /* 非法 token：丢弃该条，不连坐整表 */ }
+    }
+  }
+  return out
+}
+
+/**
+ * manualCreditsSet 写路径（UI 契约：patch.manualCreditsSet = { channel, id, value }）。
+ * value 空/null = 删除该模型的记录；非法形态由 normalizeCredits 抛错转 400。
+ * **刻意不校验 id 是否在当前目录里**：这是纯展示元数据，目录尚未同步时也应当
+ * 允许先标（与 *ModelPrefs 那些必须绑定目录声明档位的 setter 区分开）。
+ */
+async function setManualCredits({ channel, id, value } = {}) {
+  if (!CREDIT_CHANNELS.includes(channel)) {
+    throw new Error('manualCreditsSet 的 channel 必须是 codebuddy / trae / qoder')
+  }
+  if (typeof id !== 'string' || !id.trim()) throw new Error('manualCreditsSet 需要 id')
+  assertSafeModelId(id)
+  const token = normalizeCredits(value)
+  const all = readManualCredits()
+  const rec = { ...all[channel] }
+  if (token === null) delete rec[id]
+  else rec[id] = token
+  const next = { ...all, [channel]: rec }
+  const layer = readFileLayer()
+  // 纯净态纪律：一条都不剩就删掉整键，别留空壳。
+  if (Object.values(next).some((m) => Object.keys(m).length > 0)) layer.manualCredits = next
+  else delete layer.manualCredits
+  writeFileLayer(layer)
+  return next
 }
 
 /** Effective models = static base + enabled catalog extras − disabled ids. */
@@ -1495,6 +1553,8 @@ function settingsView(resolveNow) {
     // The raw file layer carries plaintext apiKeys[].key — never ship it to
     // the browser (the card only checks top-level field presence).
     user: maskedUserLayer(user),
+    // 手填积分倍率（读侧已归一化）：官方无倍率的模型由用户自己标，仅展示用。
+    manualCredits: readManualCredits(),
     oauth: provider.oauth.oauthStatus(),
     bridge: {
       running: bridgeRuntime.running,
@@ -2042,6 +2102,23 @@ function registerSettingsRoute(ctx, entryConfig, resolveNow, applyLive, retryGat
                 qoder: settingsView(resolveNow).qoder,
               })
               applyLive()
+              return
+            }
+            if (patch.manualCreditsSet !== undefined) {
+              // 手填积分倍率：纯展示字段（不进宿主配置层、不参与任何镜像），
+              // 故刻意不调 applyLive——那会白跑一遍五个 gateway sync。
+              const withKeys = { ...nextUser }
+              await setManualCredits(patch.manualCreditsSet)
+              const after = readFileLayer()
+              delete withKeys.manualCredits
+              Object.assign(after, { apiKeys: withKeys.apiKeys, activeApiKey: withKeys.activeApiKey })
+              writeFileLayer(after)
+              sendJSON(response, 200, {
+                ok: true,
+                value: settingsView(resolveNow).value,
+                user: maskedUserLayer(after),
+                manualCredits: readManualCredits(),
+              })
               return
             }
             for (const [key, value] of Object.entries(patch)) {

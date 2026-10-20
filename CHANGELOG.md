@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.22.0 (2026-10-20)
+
+- **官方没标倍率的模型支持逐模型手填积分倍率**：Trae / Qoder 目录根本不提供逐模型倍率，CodeBuddy 也有缺 `credits` 字段的条目——这些模型现在由用户自己标（0.21.0 只做了「官方标了才显示」）。
+  - **纯函数层（新 `credits.js`）**：`parseCredits`（官方 `"x0.51 credits"` → `"0.51"`）与 `normalizeCredits`（手填 → 归一 token；空 = 清记录；非法抛错）同处一文件，provider 无关、可离线测；`providers/codebuddy/catalog.js` 改为从这里 import 再原样导出（既有 import 路径不变）。
+  - **存文件层 `manualCredits`**：`{ codebuddy: {id: token}, trae: {...}, qoder: {...} }`，按通道隔离同名 id。写入走专用 patch 分支 `manualCreditsSet`（通用 patch 受 `SETTINGS_FIELDS` 白名单约束，新键必须走专用分支）；**刻意不调 `applyLive()`**——纯展示字段不进宿主配置层、不参与镜像；一条不剩时删掉整键（纯净态纪律）。读侧 `readManualCredits` 丢弃非法 token（手改文件不得让卡片炸）。
+  - **展示**：官方有值 → 仍然只读官方 `Tag`（官方优先）；官方无值 → 行内 `x` + 窄胶囊输入框（Enter/失焦提交、Esc 撤销、留空清除）。CodeBuddy/Trae/Qoder 三个模型组同构。
+  - **口径**：手填值是**用户断言**，不是网关事实；仅展示，**禁止参与任何计费推算**（R-Q4 已证官方倍率本身与实测 credit/1k 非线性）。
+  - **回归**：`verify-models` 增离线断言 `assertCreditsNormalizer()`（12 例：5 合法/2 清空/5 非法）；离线套件全绿。
+
 ## 0.21.0 (2026-10-20)
 
 - **设置卡模型行显示网关积分倍率徽标（官方 Tag 勋章样式）**：`/v3/config` 的 `models[].credits`（`"x0.51 credits"` 字符串）此前在 `providers/codebuddy/catalog.js` 的白名单映射里被**丢弃**，本版把它接进模型列表：
