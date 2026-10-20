@@ -24,6 +24,37 @@ import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { parseCredits } from '../providers/codebuddy/catalog.js'
+
+/**
+ * 离线硬闸门：积分倍率提取（catalog.js `parseCredits`）。CI 用 `--list` 跑本脚本，
+ * 断言置于一切分支之前 ⇒ 任何模式都执行。口径见 docs/rules/quota-signals.md R-Q4：
+ * 只原样提取 token、不换算式；`x0.00` 必须原样保留（不可被 Number() 抹成 `0`）。
+ */
+function assertCreditsParser() {
+  const cases = [
+    ['x0.51 credits', '0.51'],
+    ['x0.00 credits', '0.00'],
+    ['x1 credits', '1'],
+    [undefined, null],
+    ['abc', null],
+  ]
+  const failed = []
+  for (const [raw, want] of cases) {
+    const got = parseCredits(raw)
+    if (got !== want) {
+      failed.push(`parseCredits(${JSON.stringify(raw)}) = ${JSON.stringify(got)}, want ${JSON.stringify(want)}`)
+    }
+  }
+  if (failed.length > 0) {
+    console.error(`credits parser FAIL ${failed.length}/${cases.length}`)
+    for (const line of failed) console.error(`  ${line}`)
+    process.exit(1)
+  }
+  console.log(`credits parser ${cases.length}/${cases.length} PASS`)
+}
+assertCreditsParser()
+
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const PATCH_FILE = join(ROOT, 'cordis.patch.yml')
 const BASE_URL = 'https://copilot.tencent.com/v2'

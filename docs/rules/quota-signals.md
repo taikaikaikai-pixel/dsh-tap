@@ -36,6 +36,7 @@
 **规则**：目录每个模型带字符串字段 `credits: "xN.NN credits"`（本账号实测：v4-pro x0.51、v4-flash x0.17、v3-2-volc x0.29、glm-5.2 x0.79、kimi-k2.6 x0.52、hy3 x0.00）。它是**相对展示倍率**：与实测 credit/1k tokens 不成线性（glm-5.2 倍率最高 0.79，实测 0.171 credit/1k 却低于 v4-pro 的 0.257）；唯一成立的硬映射是 **x0.00 ⟺ 实测零计费**。
 **验证**：倍率字段本轮发现于 P-Q1b 的体扫描；**P-Q5 预注册命中**——读 `hy3 = x0.00` 后预测"hy3 微调用 usage.credit === 0"，实测 200 / credit=0 / 16 tokens ✓。
 **推翻记录**："credits 是每 1k token 费率"假设被实测单价对比推翻（非线性）。
+**展示落地（0.21.0）**：设置卡 CodeBuddy 模型行显示 `xN.NN` 徽标（宿主官方 `Tag` 原语，`x0.00` 用 success 调）。提取层 = `providers/codebuddy/catalog.js` 的 `parseCredits()`：**只原样取 token，不换算、不排序、不补缺失值**；缺 `credits` 的条目不出徽标。展示层**不得**把它当单价表做成本推算——本规则的非线性结论是硬约束。
 
 ### R-Q5 计费正信号：仅 chat SSE 的 usage.credit
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.21.0 (2026-10-20)
+
+- **设置卡模型行显示网关积分倍率徽标（官方 Tag 勋章样式）**：`/v3/config` 的 `models[].credits`（`"x0.51 credits"` 字符串）此前在 `providers/codebuddy/catalog.js` 的白名单映射里被**丢弃**，本版把它接进模型列表：
+  - **提取**：新增导出纯函数 `parseCredits(raw)`——只原样取数字 token（`"x0.51 credits"` → `"0.51"`），不换算式、不排序、不补缺失值；保留原始 token 而非 `Number()`，避免 `x0.00` 被抹成 `x0`。映射处补 `credits: parseCredits(m.credits)`（缺省 `null`）。
+  - **渲染**：`lib/client.js` 新增 `UITag = pickComponent(["Tag"])`，模型 id 后渲染宿主**官方 Tag 原语**（`<Tag tone="info">x0.51</Tag>`）——与官方 `dsh-client-ui-deepseek-model-label-1017` 的「1017」勋章同一个组件、同一套 `--dsw-alias-*` token，浅/深色自动跟随；`x0.00` 用 `success` 调（R-Q4 唯一被实测证实的语义 = 零计费）。老宿主无 `Tag` 时降级为现成 `cbc-badge`，**未新增任何配色 CSS**。
+  - **口径如实**：只做展示，**不换算、不当单价表**——R-Q4 已证该倍率与实测 credit/1k 非线性，`x0.00 ⟺ 零计费`是唯一硬映射；模型组帮助条就地写明「相对展示口径，非单价」，无 `credits` 的条目/静态兜底行不出徽标（不编造数字）。Trae/Qoder 目录不提供逐模型倍率，两通道不变。
+  - **回归**：`scripts/verify-models.mjs` 增离线断言 `assertCreditsParser()`（5 例，置于 `--list` 分支之前 ⇒ CI 硬闸门必跑，`credits parser 5/5 PASS`）；离线套件全绿。
+  - **生效方式**：浏览器半（`lib/client.js`）刷新页面即生效；`catalog.js` 属宿主半 ⇒ 重启 dsh / 退出并重启桌面应用。
+
 ## 0.20.0 (2026-10-05)
 
 - **Trae 通道「额度/模型/工具环」在 DSH 闭环——agent 传输档（`traeChatTransport:'agent'`，goal docs/goals/trae-agent-v3.md 的 M1→M3 一轮落地）**：inline 面 3003 第 6 周未愈、remote 面架构性拒绝工具的处境下，探针证实同端点 `llm_utils_chat` 的 `function=solo_work_lite` 面是第三条活路。证据 `docs/probes/trae-agent-v3-*.jsonl`（8 臂 + function 名扫描 ×2）：

@@ -33,6 +33,21 @@ export const UNROUTABLE_MODELS = {
 }
 
 /**
+ * 目录积分倍率 `credits`（如 `"x0.51 credits"`）→ 数字 token 字符串（`"0.51"`）。
+ * 只做**原样提取**：不换算式、不排序、不补缺失值——展示层负责拼 `x`，故保留
+ * 原始 token 而不是 Number()，避免 `x0.00` 被格式化成 `x0`。
+ * docs/rules/quota-signals.md R-Q4 已证它是**相对展示倍率**（与实测 credit/1k
+ * 不成线性），唯一硬映射是 `x0.00` ⟺ 实测零计费；因此不可当单价表使用。
+ * @param {unknown} raw
+ * @returns {string|null} null = 目录未声明或形态不可解析
+ */
+export function parseCredits(raw) {
+  if (typeof raw !== 'string') return null
+  const m = /x\s*(\d+(?:\.\d+)?)/i.exec(raw)
+  return m ? m[1] : null
+}
+
+/**
  * @param {{ resolveCredential: (settingsFn: () => object) => Promise<object|null>,
  *           envKey: (envName: string|undefined) => string|null }} deps
  */
@@ -90,6 +105,8 @@ export function createCatalog({ resolveCredential, envKey }) {
           maxOutputTokens: m.maxOutputTokens ?? null,
           images: m.supportsImages === true,
           cli: cliEnabled.has(m.id),
+          // 积分倍率（展示口径，parseCredits 上方注释为裁判）；缺省 = null，卡片不出徽标。
+          credits: parseCredits(m.credits),
           reasoning: !!reasoning && (reasoning.effort != null || defaultEffort != null
             || supported != null || typeof reasoning.canDisableThinking === 'boolean'),
           // 目录标注的**默认**档（legacy 的 effort 或新形态的 defaultEffort）——
