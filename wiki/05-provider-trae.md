@@ -95,7 +95,8 @@ export function fetchLocalCatalog({ dbPath }) // { profiles, catalog, fetchedAt,
 export function createTraeGateway(deps)  // => { listen(port), handleChat(req, res, rawBody) }
 ```
 
-路由：`POST /v1/chat/completions`（或 `/chat/completions`）→ `handleChat`；`GET /v1/models` → 目录 id 清单；其余 404。listen 失败降级 `runtime.lastError` 不崩（同踩坑 #17 纪律）。
+路由：`POST /v1/chat/completions`（或 `/chat/completions`）→ `handleChat`；`GET /v1/models` → 目录 id 清单；其余 404。
+**0.24.0 起 `listen()` 只是 `core/http-surface.js` 的一行委托**：Host/Origin 门、包体上限与 32MiB→413（先排空再应答，踩坑 #81）、404/500 信封、`runtime` 记账（含 `port:0` 回填）、`stop()` 全在共享脚手架里；本模块只保留翻译逻辑与目录 id 清单（踩坑 #80）。listen 失败仍降级 `runtime.lastError` 不崩（同踩坑 #17 纪律）。
 
 ### 出站协议构造（导出的纯函数）
 

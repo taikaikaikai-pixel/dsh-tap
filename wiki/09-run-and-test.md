@@ -45,12 +45,22 @@ TraeWork CN / Qoder CN：各自区块的**区块头右侧勾选框**就是启用
 | `node scripts/verify-qoder-provider.mjs` | Qoder CN 通道：mock 设备流全流程（PKCE/404 轮询/drt- 刷新/门禁/代际守卫）+ 翻译网关信封 + 目录投影 + tool 配对/可见性与归因上报锁定案 | **154 项断言**（2026-09-23 实测） |
 | `node scripts/verify-host-config.mjs` | 宿主配置层：0.1.7+ forms seam 选路/写前比对/`SETTINGS_CONFLICT` 重试/不可写降级 + ≤0.1.6 settings.yaml 回退 | **36 项断言**（2026-09-23 实测） |
 | `node scripts/verify-picker-badge.mjs` | 主界面模型选择器徽标（浏览器半装饰层）：假 `window.__ModuleLoader__` + 假 react/假 DOM/假 fetch 驱动 `apply()`，锁「加载零额外请求 / 上游文案不进 CSS / 陈旧态全清 / 点选择器按需刷新带节流 / trigger 换锚点（`[1b]`） / 排队重试条选数据与 dock 注册」 | **26 项断言**（2026-10-21 实测） |
+| `node scripts/verify-client-logic.mjs` | 浏览器半「决策逻辑」（v0.23.0）：假 `window.__ModuleLoader__` + 假 react 驱动，锁网关状态词汇（`off/pending/listening/error` 与旧宿主回退）、状态芯片（含宿主镜像失败）、额度卡退避（30/60/120/300s）、资源包合并保 null、排队重试条的结构化 queueHint，以及宿主/客户端状态词集合一致性与「唯一 fetchWithTimeout」 | **40 项断言**（2026-10-23 实测） |
+| `node scripts/verify-net-discipline.mjs` | 上游调用与设置路由的成本/护栏纪律（v0.23.0）：全仓无「裸 fetch」（豁免须注释）、按面超时真的用上、设置路由的 1MiB 上限/413/aborted 收口/幂等响应出口/副作用前置、三个额度快照的 `unauth`、`settingsView` 的 `mirror` 与 `bridge.state` | **25 项断言**（2026-10-23 实测） |
+| `node scripts/verify-quota-view.mjs` | 主界面额度卡（v0.22.0）：`core/quota-cache` 的记忆化语义（60s TTL / 15s 强制地板 / 并发单飞 / 失败不缓存）+ `quota-view` 的三通道归一与合计口径（精确/估算/未登录/读失败/非 credit 单位/陈旧）+ 浏览器半 `countTurnTails` 选择器与静态面（槽 id、轮询下限、CSS 只用令牌、`quota-all` 与 config 字段） | **73 项断言**（2026-10-21 实测） |
 | `node scripts/verify-desktop-acceptance.mjs` | desktop 适配可执行验收：A 组结构性不变量（§4a index.js 无 desktop 特化 / §4b 宿主差异收口 / §6 goal 锚点；`--structural` 为 CI 硬闸门）+ B 组桌面环境断言（有 `~/.dsh/profiles/desktop` 才跑）；C 组活实例断言恒 SKIP，由端到端探针承担（证据 docs/probes/desktop-e2e-2026-10-03.json） | **9 ok / 0 FAIL / 3 SKIP**（2026-10-03 实测） |
+| `node scripts/verify-gateway-core.mjs` | 本机面的「唯一实现」闸门（v0.24.0）：`core/net-guard` 判定矩阵（Host 带端口/裸 `::1`/无 Origin/`Origin: null`/allowedOrigins 精确匹配）+ `core/http-surface` 服务器行为（403 排空→JSON、413 先排空再应答、404、同步/异步抛错→500、`stop()`、`port:0` 回填、EADDRINUSE 不崩、OpenAI 路由形状）+ `describeError` 契约 + `createChannelRuntime` 五语义 + 静态唯一性（门/脚手架/响应出口/客户端格式化器） | **67 项断言**（2026-10-21 实测） |
+| `node scripts/verify-host-split.mjs` | 组合根拆分后的结构验收（v0.25.0）：index ≤1200 / route ≤120 行、`host/**` 模块登记表、依赖单向（models 不 import settings、providers 不 import models/settings、core 不 import host）、28 action 齐全、动作体不自己拼响应、模块头注释 | **41 项断言**（2026-10-21 实测） |
+| `node scripts/verify-pack.mjs` | 发布完整性（v0.25.0）：`package.json#files` 覆盖 `host/**`、`core/**`、`providers/**` 与必需文件；`main`/`exports`/`dsh.bundle.patch` 都指向存在的文件；说明类文件在发布清单内 | **56 项断言**（2026-10-21 实测） |
+| `node scripts/verify-channel-contract.mjs` | 通道扩展点四方对账（v0.26.0）：契约形状（必填/可选/未知字段/重复 id）+ 三条真实通道的 settings 键与 runtime 台账 + 组合根按清单迭代（无通道名字面量）+ 客户端区块/control 对账 + quota-view 清单形态与命名形态同形 | **45 项断言**（2026-10-21 实测） |
+| `node scripts/verify-all.mjs` | 聚合入口：自动发现全部离线套件（`--list` 只列、`--only=` 过滤） | — |
 | `node scripts/verify-agents-md.mjs` | AGENTS.md 预算闸门：行数/字节/引用路径存在 + 踩坑编号连续性对账 | — |
 | `node scripts/verify-models.mjs` | 模型解析离线自检 / 在线探测可用性 / 目录漂移对比 | — |
 | `node scripts/verify-trae-model-catalog.mjs` | 目录提取器回归 | — |
 
-`npm run verify` = 在线模型探测（18 次真实请求，消耗额度）；离线快捷方式齐了 `verify:bridge` / `verify:core` / `verify:providers` / `verify:trae` / `verify:trae-provider` / `verify:qoder` / `verify:host-config` / `verify:picker-badge`。
+**`npm run verify` = 全部离线回归**（v0.24.0 起）：`scripts/verify-all.mjs` **自动发现** `scripts/` 下的 `verify-` 套件并按文件名顺序执行（`verify-models --list` / `verify-desktop-acceptance --structural` 的默认参数内置），逐套计时、失败贴全文、任一失败非零退出。新增套件**零登记**——写进 `scripts/` 就自动进闸门（此前手写 CI step 清单漏过 `verify-trae-model-catalog` 两个版本）。
+
+**`npm run verify:live` = 在线模型探测**（18 次真实请求，消耗额度，CI 与离线闸门都不跑）。单套快捷方式仍保留：`verify:bridge` / `verify:core` / `verify:providers` / `verify:trae` / `verify:trae-provider` / `verify:qoder` / `verify:host-config` / `verify:picker-badge` / `verify:client` / `verify:gateway` / `verify:net` / `verify:quota`。
 
 **断言纪律**：验证队列/代理行为必须断言"响应完成"（EOF），不是首字节；跨层测试先想清楚轮转游标在第几个请求上。
 

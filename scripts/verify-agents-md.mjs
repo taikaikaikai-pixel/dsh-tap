@@ -3,12 +3,14 @@
 // 锁三件事：①体积预算（行数/字节）②引用的本仓路径都存在 ③踩坑速查编号集 == docs/pitfalls.md 编号集且连续。
 // 背景与动机见 docs/pitfalls.md #52。
 import { readFileSync, existsSync } from 'node:fs';
+import { createChecker } from './lib/harness.mjs';
 
 const MAX_LINES = 150;
 const MAX_BYTES = 12000;
-let failures = 0;
-const ok = (m) => console.log(`ok ${m}`);
-const fail = (m) => { console.error(`FAIL ${m}`); failures++; };
+// 断言记账走共享骨架：本套件历史调点是 ok(msg) / fail(msg)（消息里自带判据）。
+const checker = createChecker('agents-md');
+const ok = (m) => checker.check(m, true);
+const fail = (m) => checker.check(m, false);
 
 const buf = readFileSync('AGENTS.md');
 const text = buf.toString('utf8');
@@ -41,5 +43,4 @@ const sameSet = agentNums.size === fileNums.size && [...agentNums].every((n) => 
   `踩坑编号连续对账 AGENTS.md=${agentNums.size} pitfalls.md=${fileNums.size} 1..${max}${sameSet && continuous ? '' : '（集合不一致或断号）'}`,
 );
 
-if (failures) { console.error(`${failures} 项未过`); process.exit(1); }
-console.log('agents-md budget check all green');
+if (!checker.finish()) process.exit(1);

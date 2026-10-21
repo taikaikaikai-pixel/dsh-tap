@@ -219,3 +219,34 @@
 > 脱敏（公开仓库）：CHANGELOG 移除账号 uid、邮箱、账号侧额度与用量绝对值、逐通道请求数，改用「账号 A / 账号 B」与量级比；第二轮（同日）把 `docs/probes/` 等 40 个文件里的账号 uid 与机器用户名一并替换为占位符 `acct-A` / `acct-B` / `<user>`（只改标识、不改结论与数值），仓库内容面至此不再出现账号标识。
 > 历史压缩（同日，用户要求「从 `0d7776c` 开始压缩」）：`0d7776c`..`ac2e9a1` 共 18 个开发提交压成 1 个，提交总数 152 → 135，树逐字节不变；26 个 tag 全部落在压缩点之前故不受影响。备份 = 分支 `backup/pre-squash-*` + 全量 bundle。**注意压缩只改历史、不改内容**：tip 提交的树里仍带着未打码的 `docs/probes/`，故本轮按「先打码、后压缩」的顺序把打码并入该压缩提交。更早的 12/15 个提交（2026-09-03 起）仍含账号标识与机器名，是否继续前移压缩点待定。
 > 纪律：此后不在「未发版」状态下推进 `package.json` 版本号——先发版（commit + annotated tag + push）再开下一轮，避免同类错位复发。
+
+## 可扩展性批（2026-10-21 定案，0.26.0）
+
+> 状态：**已落地**。优化计划 B4。目标：加一条通道从"改五处"变成"加一个描述符 + 一处登记"。
+> 落地：①`providers/channel.js` 契约（必填/可选/未知字段拒绝）；②`host/channels/{codebuddy,trae,qoder}.js` + `index.js` 清单（codebuddy 是工厂——桥按 apply 每代创建）；③组合根按清单迭代生命周期/retry/dispose，`index.js` 290 → 243 行；④`gateway-retry` 与 `quota-all` 按清单；`buildQuotaView` 接受 `channels` 映射且与命名参数同形（旧调用与 83 条断言零改动）；⑤客户端 `BLOCK_DEFS` 数据化（`gateway`/`control`/`diag`），删掉三处 `def.id ===` 三元与诊断 if 链；⑥`verify-channel-contract`（45 断言）+ `wiki/11-add-a-channel.md`（十二步）。
+> 未做（如实）：`lib/client.js` 仍 4026 行——`BLOCK_DEFS` 数据化净增了声明字段与注释，没到计划里"≤3800"的目标；要再瘦得动分区渲染本身（`SECTION_RENDERERS` 与三张面板），属下一次专门的重构，不塞进本批。
+> 验证：20 套件全绿（`npm run verify`）；`verify-channel-contract` 45 / `verify-host-split` 50 / `verify-route-contract` 69 / `verify-gateway-core` 67 / `verify-quota-view` 83；真实 HTTP 冒烟 16 项 + 11 个 action；`~/.dsh/codebuddy-plugin.json` md5 全程未变。
+
+## 可维护性批（2026-10-21 定案，0.25.0）
+
+> 状态：**已落地**。优化计划 B3。目标：让"改哪类东西去哪个文件"变成机器可判的边界，而不是靠记忆。
+> 落地：①组合根 **2517 → 328 行**，设置路由 **566 → 106 行**，28 个动作进 `host/settings/actions.js` 表；`host/` 12 个模块按 `config → runtime/redact → providers → models → settings` 单向依赖（`verify-host-split` 41 断言锁）。②**契约先行**：`verify-route-contract`（69 断言）在拆分前把 28 个 action + GET 视图两层键集合 + 7 类 patch + 5 类拒绝面逐条锁死，拆完零改期望值仍全绿。③测试记账收口到 `scripts/lib/harness.mjs`（6 套件）；`verify-pack`（56）发现 `files` 缺 `host/`（发布即崩）。④静态闸门去路径耦合：`scripts/lib/host-sources.mjs` 的拼接源视图。
+> 拆分中抓到的两个真回归：`?case=` 双实例隔离失效（provider 单例上移后共享 rotator，踩坑 #82；修法 `KeyRotator.reset()` + `resetRotationForTests()`）、静态闸门写死 index.js（踩坑 #83）。另有 5 处迟绑定槽（`prefsRef`/`wireRef`/`setExtraCreditsSource`/`settingsRef`/entryConfig）用来断开 `providers → models → settings` 的反向依赖。
+> 验证：18 套件全绿（`npm run verify`）；`verify-bridge` 156 / `verify-qoder` 202 / `verify-trae` 142 / `verify-route-contract` 69 / `verify-host-split` 41 / `verify-pack` 56；真实 HTTP 冒烟 16 项 + 11 个 action；`~/.dsh/codebuddy-plugin.json` md5 全程未变。
+> 待办：B4（通道描述符 + `quota-view` 通用化 + 客户端 `BLOCK_DEFS` 数据化 + `wiki/11-add-a-channel`）。`lib/client.js` 仍 4012 行（B4 目标 ≤3800）。
+
+## 统一性批（2026-10-21 定案，0.24.0）
+
+> 状态：**已落地**。优化计划 B2。目标：把"必须处处一致"的东西收成各自唯一的一份。
+> 收敛六项：①回环 Host/Origin 门 **6 → 1**（`core/net-guard.js`，含删掉设置路由里重复的 `sameOrigin` 第二道门）；②本机 HTTP 脚手架 **3 → 1**（`core/http-surface.js`：门/包体/413/404/500/`runtime` 记账/`stop()`/`port:0` 回填）；③通道监听生命周期 **3 → 1**（`createChannelRuntime`：补齐两家的 `.catch`，wedge 自愈四条语义单点）；④宿主半错误文案拼接 **33 → 8**（`core/errors.js#describeError`，只收敛兜底位，provider 特化文案保留）；⑤客户端错误格式化 **62 → 2**（`httpErr`/`netErr`，用户可见文案逐字未变）；⑥回归入口 **15 行 CI step → 自动发现**（`scripts/verify-all.mjs`，`npm run verify` = 离线全量，`npm run verify:live` = 原在线 18 次探测）。
+> 两个新发现：a) 413 立即 `res.end()` 会被客户端 RST 抹掉响应（踩坑 #81，`verify-bridge §15c` 间歇失败的真因）——`readBody` 改成先排空再应答；b) 静态扫描用 `git ls-files` 会漏掉未提交的新文件（已改 `--cached --others`，否则新模块的"唯一实现"断言在提交前假绿）。
+> 验证：新增 `verify-gateway-core`（67 断言）；全量 **16 套件全绿**（`npm run verify`，≈70s）；`verify-bridge` 156 / `verify-qoder` 202 / `verify-trae` 142 / `verify-quota-view` 83 全过；真实 HTTP 冒烟（临时 DSH_HOME）13 项 + 门拒绝形态 2 项全过；`~/.dsh/codebuddy-plugin.json` md5 全程未变。
+> 待办：B3（组合根拆分：`host/settings/*` + `host/models/*`，index.js ≤1200、路由 ≤120、`verify-route-contract` 先立契约）、B4（通道描述符 + 客户端 `BLOCK_DEFS` 数据化 + `wiki/11-add-a-channel`）。`providers/trae/oauth.js` 的 OAuth 回调 server 仍自持 `createServer`（临时端口/一次性/无凭据面），是否纳入回环门留待 B4 评估。
+
+## 可靠性批（2026-10-23 定案，0.23.0）
+
+> 状态：**已落地**。驱动：用户要求"检查代码，给一个优化计划（可靠性/统一性/可维护性/可扩展性）"，本批为计划 B1。
+> 根因四条（各配闸门）：a) 17 处上游 fetch 无 abort，全靠 undici 300s ⇒ OAuth 轮询 deadline 卡在 await 里（#78）；b) 设置路由先应答后跑副作用且无幂等出口 ⇒ 一条请求可把宿主进程带走（`ERR_HTTP_HEADERS_SENT` → unhandled rejection）、入站无体积上限（#76）；c) 客户端额度卡把任意非 2xx 当"功能关闭"置死闩 ⇒ 一次瞬时失败整会话熄灯（#75）；d) 登录态/网关态/排队态用中文文案判据 ⇒ 改一个词行为静默变（#77）。另修：镜像失败无信号（`mirrorState` → `mirror` 视图字段 → 区块 warn 芯片）、编造模型上限（改为拒绝启用 + 服务端校验）、并发 patch 丢凭据、trae 同步失败抹路由、重复挂载请求、卸载泄漏计时器、排队条误藏他家重试行、资源包"假零"、Qoder 卡/胶囊口径不一。
+> 落位：`core/fetch-guard.js`（新）、`index.js`（sendJSON/413/状态词/镜像台账/commitPatch/modelSetEnabled 校验）、`providers/{codebuddy,trae,qoder}` 的 fetch 与 `unauth`、`quota-view.js`（`unauth` 优先）、`lib/client.js`（自愈/退避/body 超时/`gwState`/`queueHint`/各 P2）。
+> 验证：新增 `verify-client-logic`（40）、`verify-net-discipline`（25）；`verify-bridge` 增 413、`verify-quota-view` 增 unauth（83）；`verify-trae-model-catalog`（50）**补进 CI**；全量 15 套件离线全绿。
+> 待办：计划 B2（`core/net-guard` + `core/gateway-server` 收敛三网关、错误契约统一）、B3（组合根拆分 + `verify:all`）、B4（通道描述符）。诊断/工具环（`core/diagnostics.js`）顺延到 B2，本批先用 `mirror` 台账满足可见性。

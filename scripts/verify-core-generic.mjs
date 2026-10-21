@@ -69,7 +69,16 @@ console.log('\n[S] core/ static purity')
 {
   const coreDir = join(ROOT, 'core')
   const files = readdirSync(coreDir).filter((f) => f.endsWith('.js'))
-  check('core/ has the expected four modules', files.length === 4, files.join(','))
+  // 白名单式对账：新增共用模块必须登记在这里（否则"core 只放凭据边缘层"的
+  // 边界会随随手放文件慢慢走样）。quota-cache.js = v0.22.0 的额度快照记忆化。
+  // 0.24.0：回环判定（net-guard）、本机 HTTP 面脚手架（http-surface）、
+  // 错误出口契约（errors）三份共用模块进白名单——它们只收「三通道都一样的
+  // 东西」，通道自身的协议事实仍留在 providers/。
+  const EXPECTED_CORE = [
+    'bridge.js', 'errors.js', 'fetch-guard.js', 'http-surface.js',
+    'json-store.js', 'net-guard.js', 'quota-cache.js', 'rotation.js', 'usage-meter.js',
+  ]
+  check('core/ has exactly the expected modules', files.slice().sort().join(',') === EXPECTED_CORE.slice().sort().join(','), files.join(','))
   // Upstream/vendor specifics that must never appear in core/.
   const forbidden = /\bcodebuddy\b|copilot\.tencent|tencent|12403|14401|14407|11101|11102|11103|11128|11217|12153|10001|x-ide-|x-product-version|x-private-data|dsh-codebuddy-bridge/i
   for (const f of files) {

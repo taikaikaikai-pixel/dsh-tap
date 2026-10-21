@@ -29,11 +29,12 @@ import {
   createQoderOAuth, createPkce, createMachineId, normalizeExpiry, QODER_CLIENT_ID,
 } from '../providers/qoder/oauth.js'
 
-let pass = 0, fail = 0
-const ok = (cond, label, extra = '') => {
-  if (cond) { pass++; console.log(`  ok  ${label}`) }
-  else { fail++; console.log(`  FAIL ${label} ${extra}`) }
-}
+import { createChecker } from './lib/harness.mjs'
+
+// 断言记账走共享骨架（scripts/lib/harness.mjs）；本套件历史参数顺序是 (cond, label)，
+// 适配层保留原调点不动。
+const { check, finish } = createChecker('verify-qoder-provider')
+const ok = (cond, label, extra = '') => check(label, cond, extra)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // ── mock 上游 ──────────────────────────────────────────────────────────────
@@ -1293,5 +1294,4 @@ console.log('\n[19] 用量归因信封与收尾上报（官方客户端同构）
 }
 
 server.close()
-console.log(`\n=== verify-qoder-provider: ${pass} 通过 / ${fail} 失败 ===`)
-process.exit(fail ? 1 : 0)
+finish()

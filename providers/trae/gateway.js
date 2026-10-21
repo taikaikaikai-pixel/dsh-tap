@@ -43,13 +43,13 @@
  * 生命周期纪律（踩坑 #17）：listen 失败绝不抛出——降级为 runtime.lastError。
  */
 
-import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
 
 import { sanitizeToolPairing } from '../tool-pairing.js'
 
 import { SessionLimiter, extractSessionId } from '../../core/bridge.js'
+import { createLoopbackServer, openAICompatRoutes, failInternal } from '../../core/http-surface.js'
 import { normalizeTraeError, formatTraeErrorMessage, TRAE_CREDENTIAL_UNAVAILABLE_MESSAGE } from './errors.js'
 import {
   createRemoteSession, openRemoteEvents, stopRemoteSession, createRemoteEventParser,
@@ -409,38 +409,6 @@ async function forEachSseEvent(body, parser, cb) {
   }
 }
 
-/**
- * Host 门（审计 [9]）：网关无认证，唯一防线是回环端口——但回环端口本机任意
- * 进程/页面（含 DNS rebinding 把公网域名解析到 127.0.0.1 的浏览器请求）都能
- * 连上。Host 白名单把表面收紧到回环主机名：Host 头可带端口，用 URL 解析出
- * hostname 再比对（IPv6 经 URL 解析后 hostname 保留方括号，即 [::1]）；
- * 解析失败一律拒绝。
- */
-function isLoopbackHost(hostHeader) {
-  if (typeof hostHeader !== 'string' || !hostHeader) return false
-  let hostname
-  try {
-    hostname = new URL(`http://${hostHeader}`).hostname
-  } catch {
-    return false
-  }
-  return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1' || hostname === '[::1]'
-}
-
-/** Origin 门（index.js localGuardFailure 同口径）：浏览器跨站请求（含
- *  navigator.sendBeacon 的 text/plain 免预检形态）恒带 Origin——host:port
- *  必须与 Host 完全一致才放行；无 Origin 放行（本机 fetch/curl 与剥 Origin
- *  的壳转发均不带该头，Host 门仍把守回环）。 */
-function isLoopbackOrigin(req) {
-  const origin = req.headers.origin
-  if (origin === undefined) return true
-  try {
-    return new URL(origin).host === req.headers.host
-  } catch {
-    return false
-  }
-}
-
 /** SSE 单行值清洗（审计 [20]）：客户端/上游提供的字符串可能含 \r\n，直插
  *  注释行会在响应流里伪造 SSE 帧——换行统一折叠为空格。 */
 function sseLineValue(value) {
@@ -561,8 +529,7 @@ export function createTraeGateway(deps) {
       if (usage) deps.meter.record({ ts: t0, kind: 'chat', model: actualModel || null, usage, channel: 'trae' })
       gwLog({ dir: 'out', transport: 'remote', model, actualModel, ms: Date.now() - t0, usage })
     } catch (err) {
-      if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json' })
-      try { res.end(JSON.stringify({ error: { message: `trae remote gateway error: ${err?.message ?? err}` } })) } catch { res.end() }
+      failInternal(res, err, 'trae remote gateway error')
     } finally {
       release()
       if (sessionCreated && tokenForStop) {
@@ -771,82 +738,24 @@ export function createTraeGateway(deps) {
         break
       }
     } catch (err) {
-      if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json' })
-      try { res.end(JSON.stringify({ error: { message: `trae gateway error: ${err?.message ?? err}` } })) } catch { res.end() }
+      failInternal(res, err, 'trae gateway error')
     } finally {
       release()
     }
   }
 
+  // 本机 HTTP 面（门/包体上限/413/404/500/生命周期）统一由 core/http-surface.js
+  // 提供：本文件只给处理逻辑（handleChat）与目录 id 清单（踩坑 #80）。
+  const server = createLoopbackServer({
+    runtime: deps.runtime,
+    logPrefix,
+    label: 'gateway',
+    unavailableNote: '（Trae 分区其余功能不受影响）',
+    routes: openAICompatRoutes({ handleChat, modelIds: () => deps.getCatalogIds?.() ?? [] }),
+  })
+
   function listen(port) {
-    const server = createServer((req, res) => {
-      // Host 门 + Origin 门：Host 必须回环（防 DNS rebinding / LAN 直连），
-      // 带 Origin 时其 host:port 必须与 Host 一致（防跨站借浏览器烧额度）。
-      // 先 resume 丢弃未读请求体再应答，保证 403 完整送达后连接正常收尾。
-      if (!isLoopbackHost(req.headers.host) || !isLoopbackOrigin(req)) {
-        req.resume()
-        res.writeHead(403, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: { message: 'forbidden: loopback host + same-origin required' } }))
-        return
-      }
-      // Buffer 收集 + 一次解码（踩坑 #28，同 core/bridge.js）：逐分片隐式
-      // utf8 解码会把跨分片多字节字符损坏成 3×U+FFFD，译文上行带乱码。
-      // 超 32MB 答 413（同 core/bridge.js），不静默 reset。
-      const chunks = []
-      let received = 0
-      let oversize = false
-      req.on('data', (c) => {
-        if (oversize) return
-        chunks.push(c)
-        received += c.length
-        if (received > 32 * 1024 * 1024) {
-          oversize = true
-          chunks.length = 0
-          res.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' })
-          res.end(JSON.stringify({ error: { message: 'request body too large (limit 32MiB)' } }))
-        }
-      })
-      req.on('end', () => {
-        if (oversize) return
-        const rawBody = Buffer.concat(chunks).toString('utf8')
-        const path = req.url?.split('?')[0] ?? ''
-        try {
-          if (req.method === 'POST' && (path === '/v1/chat/completions' || path === '/chat/completions')) {
-            handleChat(req, res, rawBody).catch(() => { if (!res.headersSent) { res.writeHead(500); res.end() } })
-            return
-          }
-          if (req.method === 'GET' && (path === '/v1/models' || path === '/models')) {
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({
-              object: 'list',
-              data: (deps.getCatalogIds() ?? []).map((id) => ({ id, object: 'model', created: Math.floor(Date.now() / 1000) })),
-            }))
-            return
-          }
-          res.writeHead(404, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ error: { message: `no route: ${req.method} ${path}` } }))
-        } catch (err) {
-          if (!res.headersSent) res.writeHead(500)
-          res.end(String(err?.message ?? err))
-        }
-      })
-    })
-    server.on('error', (err) => {
-      deps.runtime.running = false
-      deps.runtime.lastError = err?.code ?? String(err?.message ?? err)
-      process.stderr.write(`${logPrefix} gateway :${port} unavailable: ${deps.runtime.lastError}（Trae 分区其余功能不受影响）\n`)
-    })
-    server.on('listening', () => {
-      // port=0（临时端口，测试用）时回填实际端口。
-      deps.runtime.port = server.address()?.port ?? port
-      deps.runtime.running = true
-      deps.runtime.lastError = null
-    })
-    server.listen(port, '127.0.0.1')
-    return () => new Promise((resolve) => {
-      server.close(() => resolve())
-      server.closeAllConnections?.()
-    })
+    return server.listen(port)
   }
 
   return { listen, handleChat }

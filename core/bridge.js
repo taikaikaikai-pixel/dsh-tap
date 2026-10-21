@@ -43,54 +43,20 @@
  * generality contract (scripts/verify-core-generic.mjs enforces it).
  */
 
-import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { createLoopbackServer } from './http-surface.js'
+
 // ---------------------------------------------------------------------------
-// Loopback Host gate ([8]+[26] hardening): the bridge carries the user's live
-// credential, so it must only answer callers that reached it the intended way
-// — a same-machine client addressing the loopback bind directly. A non-loopback
-// Host header (DNS-rebinding name, LAN-spoofed Host) is refused before any
-// body byte is read or proxied.
+// Loopback Host/Origin gate: the bridge carries the user's live credential, so
+// it must only answer callers that reached it the intended way — a same-machine
+// client addressing the loopback bind directly. The gate itself lives in
+// core/net-guard.js (one implementation for every local surface; 踩坑 #80) and
+// the request plumbing in core/http-surface.js — this file only decides what to
+// forward.
 // ---------------------------------------------------------------------------
-
-/** Hostnames a same-machine caller may present in Host (::1 bare for raw
- * Host values; URL-parsed IPv6 keeps its brackets). */
-const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
-
-/** Inbound request-body ceiling; past it the caller gets a real 413. */
-const MAX_BODY_BYTES = 32 * 1024 * 1024
-
-/** True when the Host header (may carry a port) names the loopback. */
-export function hostIsLoopback(host) {
-  if (typeof host !== 'string' || !host) return false
-  try {
-    return LOOPBACK_HOSTNAMES.has(new URL(`http://${host}`).hostname)
-  } catch {
-    return false
-  }
-}
-
-/**
- * Origin gate: a browser cross-site request (including a no-preflight
- * `navigator.sendBeacon` with a text/plain body) always carries Origin — its
- * host:port must equal the Host header or the request is a drive-by CSRF that
- * would burn the user's upstream quota. A missing Origin passes: same-machine
- * fetch/curl and shell-forwarded in-app requests carry no Origin; the Host
- * gate above still confines those to loopback. Non-browser clients can forge
- * any Origin anyway, so this gate adds no constraint for them.
- */
-export function originMatchesHost(req) {
-  const origin = req.headers.origin
-  if (origin === undefined) return true
-  try {
-    return new URL(origin).host === req.headers.host
-  } catch {
-    return false
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Session attribution
@@ -700,82 +666,25 @@ export function createBridge({ settings, provider, withCredentials, meter, foren
   }
 
   /**
-   * Listen on 127.0.0.1 only. A listen failure must NEVER crash the host:
-   * an unhandled 'error' event on the server used to take the whole process
-   * down — failures land in runtime.lastError instead (EADDRINUSE typically
-   * means another instance already holds the port and still serves traffic,
-   * since routes point at the port, not the process).
+   * Listen on 127.0.0.1 only. Gate, body ceiling, 413/500 envelopes and the
+   * 'error'-never-crashes-host bookkeeping all live in core/http-surface.js —
+   * this bridge only supplies the forwarder. The forwarded path stays
+   * "everything": the bridge is a transparent proxy for chat and agenttool
+   * surfaces alike, so there is no route table here.
    *
    * @param {number} port
    * @returns {() => Promise<void>} stop function
    */
+  const server = createLoopbackServer({
+    runtime,
+    logPrefix: provider.logPrefix,
+    label: 'bridge',
+    unavailableNote: '（插件其余功能不受影响；若占用者是另一个 dsh 实例，其桥仍会代管本实例流量）',
+    onRequest: (req, res, rawBody) => proxyUpstream(req, res, rawBody),
+  })
+
   function listen(port) {
-    const server = createServer((req, res) => {
-      // Host gate ([8]+[26]): the bind is loopback-only, but the Host header
-      // is still caller-controlled — a rebinding DNS name or a spoofed Host
-      // must not reach the credential-bearing proxy. Refuse before reading
-      // the body or dispatching anywhere. The Origin gate complements it: a
-      // browser cross-site drive-by (sendBeacon/text-plain, no preflight)
-      // reaches the loopback bind with a browser-correct Host, and would
-      // silently burn upstream quota unless its Origin is rejected here.
-      if (!hostIsLoopback(req.headers.host)) {
-        res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' })
-        res.end('bridge: loopback-only (Host must be 127.0.0.1/localhost/::1)')
-        return
-      }
-      if (!originMatchesHost(req)) {
-        res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' })
-        res.end('bridge: cross-origin refused (Origin must match Host)')
-        return
-      }
-      // Bytes must be collected and decoded ONCE (踩坑 #28): implicit
-      // per-chunk utf8 decoding (`rawBody += c`) corrupts any multibyte
-      // character straddling a TCP chunk boundary into 3×U+FFFD at a
-      // per-request random position — the outbound prefix drifts and the
-      // gateway's content-addressed prompt cache can only hit up to the
-      // corruption point.
-      const chunks = []
-      let received = 0
-      let oversize = false
-      req.on('data', (c) => {
-        if (oversize) return // already answered 413; drain and drop the rest
-        chunks.push(c)
-        received += c.length
-        if (received > MAX_BODY_BYTES) {
-          oversize = true
-          chunks.length = 0
-          // Answer, don't destroy: a bare req.destroy() left the caller with
-          // a reset connection and no status. Connection: close because the
-          // unframed remainder of the upload must not poison keep-alive.
-          res.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' })
-          res.end(JSON.stringify({ error: { message: `request body too large (limit ${MAX_BODY_BYTES} bytes)` } }))
-        }
-      })
-      req.on('end', () => {
-        if (oversize) return
-        const rawBody = Buffer.concat(chunks).toString('utf8')
-        proxyUpstream(req, res, rawBody).catch((err) => {
-          if (res.destroyed || res.writableEnded) return // caller already gone
-          if (!res.headersSent) res.writeHead(500)
-          res.end(`stream bridge error: ${err.message}`)
-        })
-      })
-    })
-    server.on('error', (err) => {
-      runtime.running = false
-      runtime.lastError = err?.code ?? String(err?.message ?? err)
-      process.stderr.write(`${provider.logPrefix} bridge :${port} unavailable: ${runtime.lastError}（插件其余功能不受影响；若占用者是另一个 dsh 实例，其桥仍会代管本实例流量）\n`)
-    })
-    server.on('listening', () => {
-      runtime.running = true
-      runtime.lastError = null
-    })
-    server.listen(port, '127.0.0.1')
-    return () =>
-      new Promise((resolve) => {
-        server.close(() => resolve())
-        server.closeAllConnections?.()
-      })
+    return server.listen(port)
   }
 
   return { listen }

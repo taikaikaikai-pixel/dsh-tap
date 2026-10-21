@@ -32,6 +32,7 @@
  */
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { fetchWithTimeout, FETCH_TIMEOUTS } from '../../core/fetch-guard.js'
 
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000
 const LOGIN_POLL_INTERVAL_MS = 1000
@@ -166,11 +167,11 @@ export function createQoderOAuth({ readAuth, writeAuth }) {
         const store = readAuth()
         const auth = store.auth
         if (!auth?.refreshToken) { reloginNeeded = true; return undefined }
-        const res = await fetch(api(s, '/api/v1/deviceToken/refresh'), {
+        const res = await fetchWithTimeout(api(s, '/api/v1/deviceToken/refresh'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ refresh_token: auth.refreshToken, machine_id: store.machine?.machineId ?? '' }),
-        })
+        }, { timeoutMs: FETCH_TIMEOUTS.oauth })
         if (!res.ok) { reloginNeeded = true; return undefined }
         const body = await res.json().catch(() => null)
         const next = tokenFrom(body)
@@ -282,7 +283,7 @@ export function createQoderOAuth({ readAuth, writeAuth }) {
           let res
           try {
             const q = new URLSearchParams({ nonce, verifier, challenge_method: 'S256' })
-            res = await fetch(`${api(s, '/api/v1/deviceToken/poll')}?${q}`, { headers: { Accept: 'application/json' } })
+            res = await fetchWithTimeout(`${api(s, '/api/v1/deviceToken/poll')}?${q}`, { headers: { Accept: 'application/json' } }, { timeoutMs: FETCH_TIMEOUTS.oauth })
           } catch {
             continue // 网络抖动：继续等，不当失败
           }
@@ -320,9 +321,9 @@ export function createQoderOAuth({ readAuth, writeAuth }) {
   /** 账号信息尽力而为（失败不影响登录成立）。 */
   async function fetchAccount(s, accessToken) {
     try {
-      const res = await fetch(api(s, '/api/v1/userinfo'), {
+      const res = await fetchWithTimeout(api(s, '/api/v1/userinfo'), {
         headers: { Accept: 'application/json', Authorization: `Bearer ${accessToken}` },
-      })
+      }, { timeoutMs: FETCH_TIMEOUTS.oauth })
       const body = await res.json().catch(() => null)
       if (!body || typeof body !== 'object') return null
       const uid = body.uid ?? body.user_id ?? body.id ?? null

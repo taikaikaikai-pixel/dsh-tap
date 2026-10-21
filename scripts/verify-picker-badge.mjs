@@ -27,7 +27,14 @@ const calls = [];
 let probe = null;
 globalThis.fetch = (url) => {
 	calls.push(String(url));
-	return Promise.resolve({ ok: true, json: () => Promise.resolve(String(url).includes("probe=runtime") ? probe : view) });
+	// 两个读者都要支持：客户端对设置服务走 text()（非 JSON 错误页也要能读），
+	// 探针与旧路径可能走 json()。返回同一份载荷。
+	const payload = () => (String(url).includes("probe=runtime") ? probe : view);
+	return Promise.resolve({
+		ok: true, status: 200,
+		json: () => Promise.resolve(payload()),
+		text: () => Promise.resolve(JSON.stringify(payload())),
+	});
 };
 globalThis.AbortController = class { constructor() { this.signal = {} } abort() {} };
 // 可控时钟：断点②③ 要把"5 分钟窗口已过/未到"跑出来，不能等真时间。
@@ -48,12 +55,14 @@ function req(id) {
 	}
 	throw new Error("宿主模块不可用：" + id); // 踩坑 #9：浏览器半必须能在缺原语时降级
 }
+import { createChecker } from "./lib/harness.mjs";
+
 await import(new URL("../lib/client.js", import.meta.url).pathname);
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 const css = () => doc.querySelector().textContent;
-let pass = 0, fail = 0;
-const ok = (d, c, e = "") => { c ? (pass++, console.log(`  ok   ${d}`)) : (fail++, console.log(`  FAIL ${d}${e ? " — " + e : ""}`)) };
+// 断言记账走共享骨架（scripts/lib/harness.mjs）。
+const { ok, finish } = createChecker("verify-picker-badge");
 
 // 恢复时刻取「未来 30 分钟」并现算 HH:mm——fixture 禁绝对日期（踩坑 #38）：
 // 写死本地时刻的测试在钟点过后必然把「限流徽标」测成空（2026-10-21 实发）。
@@ -148,5 +157,5 @@ console.log("[5] 排队重试条 dock 注册（slot wiring）");
 	ok("dock 渲染组件是函数", typeof dock?.comp === "function");
 }
 
-console.log(`\n${pass} 通过 / ${fail} 失败`);
-process.exit(fail ? 1 : 0);
+// 浏览器半的假环境常驻定时器（quota 心跳/退避）：显式退出，别等事件循环空。
+process.exit(finish() ? 0 : 1);

@@ -13,13 +13,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHostConfigLayer } from '../host-config.js'
 
-let pass = 0
-let fail = 0
-const ok = (desc, cond, extra = '') => {
-  if (cond) { pass++; console.log(`  ok   ${desc}`) }
-  else { fail++; console.log(`  FAIL ${desc}${extra ? ' — ' + extra : ''}`) }
-}
-const section = (t) => console.log(`\n[${t}]`)
+import { createChecker } from './lib/harness.mjs'
+
+// 断言记账与 [section] 输出走共享骨架（scripts/lib/harness.mjs）。
+const { ok, section, finish } = createChecker('verify-host-config')
 
 // --- 假宿主：0.1.7 形态的 Settings forms 服务 -------------------------------
 function makeFormsService(opts = {}) {
@@ -261,5 +258,4 @@ section('C] 无 settings 服务')
 }
 
 rmSync(dir, { recursive: true, force: true })
-console.log(`\n=== verify-host-config: ${pass} 通过 / ${fail} 失败 ===`)
-process.exit(fail ? 1 : 0)
+finish()

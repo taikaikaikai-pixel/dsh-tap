@@ -122,7 +122,8 @@ export function createQoderGateway(deps)  // => { listen(port), handleChat(req, 
 export function createQoderEnvelopeParser()  // SSE 信封解析器（单测可导入）
 ```
 
-路由：`POST /v1/chat/completions`（或 `/chat/completions`）→ `handleChat`；`GET /v1/models` → 目录 id 清单；其余 404。listen 失败降级 `runtime.lastError` 不崩（踩坑 #17 纪律）；入站 Host 门（非回环先 `req.resume()` 丢体再 403，同 trae 网关审计面）；请求体 `Buffer.concat` 一次解码（踩坑 #28 纪律），上限 32MB。
+路由：`POST /v1/chat/completions`（或 `/chat/completions`）→ `handleChat`；`GET /v1/models` → 目录 id 清单；其余 404。
+**0.24.0 起 `listen()` 委托 `core/http-surface.js`**：Host/Origin 门（非回环先 `req.resume()` 丢体再 403）、`Buffer.concat` 一次解码（踩坑 #28）、32MiB→413（先排空再应答，踩坑 #81）、404/500 信封、`runtime` 记账与 `stop()` 都在共享脚手架；listen 失败降级 `runtime.lastError` 不崩（踩坑 #17 纪律）。
 
 ### handleChat 主流程
 

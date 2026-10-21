@@ -196,13 +196,14 @@ v0.10.0 起是**四区块通道手风琴**：`CodeBuddy → TraeWork CN → Qode
 
 贡献流程与提交约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-### 校验套件（除 `npm run verify` 外全部离线、mock 上游；断言数以各脚本自身输出为准）
+### 校验套件（除 `npm run verify:live` / `--sync` / `--efforts` 外全部离线、mock 上游；断言数以各脚本自身输出为准）
 
 | 命令 | 覆盖 |
 |------|------|
 | `node scripts/verify-models.mjs --list` | 离线自检模型解析（当前 23 条） |
 | `node scripts/verify-models.mjs --sync` / `--efforts [id…]` | 在线目录漂移对比 / 档位探测（消耗额度） |
-| `npm run verify` | 在线逐模型真实探测（消耗额度） |
+| `npm run verify` | **全部离线回归**：自动发现 `scripts/` 下的 verify- 套件顺序执行（新增套件零登记） |
+| `npm run verify:live` | 在线逐模型真实探测（18 次真实请求，消耗额度；CI 不跑） |
 | `npm run verify:bridge` | 流式桥端到端（mock 网关，断言响应完成） |
 | `npm run verify:rotation` | 多 Key 轮询 / 冷却 / failover |
 | `npm run verify:core` | `core/` provider 无关性证伪（静态纯净扫描 + 第二上游全链路） |
@@ -212,6 +213,11 @@ v0.10.0 起是**四区块通道手风琴**：`CodeBuddy → TraeWork CN → Qode
 | `npm run verify:qoder` | Qoder 通道全链路（目录/信封/工具环/prefs 路由） |
 | `npm run verify:host-config` | 宿主配置层选路 / 冲突重试 / 降级 |
 | `npm run verify:desktop-acceptance` | 桌面端组合验收（`--structural` 为结构模式） |
+| `node scripts/verify-gateway-core.mjs` | 本机面唯一实现（回环门矩阵 / HTTP 脚手架 / 错误契约 / 监听生命周期） |
+| `node scripts/verify-route-contract.mjs` | 设置路由行为契约（28 action + GET 视图键集合 + patch/拒绝面） |
+| `node scripts/verify-host-split.mjs` | 组合根拆分结构验收（行数预算 / 模块登记 / 依赖单向） |
+| `node scripts/verify-channel-contract.mjs` | 通道扩展点四方对账（契约 / 设置字段 / 客户端区块 / 额度形态） |
+| `node scripts/verify-pack.mjs` | 发布完整性（`package.json#files` ↔ 磁盘 / 入口 / patch 文件） |
 | `node scripts/verify-agents-md.mjs` | 文档闸门（AGENTS.md 预算 / 引用存在 / 踩坑编号连续） |
 
 联调探针：换机器或上游协议变动后，`node scripts/probe-trae-live.mjs --login` 再 `--chat "你好"`、`node scripts/probe-qoder-live.mjs --login` 再 `--chat "你好"` 校准（证据落 `docs/probes/`）。Qoder 专项差分探针见 `scripts/probe-qoder-*.mjs`。

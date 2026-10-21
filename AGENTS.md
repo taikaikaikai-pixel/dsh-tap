@@ -11,8 +11,8 @@
 | 层 | 文件 | 职责 | 裁判文档 |
 |---|---|---|---|
 | 静态配置 | `cordis.patch.yml` | provider 路由指向本地桥 + 模型清单 + web 钉选 + `insert` 入口 | wiki/01-architecture.md |
-| 组合根 | `index.js` + `host-config.js` | Config/schema、模型管理与宿主配置层镜像（host-config 按宿主版本选路）、凭据编排、设置路由、apply 生命周期 | wiki/02-composition-root.md |
-| 凭据边缘层 | `core/` | **provider 无关**：json-store / rotation / usage-meter / bridge；禁止任何 CodeBuddy 特化（verify-core-generic 锁） | wiki/03-core-layer.md |
+| 组合根 | `index.js` + `host/**` + `host-config.js` | 入口与 apply 生命周期（≤1200 行）+ `host/`：config/runtime/redact、providers 单例与登记册、models 状态与镜像、**channels 通道描述符清单**、settings 路由/动作/patch/视图（host-config 按宿主版本选路） | wiki/02-composition-root.md + wiki/11-add-a-channel.md |
+| 凭据边缘层 | `core/` | **provider 无关**：json-store / rotation / usage-meter / quota-cache / fetch-guard / **net-guard（回环门唯一实现）** / **http-surface（本机 HTTP 面脚手架）** / **errors（错误出口契约）** / bridge；禁止任何 CodeBuddy 特化（verify-core-generic 锁） | wiki/03-core-layer.md |
 | 上游适配器 | `providers/codebuddy/` | CodeBuddy 全部网关事实：headers/errors/oauth/catalog/agenttool/images | docs/rules/ + wiki/04-provider-codebuddy.md |
 | 上游适配器 | `providers/trae/` | TraeWork CN：自持设备密钥 OAuth / state.vscdb 目录 / 翻译网关 :3902 | docs/reverse/ + wiki/05-provider-trae.md |
 | 上游适配器 | `providers/qoder/` | Qoder CN：PKCE 设备流 / COSY WASM 签名 / 加密信封翻译网关 :3903 | docs/goals/qoder-cn-provider-design.md + wiki/10-provider-qoder.md |
@@ -60,23 +60,19 @@
 `#71` 宿主重试只看failure.code·Retry-After被pi-ai丢弃·固定30s须initial=max·429排队/额度同码靠消息分QUOTA
 `#72` 装饰挂进截断盒必被裁·trigger徽标换锚点到button·旧锚点content:none成对关·:has降级成对
 `#73` 拒绝面高频探测=账号风控封禁（403/11140）·目录面200≠聊天可用·封禁期零请求先申诉
+`#74` composer.dock≠input.dock·无会话不渲染·容器无定位须自建锚点
+`#75` 瞬时失败别置死闩·`#76` 响应出口须幂等·`#77` 登录态/网关态走结构化字段·`#78` 上游fetch必带超时
+`#79` 错误信封有两条契约别合并·`#80` 回环门只留一份实现·`#81` 413须先排空再应答
+`#82` `?case=`复制不了依赖模块的单例状态·`#83` 静态闸门别写死文件路径·`#84` 通道扩展点须四方对账
 
 ## 常用命令（probe/联调/取证脚本的用法注释见 wiki/09-run-and-test.md）
 
 ```sh
 dsh web
-node scripts/verify-models.mjs --list
-node scripts/verify-bridge.mjs
-node scripts/verify-rotation.mjs
-node scripts/verify-core-generic.mjs
-node scripts/verify-providers.mjs
-node scripts/verify-trae-provider.mjs
-node scripts/verify-qoder-provider.mjs
-node scripts/verify-host-config.mjs
-node scripts/verify-picker-badge.mjs
-node scripts/verify-desktop-acceptance.mjs
-node scripts/verify-agents-md.mjs
-npm run verify
+npm run verify            # 全部离线回归：自动发现 scripts/ 下的 verify- 套件（新增零登记）
+npm run verify:live       # 在线模型探测（18 次真实请求，耗额度——CI 与离线闸门都不跑它）
+node scripts/verify-gateway-core.mjs   # 只跑本机面：回环门矩阵 / HTTP 脚手架 / 错误契约 / 监听生命周期
+node scripts/verify-models.mjs --list  # 只列模型（离线）
 CODEBUDDY_BRIDGE_LOG=/tmp/bridge.jsonl dsh web
 ```
 
@@ -87,7 +83,7 @@ CODEBUDDY_BRIDGE_LOG=/tmp/bridge.jsonl dsh web
 ## 文档地图（改哪类代码，先读哪份）
 
 - 改 CodeBuddy 出站行为（headers/UA/错误码/目录/额度/缓存/审核）→ docs/rules/ 对应专题：routing、ua-validation、quota-signals、prompt-cache、content-moderation、dev-role-boundary、oauth-handshake；错误码表在 providers/codebuddy/errors.js
-- 接入新的 key 型 OpenAI 兼容上游 → docs/rules/extra-providers.md
+- 接入新的 key 型 OpenAI 兼容上游 → docs/rules/extra-providers.md；加一条**通道**（本机网关+目录+设置卡区块）→ wiki/11-add-a-channel.md
 - 改 Trae 通道 → docs/reverse/traework-cn.md + trae-cloud-api.md（目录提取另见 trae-model-catalog.md）；错误码表在 providers/trae/errors.js
 - 改 Qoder 通道 → docs/goals/qoder-cn-provider-design.md + wiki/10-provider-qoder.md
 - 排查"缓存命中率低/重复提问" → docs/diagnosis-cache-quota.md + docs/diagnosis-cache-decline.md；"trae 3003" → docs/diagnosis-trae-3003.md；Qoder "provider_error / Flash 不可用" → docs/diagnosis-qoder-flash.md；CodeBuddy "API 密钥无效 / 全模型失败" → docs/diagnosis-codebuddy-11140.md

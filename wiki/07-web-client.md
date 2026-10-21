@@ -123,3 +123,31 @@ details.cbc-adv（高级组）/ details.cbc-help（使用说明）。
 **零真实写入纪律**：套件里走 mock 的通道不写真实设置；走真实视图的脚本（prefs-check）基线从 GET 实况读取、收尾复原到实况（不是"复原到空"），跑前跑后对 `~/.dsh/codebuddy-plugin.json` 取 md5 对账。
 
 **截图口径**（踩坑 #48）：`page.screenshot({fullPage:true})` 在本宿主是**空操作**（卡片在内层 overflow 容器里、`document.scrollHeight` === 视口高），产物恒 1440×900——"尺寸对 ≠ 内容在"。区块级基线一律走元素句柄 `handle.screenshot()` + **逐张看图**，脚本另核对「最近滚动祖先的 client 区是否整个包住该元素」。
+
+## 通道状态口径（0.23.0）
+
+区块头的"网关未监听/运行中"不再由客户端解析中文文案，而是读 `settingsView` 的 `bridge.state`：
+
+| `bridge.state` | 含义 | 客户端用法 |
+|---|---|---|
+| `off` | 通道未启用（开关关） | 芯片 tone=off |
+| `pending` | 已启用但还没监听上（`listening` 事件未到/启动窗口） | 芯片 warn；**保存后补拉只认这个词** |
+| `listening` | 正在服务 | 芯片 ok + 端口 |
+| `error` | 监听失败（端口占用等，`lastError` 有值） | 芯片 warn + 原因 |
+
+客户端 `gwState()` 优先读该字段，旧宿主（无此字段）按 `running/lastError` 现场推导同一套词汇；`GW_STATES` 与宿主 `bridgeStateOf` 的集合由 `verify-client-logic` 静态比对（踩坑 #77）。排队重试条同理：`pickQueueRetry` 以 `?probe=runtime` 的 `queue` 为结构化判据，文案正则仅作旧版回退。
+
+## 主界面额度卡（0.22.0）
+
+设置卡之外的第二个 UI 面：输入框下方常驻一枚**额度胶囊**（折叠态只显示跨通道合计），悬停 120ms 或点击展开逐通道明细。
+
+- **槽**：`conversation.composer.dock` = **输入框卡片下方**的环境行，注册 `{ name, id: 'dsh-tap-quota', order: 2 }`；同槽已有宿主 `activity`(0) / `usage`(1)，其后宿主还直绘上下文占用环。**别和 `conversation.input.dock` 混**（那是卡片上方，本插件的排队重试条 `dsh-tap-queue` 在那里；踩坑 #74）。
+- **渲染条件（宿主侧）**：`variant === 'composer' && input !== undefined && sessionId !== undefined` ⇒ 空白新会话（hero 态）不渲染该槽，插件侧按"可选装饰"设计（不占位、不报错）。
+- **定位**：宿主 dock 行是普通 flex（`justify-content:center; gap:12px`，无 position/overflow 契约）⇒ 胶囊自带 `div.cbc-q-wrap{position:relative}` 锚点，面板 `position:absolute; bottom:calc(100% + 8px); left:50%; translateX(-50%)`，`width:min(380px, calc(100vw - 32px))`、`max-height:min(60vh,420px)` 可滚。不把浮层挂进别人的盒子赌它不裁剪（坑 #72 同族）。
+- **交互**：hover 120ms 开 / 移开 240ms 关（面板 `mouseenter` 取消收起）、点击切换、`Esc` 与点外部关闭、`Tab` + `Enter` 可达（`aria-haspopup="dialog"` / `aria-expanded` 如实翻转）；展开时 5s 心跳刷新相对时间。
+- **数据与刷新**：`POST /dsh-tap/settings {action:'quota-all', fresh?}`，服务端用 `quota-view.js` 归一三通道额度（CodeBuddy 周期/总量、Trae IDE/work 双池、Qoder 订阅/附加）。刷新策略：挂载一次 → 每完成一轮（Chat 快照 `turn-tail` +1）去抖 1.5s 强制刷新 → 回前台/展开/点刷新 → 空闲兜底 5 分钟，页面不可见零请求；服务端 60s memoize + 15s 强制地板吸收连发（口径见 `docs/rules/quota-signals.md` R-Q12）。
+- **失败自愈（0.23.0）**：只有 `404/405/501`（路由/动作不存在）或 `ok:true && enabled:false`（宿主明确关开关）才把卡片判为"没有这张卡"并停止轮询；其余失败（宿主重启窗口的 502、非 JSON 错误页、网络中断）都算瞬时——保留上一份视图，按 30/60/120/300s 退避重试（`quotaRetryDelay`）。旧实现把任意非 2xx 写成 `enabled:false`，而 300s 心跳与 `visibilitychange` 都以它为前置条件早退 ⇒ 一次瞬时失败就让胶囊整个会话消失（踩坑 #75）。
+- **响应读取也有上限**：`fetchWithTimeout` 的计时器罩到 body 读完（`r.text()`/`r.json()` 各包一层），不是收到响应头就解除——否则服务回 200 头后挂住 body，卡片会永远停在"正在读取设置…/刷新中…"（踩坑 #75 c 项）。
+- **降级**：路由不存在/旧宿主/全部未登录 ⇒ 整枚隐藏（`enabled === false` 或 `visible === false`），不报错、不重试成风暴。
+- **样式**：组件内渲染 `<style data-plugin-css="dsh-tap-quota-widget">`（卸载即移除），类前缀 `cbc-q-`，只用 `--dsw-alias-*` 与 `--dsw-elevation-panel` 令牌，无硬编码颜色。
+- **开关**：设置卡通用区块「主界面额度卡」（Config `quotaDockEnabled`，默认开；纯展示开关，不进宿主配置层镜像）。

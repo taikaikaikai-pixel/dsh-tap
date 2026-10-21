@@ -1,5 +1,68 @@
 # Changelog
 
+## 0.26.0 (2026-10-21)
+
+> 可扩展性批次（优化计划 B4）：把"加一条通道要改五处"变成**加一个描述符文件 + 一处登记**。新增**踩坑 #84**、契约闸门 `verify-channel-contract.mjs`（45 断言）与 [wiki/11-add-a-channel.md](wiki/11-add-a-channel.md)。
+
+- **通道契约（`providers/channel.js`）**：`defineChannel({id,label,settings,runtime,listen,quota?,catalogSync?,catalogView?,onDisabled?,onStarted?,block?})`——必填五项、可选六项，**未知字段直接抛**（防"以为是契约的私有字段"被下一代照抄），`id` 有命名规则，`assertChannels` 拒绝重复 id 与空清单。契约文件本身**不含任何通道具体值**（只校验形状）。
+- **三条通道描述符（`host/channels/{codebuddy,trae,qoder}.js` + `index.js`）**：把"settings 键 / runtime 台账 / listen / 额度面 / 目录同步 / 镜像钩子"从组合根搬进数据；`createChannels()` 是唯一清单（`CHANNEL_IDS` 顺序 = 设置卡区块顺序）。codebuddy 的描述符是**工厂**（桥按 apply 每代创建），trae/qoder 是常量——真差异留在数据里，没被"统一"抹掉。
+- **组合根按清单迭代**：三段 `createChannelRuntime` + `syncTraeBridge/syncQoderBridge` 包装 + `retryGateway` 的 if 链 + dispose 的三次 stop，合并成"一个循环 + 一张 `live` 表"；`index.js` 从 290 → **243 行**。`gateway-retry` 的 id 校验与 `quota-all` 的三段 `Promise.all` 同样改为按清单/按通道 `quota({fresh})` 迭代（加通道自动进额度卡片）。
+- **`buildQuotaView` 接受清单形态**：`channels: { codebuddy, trae, qoder }` 与旧的三命名参数**同形同值**（`verify-channel-contract` 逐字段比对），旧调用与 83 条额度断言零改动——扩展点加上了，向后兼容没破。
+- **客户端区块数据化**：`BLOCK_DEFS` 增加 `gateway`/`control`/`diag` 三个声明字段，删除 `def.id === "trae"` / `"qoder"` / `"codebuddy"` 的三处三元、`(codebuddy||trae||qoder)` 的动作判定、以及 `copyDiagnostics` 里的通道名 if 链（改成 `DIAG_SOURCES[def.diag]` + `PORT_FIELD`）。新增通道 = 加一条 def + 一个分区组件。
+- **`verify-channel-contract.mjs`（45 断言）**：契约形状（含四种负例）+ 三条真实通道的 settings 键在 Config/SETTINGS_FIELDS 里真有 + runtime 是 `host/runtime.js` 的台账 + 组合根/动作/客户端不再出现通道名字面量 + 客户端 `control` 字段存在 + quota-view 两种形态同形。
+- **`wiki/11-add-a-channel.md`**：十二步清单（上游适配器 → 配置字段 → runtime → provider 单例 → 模型镜像 → 描述符 → 登记 → 视图片段 → 客户端区块 → 额度适配器 → 文档）、三条通道各自的特殊处、加完必跑的闸门、四种常见错法。
+- **文档**：pitfalls #84；wiki/02 文件地图补 channels 行；wiki/09 增契约脚本行；AGENTS 三层表与文档地图（加通道 → wiki/11）同步；STATE 记「可扩展性批」。
+
+## 0.25.0 (2026-10-21)
+
+> 可维护性批次（优化计划 B3）：把 2517 行的组合根拆成 **328 行的 index.js + 12 个 `host/**` 模块**，设置路由从 566 行降到 **106 行**外壳 + 28 条动作表。**先立契约闸门再动手**——拆分前的 28 个 action / GET 视图每一层键集合被 `verify-route-contract.mjs` 逐条锁死，拆完不改期望值仍全绿。新增**踩坑 #82/#83**。
+
+- **契约先行（`scripts/verify-route-contract.mjs`，69 断言）**：临时 `DSH_HOME` + 上游基址指向必然 ECONNREFUSED 的本机端口 ⇒ 28 个 action 都有**确定的**状态码/`ok` 语义/顶层键集合可锁；GET 视图锁到第二层（`value`/`user`/`mirror`/`models`/`bridge`/`trae`/`qoder`/`host`/`oauth`/`credits`/`manualCredits`）；7 类 patch、5 类拒绝面（坏 JSON / 空 body / 405 / 跨站 Origin / LAN Host / 超 1MiB）与两个探针端点同样入册。**这份期望表同时是客户端与路由之间的对外契约**：改它必须改 CHANGELOG。
+- **组合根拆分（`host/`，依赖单向）**：`config`（路径/schema/字段表/文件层/端口分流）→ `runtime`（三通道运行态）+ `redact`（脱敏原语）→ `providers/{instances,registry}`（provider 单例+凭据编排 / key 型上游登记册）→ `models/{state,mirror,channels}`（清单计算 / 宿主镜像 / 两家订阅通道模型）→ `settings/{view,patch,actions,route}`。`index.js` 只剩入口导出、`apply()` 装配与三个迟绑定槽的注册。依赖方向由 `verify-host-split.mjs` 锁死（`models` 不许 import `settings`、`providers` 不许 import `models`/`settings`、`core` 不许 import `host`）。
+- **路由瘦身**：`host/settings/route.js`（106 行）= 本地门 → GET/探针 → `readBody`（1MiB + 先排空再 413）→ `ACTIONS[action]` 或 patch 分支 → 400 兜底；28 个动作在 `actions.js` 里**逐字照搬**（只把 `sendJSON(response, …)` 换成 `reply(…)`），patch 语义在 `patch.js`（`commitPatch` 与"副作用先于响应"纪律原样）。
+- **迟绑定槽取代反向依赖**：三个模块级单例（provider 栈、偏好读侧、档位线值）由组合根在装配时填入 `prefsRef`/`wireRef`/`setExtraCreditsSource`，避免 `providers → models` 的环（拆到一半时靠 ReferenceError 逐个暴露，最终由 `verify-host-split` 的方向断言兜住）。
+- **测试基建收口（6 套件 → 1 份 harness）**：`verify-{bridge,trae-provider,qoder-provider,host-config,picker-badge,agents-md}` 各自抄的记账器统一到 `scripts/lib/harness.mjs`（`check/ok` 双别名 + `section` + `finish`）；bridge 因监听 socket 常开需显式 `process.exit(finish())`（旧代码的 `process.exit` 语义）。
+- **两个新结构闸门**：①`verify-host-split.mjs`（41 断言）——行数预算（index ≤1200、route ≤120）、模块登记表、依赖方向、28 action 齐全、动作体不再自己拼响应、每个 host 模块有职责头注释；②`verify-pack.mjs`（56 断言）——`package.json#files` 与磁盘/入口/`dsh.bundle.patch` 对账，**发现并修掉 `files` 里缺 `host/`**（否则发布出去的包 import 即崩；这类事故本地永远测不出来）。
+- **静态闸门去路径耦合**：新增 `scripts/lib/host-sources.mjs`（`hostSource()` = index.js + host/** 拼接源），把"宿主半某处有"类断言（`bridgeStateOf`/路由护栏/`settingsView.mirror`/分流常量/`quota-all`/provider 接缝）从写死 `index.js` 改为扫拼接源——拆一次文件不再红一次。
+- **两个真实回归（都在拆分中当场抓到）**：①`verify-rotation` 的 `?case=` 双实例隔离失效——provider 单例搬进 `instances.js` 后两个 index 实例共享同一个 `KeyRotator`，游标从 bravo 起跑（修法：`KeyRotator.reset()` + `resetRotationForTests()` 显式清空，**踩坑 #82**）；②静态闸门写死文件路径（**踩坑 #83**）。
+- **文档**：`docs/pitfalls.md` #82/#83；`wiki/02-composition-root.md` 新增「文件地图」与依赖方向表；`wiki/09-run-and-test.md` 增两套新脚本；AGENTS 三层架构表（组合根 = `index.js` + `host/**`）与踩坑速查同步；`docs/rules/STATE.md` 记「可维护性批」。
+
+## 0.24.0 (2026-10-21)
+
+> 统一性批次（优化计划 B2）：把"本机面"重复的**六份回环门**、**三份 HTTP 脚手架**、**三份监听生命周期**、**33 处错误文案拼接**、**62 处客户端错误格式化**各自收成唯一的一份。新增**踩坑 #79–#81**；新增闸门 `scripts/verify-gateway-core.mjs`（**67 断言**）与聚合入口 `npm run verify`。三个通道的 SSE/翻译逻辑**零改动**。
+
+- **回环门：六份实现 → 一份 `core/net-guard.js`（踩坑 #80）**：`Host`/`Origin` 判定此前分布在 `core/bridge.js`(2 导出)、`providers/trae/gateway.js`(2)、`providers/qoder/gateway.js`(2)、`index.js`(4 个函数)、`providers/{codebuddy,qoder}/oauth.js`。语义之所以一致是运气：两处把白名单抄成常量、一处只认不带端口的 hostname、一处漏 `[::1]`；设置路由甚至在入口门之后又跑了一遍同语义的 `sameOrigin`（两道门一份语义，已删）。现在只剩 `isLoopbackHostname` / `isLoopbackHostHeader` / `originMatchesHost` / `localGuardFailure`（返回结构化 `{code:'host'|'origin'}`，文案归各面：设置面说中文、网关面回英文 OpenAI 信封）。门行为逐条锁定（可带端口的 Host、裸 `::1` 拒绝、无 Origin 放行、`Origin: null` 拒绝、`localAllowedOrigins` 精确匹配不做前缀）。
+- **本机 HTTP 面：三份脚手架 → 一份 `core/http-surface.js`**：`createLoopbackServer` 统一 门→排空→包体→路由→信封→`runtime` 记账→`stop()`；差异点顺手归一——403 一律 JSON（桥原来回 text/plain）、403 前一律 `req.resume()`（桥原来不排空）、413 上限文案统一带真实字节数（两家原来写死 `32MiB`）、500 一律 `{error:{message,code}}`（桥原来回纯文本）、`port:0` 时一律回填真实端口（**桥原来恒为 0**，测试与「重试监听」都读不到真值）。typo 级细节也一并统一：两个翻译网关的 `/v1/models`、`/v1/chat/completions`、`/chat/completions`、`/models` 路由形状抽成 `openAICompatRoutes`（形状与改造前逐字一致）。
+- **通道监听生命周期：三份 → 一份 `createChannelRuntime`**：禁用→停服务+清 `runtime`+撤镜像、同端口无 `lastError` 早退、**wedge 自愈**（`lastError` 置位不早退、重新 listen）、`retry()` 禁用时返回 `false` 且不写配置（踩坑 #44）——四条语义此前各写一遍，注释都在解释同一件事。目录同步的 fire-and-forget 现在统一挂 `.catch`（旧实现里一家有 `catch`、一家没有 = 潜在未处理拒绝）。
+- **错误出口契约：33 处拼接 → `describeError()`（踩坑 #79）**：`core/errors.js` 只做三件事——取可读消息（折叠换行、截断 400 字、敌意 getter 不抛）、定机器可判的 `code`（`err.code` 优先，其次 `err.kind`）、定 `kind`（`timeout/aborted/network/internal`）。**两条信封契约有意保留**：设置面 `{ok:false,error:"中文"}`（客户端 `setErr` 直吃）、网关面 `{error:{message,code}}`（dsh/pi-ai 直吃）——各留一个出口，不许合并。
+- **客户端错误格式化：62 处内联 → 2 个函数**：`httpErr(res, label, showStatus)` / `netErr(e, label)`。此前每个请求各写一遍三元表达式（"保存失败（HTTP n）"/"获取失败（网络）"），文案口径靠人肉统一；现在文案由 label 传入、状态码与网络原因统一拼装。用户可见文案逐字未变。
+- **413 时序修正（踩坑 #81）**：旧写法在收到上限那一瞬间 `res.end()`，Node 随即销毁 socket；客户端还在上传，RST 会把它已收到的响应缓冲一起抹掉 ⇒ 只看到"连接被重置"、拿不到状态码（`verify-bridge §15c` 曾因此间歇性失败，本轮实测定位）。现在 `readBody` **先排空这一轮上传再回 413**（排空期不再缓冲，内存上限不变；30s 宽限后强制收尾）。设置路由同一套。
+- **回归入口：`npm run verify` = 离线聚合（自动发现）**：新增 `scripts/verify-all.mjs`——按文件名自动发现 `scripts/verify-*.mjs`（`verify-models --list` / `verify-desktop-acceptance --structural` 的默认参数内置），顺序执行、逐套计时、失败贴全文、非零退出。**手写 CI step 清单就此退役**（0.23.0 才补回漏跑两个版本的 `verify-trae-model-catalog`，不再可能复发）。`npm run verify:live` = 原在线 18 次探测（耗额度，CI 不跑）。CI 的 15 行 step 收敛成 `npm run verify` 一行。
+- **测试基建**：新增 `scripts/lib/harness.mjs`（断言器/sleep/临时端口/Host 可覆写的极简 HTTP 客户端），新套件直接用；存量 6 套件的 harness 迁移留到 B3。`verify-net-discipline` 的静态扫描改用 `git ls-files --cached --others`（**未提交的新文件也扫**——只 `ls-files` 会漏掉刚写的模块），并把设置路由护栏断言改到新落点。
+- **文档**：`docs/pitfalls.md` 新增 #79（两条错误信封契约）、#80（回环门只留一份实现，六份分叉即六处洞）、#81（413 须先排空再应答）；`wiki/03-core-layer.md` 增三节；`wiki/05/10`（网关 listen 不再是自己的代码）；`wiki/09-run-and-test.md` 命令表与 `npm run verify` 语义；AGENTS 架构表/命令区/踩坑速查同步；`docs/rules/STATE.md` 记「统一性批」。
+- **未做（有意）**：`providers/trae/oauth.js` 的 OAuth 回环回调 server 仍是自持 `createServer`（临时端口 0、一次性、无凭据面，不属"本地代理面"）；是否也纳入回环门留待 B4 通道契约统一时评估（登录回调的 Host/Origin 门涉及登录链路，需单独实测）。
+
+## 0.23.0 (2026-10-21)
+
+> 可靠性批次（优化计划 B1）：把"失败要么可自愈、要么可见"变成结构性保证。四类根因各配一条静态/离线闸门，新增**踩坑 #75–#78**。
+
+- **上游调用一律带超时（踩坑 #78）**：新增 `core/fetch-guard.js`——`fetchWithTimeout(url, init, {timeoutMs, signal})` + 按面分类的 `FETCH_TIMEOUTS`（目录 30s / 额度 15s / OAuth 10s / 纯上报 8s），失败归成带 `kind`（`timeout`/`aborted`/`network`）的 Error 给中文原因。**17 处**上游 `fetch` 原地迁移（CodeBuddy 目录/额度/账户/OAuth、Qoder 目录/OAuth/上报、Trae OAuth）。此前这些调用没有任何 `signal`，全靠 undici 默认的「响应头 300s」：上游连上不回应时模型同步/额度刷新挂五分钟，而 OAuth 轮询循环的 `deadline` 检查永远走不到（卡在 `await` 里）。豁免须写 `// no-timeout: 理由`。
+- **设置路由不再能打死宿主进程（踩坑 #76）**：`sendJSON` 改为幂等（`writableEnded/destroyed/headersSent` 守卫，写失败只记 stderr）；六处「先 `sendJSON(200)` 再 `applyLive()`」的分支改为**副作用先于响应**，已应答后的异常只记日志——旧写法里副作用抛错会落进外层 `catch` 再写一次响应，`ERR_HTTP_HEADERS_SENT` 抛在 `request.on('end')` 的 async 回调里 = 未处理拒绝 = Node 退出。入站补 **1MiB 上限 + 413**（`Connection: close`，`finish` 后收连接）与 `aborted`/`error` 收口；此前 `chunks.push` 无界、客户端半途挂断时 `end` 永不触发。
+- **主界面额度卡可自愈（踩坑 #75）**：客户端 `loadQuota` 只有 `404/405/501` 或 `ok:true && enabled:false` 才判"宿主没有这张卡"；其余失败（宿主重启窗口的 502、非 JSON 错误页、断网）保留上一份视图并按 30/60/120/300s 退避重试（`quotaRetryDelay` 纯函数）。旧实现把任意非 2xx 写成 `enabled:false`，而 300s 心跳与 `visibilitychange` 都以它为前置条件早退 ⇒ **一次瞬时失败就让胶囊整个会话消失，只能刷新页面**。`fetchWithTimeout` 的计时器也改为罩到 **body 读完**（`r.text()`/`r.json()` 各包一层）——旧实现收到响应头就解除，服务回 200 头后挂住 body 时卡片会永远停在「正在读取设置…/刷新中…」。
+- **状态不再拿文案当判据（踩坑 #77）**：三个额度快照新增结构化 `unauth: true`（`quota-view` 优先读布尔，中文正则只留一版回退）；`settingsView` 三通道 `bridge` 新增 `state: off|pending|listening|error`（`bridgeStateOf` 单点产出），客户端 `gwState()` 只读这个词——「保存后补拉」不再依赖 `/未监听/` 正则；排队重试条以 `?probe=runtime` 的 `queue` 为结构化判据、文案正则降为兜底。`verify-client-logic` 静态比对宿主/客户端的状态词集合。
+- **宿主镜像结果可见**：三处 `sync*ToDshSettings` 的成败记账到 `mirrorState`（`{ok, at, error}`）并随 `GET` 的 `mirror` 字段下发，设置卡在对应区块头出「宿主配置写入失败」warn 芯片——此前镜像失败只写一行 stderr，卡片照样显示「已保存 ✓」，用户永远不知道宿主路由没更新（踩坑 #66 的复发面）。
+- **不再编造模型上限**：设置卡启用目录新增模型时，缺 `contextWindow`/`maxTokens` 曾用 `262144/32768` 兜底（宿主 schema 要求正整数，等于把"不知道"写成两个权威数字落进路由）。现在取值顺序 = 本机 ceilings（目录声明 ∪ 用户覆盖）→ 目录条目自述；两处都没有就**拒绝启用并说明原因**；服务端 `setModelEnabled` 同步加第二道校验（缺值/非正整数一律 400）。
+- **并发与生命周期修正**：① 六处模型 patch 收口到 `commitPatch`——只有本请求真动过 `apiKeys` 才回写凭据组，避免并发保存时旧快照把另一请求刚加的 key 覆盖掉（静默丢凭据）；② `trae-model-sync` 加与 qoder 同款的"失败且无旧目录时不重铺镜像"守卫（否则一次失败的同步会把选择器里的 Trae 路由整块 `unset`）；③ Trae/Qoder 的模型列表挂载只发一发 POST（此前 `[]` 与 `[syncAt, enabled]` 两个 effect 各发一次）；④ 四个分区补 `setTimeout` 卸载清理；⑤ Qoder 退出登录时推进额度代际号，在飞的旧账号余额不再回填；⑥「重试监听」看 `retried:false` 并提示"通道未启用"；⑦ 排队条只隐藏**本通道**的宿主重试行（`:has([data-provider-id=…])`，不支持时退回双显示而非误伤）；⑧ 资源包合并保 null（`p.remain || 0` 曾把缺字段算成"余 0.00"，健康的包画成已耗尽）；⑨ 设置卡与额度胶囊对 Qoder 快照用同一存在性规则（已用→余额→总量三层回退）。
+- **CI 补漏与新闸门**：`verify-trae-model-catalog.mjs`（50 断言）此前只在本地跑、**从未进 CI**，现已并入；新增 `scripts/verify-client-logic.mjs`（40 条：状态词汇/芯片/退避/保 null/排队判据/静态一致性）与 `scripts/verify-net-discipline.mjs`（25 条：无裸 fetch、按面超时、路由护栏、结构化状态）；`verify-bridge` 增入站 413 断言；`verify-quota-view` 增 `unauth` 分支（83 条）。core 白名单加 `fetch-guard.js`。
+- **文档**：`docs/pitfalls.md` 新增 #75（瞬时失败别置死闩）、#76（响应出口须幂等 + 副作用前置）、#77（登录态/网关态走结构化字段）、#78（上游 fetch 必带超时）；`wiki/03-core-layer.md` 增 `core/fetch-guard.js`；`wiki/07-web-client.md` 增「失败自愈」「响应读取上限」「通道状态口径」；`wiki/09-run-and-test.md` 增两套新脚本行；AGENTS.md 架构表/命令表/踩坑速查同步。
+
+## 0.22.0 (2026-10-21)
+
+- **主界面跨通道额度卡**（用户要「供应商额度在主界面有个卡片，先看合计，点开/移入看各家明细，能实时最好」）：新增第三处 UI 面——输入框下方常驻胶囊（槽 `conversation.composer.dock`，id `dsh-tap-quota`，order 2）：折叠态只显示跨通道**合计**额度（标签直接写「合计 N credit」），悬停 120ms 或点击展开逐通道明细（CodeBuddy 周期/总量、Trae IDE/work 双池、Qoder 订阅/附加，逐行 `余量 / 总量 单位` + 来源徽标「官方计数/估算/未登录/读取失败」+ 时效；页脚给本机计量与「跨通道 credit 不可换算」口径；未登录/读失败的通道只显示原因、**绝不编数字**）。合计的单位判据按语义归一：上游 Qoder 的 `unit` 写作复数 `credits`、CodeBuddy 写 `credit`，两者视为同一单位参与求和（发布前实测抓到：按字面比较会把 Qoder 整通道排除，胶囊只剩单家数字 ⇒ 已修并加回归）。键盘可达（`aria-haspopup="dialog"` + `aria-expanded` + Esc/点外部收起），样式只用 `--dsw-alias-*` / `--dsw-elevation-panel` 令牌。设置卡通用区块新增「主界面额度卡」开关（Config `quotaDockEnabled`，默认开）。
+- **额度取数收口**：新增根模块 `quota-view.js`（三通道归一 + 合计口径，纯函数：只加 `ok`+`credit` 通道、估算档不混入精确合计、缺字段一律 null）+ `core/quota-cache.js`（60s memoize + 15s 强制刷新地板 + 并发单飞 + 失败不缓存）；CodeBuddy/Trae/Qoder 三条额度路径改用它（`snapshot()` 增 `{fresh}` 参数，默认行为不变）；新增路由动作 `POST {action:'quota-all', fresh?}`。7 家 key 型 OpenAI 兼容上游**没有**余额接口 ⇒ 面板只标注数量，不做新上游探测（探针纪律见踩坑 #73）。
+- **刷新纪律（事件驱动 > 高频轮询）**：每完成一轮（Chat 快照 `turn-tail` +1）去抖 1.5s 强制刷新、回前台/展开/点刷新即时、空闲兜底 5 分钟、页面不可见零请求；服务端 15s 地板吸收悬停连击 ⇒ 稳态约每 5 分钟 5 发上游（3+1+1），而"刚花完钱"的那一刻数在 2s 内变新。口径写进 `docs/rules/quota-signals.md` **R-Q12**（合计语义 / 估算档 / 刷新矩阵 / 为什么不再快）。
+- **新增踩坑 #74**：`conversation.composer.dock` ≠ `conversation.input.dock`（上下两个 dock）；前者在无会话（hero 态）不渲染、容器无定位上下文 ⇒ 浮层要自建 `position:relative` 锚点；`slots.inject` 对未声明槽静默等待。文档：`wiki/07-web-client.md`「主界面额度卡」、`wiki/03-core-layer.md`「core/quota-cache.js」、AGENTS.md 踩坑速查加 `#74`。回归：新脚本 `scripts/verify-quota-view.mjs`（73 条：记忆化语义/归一分支/合计口径/静态面）并入 CI 与 `npm run verify:quota`；`verify-core-generic` 的 core 模块清单由"恰好四份"改为白名单对账（新增 `quota-cache.js`）。
+
 ## 0.21.1 (2026-10-21)
 
 - **CodeBuddy 账号级风控封禁（403/11140）不再伪装成「API 密钥无效」**（用户报「所有 CodeBuddy 模型都报 API 密钥无效，但设置卡测试正常」）。诊断：上游对**聊天面**全模型回 `403 {"code":11140,"msg":"request illegal"}`（`displayMsg.zh`「账号存在异常行为，已被限制使用」，带 `requestId` 与申诉提示），而 `/v3/config`、`/v2/accounts`、`/agenttool/*` 仍 200 ⇒ 设置卡「测试一下」（只打目录面）显示正常；宿主把 401/403 一律分类为 `AUTH` 并把失败行文案替换为「API 密钥无效」（`message.failure.auth`），真实原因被吞。实测：4 种 UA/头形态同拒（与客户端指纹无关）、目录/账户/agenttool 正常、刷新 access token 后新令牌同拒、≥3h 未自解 ⇒ 账号级封禁，只能申诉/等待。修法：`providers/codebuddy/index.js` 的 `describeUpstreamError` 新增 `403/11140` 分支 → **400 + `codebuddy_account_restricted`** + 真实原因/requestId/申诉指引（400 不在宿主 AUTH 替换名单，真实文案可达聊天界面；该路由 `retryPolicy.maxRetries: 0`，状态码变化不引重试），其他 403 原样透传。`providers/codebuddy/errors.js` 收录 11140（含边界说明）并注明官方 CLI 同族码（11141/11142/17271–17276）未线上实测、不入表。回归：`verify-bridge [20]` 增适配器 4 条 + 端到端 3×2 条断言（stream true/false：400、结构化 code、requestId、申诉文案、不误当限流、403 其他码/非 JSON 不误翻）。

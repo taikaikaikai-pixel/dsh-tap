@@ -15,6 +15,7 @@
  */
 
 import { creditTokenFromNumber } from '../../credits.js'
+import { fetchWithTimeout, FETCH_TIMEOUTS } from '../../core/fetch-guard.js'
 
 /**
  * thinking_config → dsh `reasoningEfforts` 档位表（键 = 档位名，值 = 出站线值）。
@@ -114,7 +115,7 @@ export function applyQoderContextVariant(profile, variantName, variants) {
 export async function fetchQoderCatalog(cosy, cred, inferBaseURL) {
   const base = String(inferBaseURL ?? '').replace(/\/+$/, '')
   const req = await cosy.prepareGet(cred, { endpoint: base, path: '/api/v2/model/list?Encode=1' })
-  const res = await fetch(req.url, { headers: req.headers })
+  const res = await fetchWithTimeout(req.url, { headers: req.headers }, { timeoutMs: FETCH_TIMEOUTS.catalog })
   const text = await res.text()
   if (!res.ok) {
     throw new Error(`qoder 目录 HTTP ${res.status}：${text.slice(0, 120)}`)

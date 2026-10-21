@@ -39,13 +39,10 @@ import { flattenQuery, buildRemoteCreateBody, createRemoteEventParser, createRem
 import { normalizeTraeError, formatTraeErrorMessage } from '../providers/trae/errors.js'
 import { createTraeProvider } from '../providers/trae/index.js'
 
-let failures = 0
-let checks = 0
-function check(label, cond, detail = '') {
-  checks++
-  if (cond) console.log(`  ok   ${label}`)
-  else { failures++; console.log(`  FAIL ${label}${detail ? ` — ${detail}` : ''}`) }
-}
+import { createChecker } from './lib/harness.mjs'
+
+// 断言记账走共享骨架（scripts/lib/harness.mjs）。
+const { check, finish } = createChecker('verify-trae-provider')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -1446,8 +1443,4 @@ function readFileOr(path, fallback) {
 }
 
 console.log('')
-if (failures) {
-  console.log(`verify:trae-provider FAILED — ${failures}/${checks} 项断言未通过`)
-  process.exit(1)
-}
-console.log(`verify:trae-provider OK — ${checks} 项断言全部通过`)
+finish()

@@ -7,10 +7,9 @@
  * as last resort when every fresh key is unavailable.
  *
  * INSTANCE state (cooldown map + round-robin cursor) lives on the KeyRotator
- * object, NOT on the module — the composition root creates one instance per
- * plugin module instance, so test harnesses that import the plugin twice
- * (scripts/verify-rotation.mjs ?case=provider / ?case=bridge) keep the same
- * isolation the old module-global state provided.
+ * object, NOT on the module. 0.25.0 起这个实例由 host/providers/instances.js
+ * 持有（模块级单例，跨 apply 代际存活）；测试需要独立的轮换状态时调
+ * `reset()`，而不是复制整个模块图。
  *
  * Extracted from index.js during the core/providers split. This file knows
  * nothing about any specific upstream: the "no credential" error for the
@@ -27,6 +26,20 @@ export class KeyRotator {
     /** keyName → cooldown-until epoch ms. */
     this.cooldowns = new Map()
     /** Round-robin cursor (advanced once per ordered() call). */
+    this.cursor = 0
+  }
+
+  /**
+   * 清空游标与冷却表。
+   *
+   * 用途：0.25.0 把 provider 单例收进 host/providers/instances.js 之后，
+   * 单例随"模块图"共享——测试里用 `?case=` 复制 index.js 已无法再复制依赖模块，
+   * 于是双用例共用同一个 rotator。这个 seam 让每个用例从 alpha 起跑
+   * （scripts/verify-rotation.mjs）。生产路径不调用它：进程内只有一份轮换状态，
+   * "清空"在语义上等于重启插件。
+   */
+  reset() {
+    this.cooldowns.clear()
     this.cursor = 0
   }
 

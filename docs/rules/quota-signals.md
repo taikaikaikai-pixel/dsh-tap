@@ -130,6 +130,44 @@ credit 随请求模型的 `price_factor` 单调放大（跨度约 100 倍）⇒ 
 **落地（0.21.0）**：`providers/codebuddy/rate-limit.js` 解析该形态（含从文案归算 resetAt）；`provider.describeUpstreamError()` 提供语义、`core/bridge.js` 只做通用转发（core 禁上游词闸门）；桥双路径回 429 + `Retry-After` + `code:codebuddy_rate_limited`；`runtime.rateLimit` 下发到设置卡（区块头 + 模型行徽标 + 恢复时刻）。
 **重试策略（0.21.0）**：限流有明确重置点，重试只会继续撞墙 ⇒ CodeBuddy provider 的 `retryPolicy` 设为 `{mode:'normal', maxRetries:0}`（不重试），429 直接落到 turn-error 显示"限流 + 恢复时刻 + 可换模型"。Qoder 侧只有排队 10605 重试（30s 一次），额度 `[EXCEED_QUOTA]` 的 429 消息带 `usage limit exceeded` 让宿主分类成 `QUOTA`（非 retryable），两者不会被混为一谈（踩坑 #71）。
 
+### R-Q12 跨通道额度聚合与刷新纪律（2026-10-21，0.22.0）
+
+**规则**：主界面额度卡（`lib/client.js` 的 `QuotaPill`，槽 `conversation.composer.dock`）里那个
+"合计额度"是**展示口径**，不参与任何计费、也不做跨厂商换算：
+
+- 单位判据**按语义**：上游 `unit` 有 `credit`（CodeBuddy 计费口径）与 `credits`（Qoder
+  `/api/v2/quota/usage` 实测写法）两种，归一成同一单位再求和；其它单位（如 token）照显示、
+  不进合计。（发布前实测踩到：按字面比较会把 Qoder 整通道排除，合计只剩单家。）
+- 合计**只加** `state==='ok'` 且 `unit==='credit'`（归一后）且 `primary!=null` 的通道。不同厂商的 credit
+  不可换算（R-Q4/R-Q8 已证倍率非线性）⇒ 面板页脚必须写「跨通道 credit 不可换算，合计仅作量级参考」。
+- api-key 档（CodeBuddy 无数值额度接口，R-Q7）用「手填总额 − 本机计量」算估算值，标 `estimate`：
+  **不混进精确合计**，只在没有精确值时作为合计展示（客户端加 `≈`）。
+- 缺字段一律 `null`，不补 0（0 是真实读数）；失败绝不回填旧值、也不编数字。
+- **登录态判据是结构化的**（0.23.0）：三个额度快照在未登录时回 `unauth: true`，`quota-view` 优先读这个
+  布尔；中文文案正则（`/^(未登录|凭据不可用)/`）只保留为旧快照的兼容回退。`unauth` 归 `unavailable`
+  （不触发显示），真故障（`code N` / `http N` / 上游异常）归 `error`（带原因、触发显示）。
+  原因：按措辞分类 = 文案一改，登录态就被画成「读取失败」并参与胶囊可见性（踩坑 #77）。
+- 全通道 `unavailable` ⇒ 整枚胶囊不渲染（纯 key 型用户的界面不变）。
+
+**刷新纪律（省上游）**：三条额度端点各自 60s memoize，本轮改为共享 `core/quota-cache.js`（并发单飞）；
+`fresh:true` 越过 TTL，但**每 15s 只放行一次**。客户端触发点：挂载一次（走缓存）、每完成一轮
+（Chat 快照 `turn-tail` +1）1.5s 去抖后强制刷新、回前台 / 展开面板 / 点「刷新」、空闲兜底 5 分钟、
+页面不可见零请求。⇒ 稳态约每 5 分钟 5 发（3+1+1），而"刚花完钱"的那一刻数一定在 2s 内变新。
+
+**为什么不轮询得更快**：「额度只会因为花钱而变」——事件驱动已等价于实时；更快的轮询只会在踩坑 #73
+的风控背景下徒增上游请求。
+
+**失败自愈（0.23.0，踩坑 #75）**：客户端只有 `404/405/501`（路由/动作不存在）或 `ok:true && enabled:false`
+（宿主明确关掉 `quotaDockEnabled`）才判定"没有这张卡"并停止轮询；其余失败（宿主重启窗口的 502、
+非 JSON 错误页、断网）算**瞬时**——保留上一份视图，按 30/60/120/300s 退避重试（`quotaRetryDelay`）。
+旧实现把任意非 2xx 写成 `enabled:false`，而 300s 心跳与 `visibilitychange` 刷新都以它为前置条件早退，
+一次瞬时失败就让胶囊整个会话消失。服务端取数同样有上限：`core/fetch-guard.js` 的额度面 15s（R-Q12
+只谈展示口径；成本纪律见 `wiki/03-core-layer.md` 的 `core/fetch-guard.js`）。
+
+**新增路由动作**：`POST /dsh-tap/settings {action:'quota-all', fresh?}` → `{ok, enabled, quota}`。
+归一化在根模块 `quota-view.js`（纯函数，离线测 `scripts/verify-quota-view.mjs`）；设置卡的
+`usage` 动作与其返回结构保持原样（`usage` 加 `trae` 不划算：那是设置卡不用的第三发上游请求）。
+
 ## 3. 额度信号完整地图（结论表）
 
 | 端点 | 响应头额度信号 | 响应体额度信号 |

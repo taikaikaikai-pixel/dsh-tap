@@ -58,6 +58,8 @@
 import { createServer } from 'node:http'
 import { connect } from 'node:net'
 import { EventEmitter } from 'node:events'
+
+import { createChecker } from './lib/harness.mjs'
 import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -198,15 +200,8 @@ const upstream = createServer((req, res) => {
 
 // ---------------------------------------------------------------- test harness
 
-let failures = 0
-function check(label, cond, detail = '') {
-  if (cond) {
-    console.log(`  ok   ${label}`)
-  } else {
-    failures++
-    console.log(`  FAIL ${label}${detail ? ` — ${detail}` : ''}`)
-  }
-}
+// 断言记账走共享骨架（scripts/lib/harness.mjs）——各套件只保留自己的 fixture。
+const { check, finish } = createChecker('verify-bridge')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -747,6 +742,33 @@ async function main() {
     res = await callRoute(routes, null)
     check('rejected patches persisted nothing (baseURL unchanged)',
       res.json?.value?.baseURL === `http://127.0.0.1:${upstreamPort}`, res.json?.value?.baseURL)
+
+    // 13d. 入站体积上限（0.23.0）：无上限时一个超大 POST 就能撑爆宿主内存。
+    //     设置面最大合法请求是 apiKeysAdd / provider-add 的几 KB，1MiB 上限足够宽。
+    {
+      const raw = await new Promise((resolve) => {
+        const handler = routes['/dsh-tap/settings']
+        const req = new EventEmitter()
+        req.method = 'POST'
+        req.headers = { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' }
+        req.destroy = () => {}
+        const res = {
+          status: 0,
+          writeHead(s) { this.status = s },
+          end(b) {
+            let json = null
+            try { json = JSON.parse(b) } catch { /* non-JSON */ }
+            resolve({ status: this.status, json })
+          },
+        }
+        handler(req, res)
+        const big = Buffer.alloc(1024 * 1024 + 64, 0x20)
+        req.emit('data', big.subarray(0, 700 * 1024))
+        req.emit('data', big.subarray(700 * 1024))
+      })
+      check('oversize POST body → 413 with reason',
+        raw.status === 413 && /过大/.test(raw.json?.error ?? ''), JSON.stringify(raw.json))
+    }
   }
 
   // ------------------------------------------------- 14. G8 思考强度注入
@@ -862,7 +884,8 @@ async function main() {
       })
       let out = ''
       sock.on('data', (d) => { out += d.toString('utf8') })
-      // 413 在收满 32MB 即回；剩余字节撞在关闭中的 socket 上不算失败。
+      // 桥先排空这一轮上传再回 413（core/http-surface.js readBody 的时序），
+      // 所以这里应当稳定拿到完整响应；'error' 分支只做兜底。
       sock.on('error', (err) => { out ? resolve(out) : reject(err) })
       sock.on('close', () => resolve(out))
     })
@@ -1306,8 +1329,8 @@ async function main() {
     await new Promise((r) => upstream.close(r))
   }
 
-  console.log(failures === 0 ? '\nall bridge checks passed' : `\n${failures} check(s) FAILED`)
-  process.exit(failures === 0 ? 0 : 1)
+  // 桥/模拟上游的监听 socket 还开着：显式退出，别等事件循环自己空（旧代码的 process.exit 语义）。
+  process.exit(finish() ? 0 : 1)
 }
 
 main().catch((err) => {
