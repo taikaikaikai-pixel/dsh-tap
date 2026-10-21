@@ -15,9 +15,12 @@
  * 与重构前模块全局一致。
  */
 
+import { fetchWithTimeout, FETCH_TIMEOUTS } from '../../core/fetch-guard.js'
+
 const AUTH_PENDING_CODE = 11217 // ERROR_CODES[11217]：三态同码，勿当"未完成"以外含义用
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000
 const LOGIN_POLL_INTERVAL_MS = 1000
+
 
 // 授权页允许的站点族：CodeBuddy（copilot.tencent.com）与 WorkBuddy
 // （www.workbuddy.cn）同账户体系（docs/rules/gateway-facts.md）；codebuddy.cn
@@ -89,10 +92,10 @@ export function createOAuth({ readAuth, writeAuth }) {
         }
         if (auth.uid) headers['X-User-Id'] = auth.uid
         if (auth.enterpriseId) headers['X-Enterprise-Id'] = auth.enterpriseId
-        const res = await fetch(`${baseURL}/v2/plugin/auth/token/refresh`, {
+        const res = await fetchWithTimeout(`${baseURL}/v2/plugin/auth/token/refresh`, {
           method: 'POST',
           headers,
-        })
+        }, { timeoutMs: FETCH_TIMEOUTS.oauth })
         if (!res.ok) { reloginNeeded = true; return undefined }
         const body = await res.json().catch(() => null)
         if (!body || body.code !== 0 || !body.data?.accessToken) { reloginNeeded = true; return undefined }
@@ -140,7 +143,7 @@ export function createOAuth({ readAuth, writeAuth }) {
 
   async function startOAuth(baseURL) {
     if (oauthPending.active) return { started: true, authUrl: oauthPending.authUrl }
-    const res = await fetch(`${baseURL}/v2/plugin/auth/state?platform=CLI`, {
+    const res = await fetchWithTimeout(`${baseURL}/v2/plugin/auth/state?platform=CLI`, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -150,7 +153,7 @@ export function createOAuth({ readAuth, writeAuth }) {
         'X-No-User-Id': 'true',
         'X-No-Enterprise-Id': 'true',
       },
-    })
+    }, { timeoutMs: FETCH_TIMEOUTS.oauth })
     if (!res.ok) throw new Error(`auth state HTTP ${res.status}`)
     const body = await res.json()
     if (body.code !== 0 || !body.data?.state) {
@@ -178,9 +181,9 @@ export function createOAuth({ readAuth, writeAuth }) {
           if (!alive()) return
           let response
           try {
-            response = await fetch(`${baseURL}/v2/plugin/auth/token?state=${encodeURIComponent(state)}`, {
+            response = await fetchWithTimeout(`${baseURL}/v2/plugin/auth/token?state=${encodeURIComponent(state)}`, {
               headers: { Accept: 'application/json', 'X-No-Authorization': 'true' },
-            })
+            }, { timeoutMs: FETCH_TIMEOUTS.oauth })
           } catch {
             continue
           }
@@ -197,7 +200,7 @@ export function createOAuth({ readAuth, writeAuth }) {
           // Fetch the account facts before persisting.
           let account = {}
           try {
-            const accRes = await fetch(`${baseURL}/v2/plugin/login/account?state=${encodeURIComponent(state)}`, {
+            const accRes = await fetchWithTimeout(`${baseURL}/v2/plugin/login/account?state=${encodeURIComponent(state)}`, {
               headers: {
                 Accept: 'application/json',
                 Authorization: `Bearer ${token.accessToken}`,
@@ -205,7 +208,7 @@ export function createOAuth({ readAuth, writeAuth }) {
                 'X-No-Enterprise-Id': 'true',
                 'X-Domain': token.domain ?? '',
               },
-            })
+            }, { timeoutMs: FETCH_TIMEOUTS.oauth })
             const accBody = await accRes.json().catch(() => null)
             if (accBody?.code === 0 && accBody.data) account = accBody.data
           } catch {

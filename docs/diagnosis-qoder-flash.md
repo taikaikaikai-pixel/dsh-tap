@@ -4,6 +4,20 @@
 >
 > 复测（幂等，节点恢复即翻绿）：`node scripts/probe-qoder-flash-confirm.mjs`
 
+## 0. ⚠️ 2026-10-20 更正：根因不是"上游节点持久故障"，而是**缺归因信封**
+
+上面的结论（"上游节点 `oa_qwen-plus-main` 持久失败、任何客户端都拿不到正文"）**已被 A/B 对照推翻**。复现（正确账号 `acct-A…`，`qfmodel`，同 prompt / max_tokens=8，各 3 次）：
+
+| 请求形态 | 成功 | 失败 |
+|---|---|---|
+| **裸 OpenAI 体**（只有 model/messages/stream） | 0 / 3 | 3 / 3（`[FAIL]node:oa_qwen-plus-main msg:Execution failed: null`） |
+| **补齐官方归因信封**（`request_id`/`request_set_id`/`chat_record_id`/`session_id`/`chat_task`/`chat_context`/`is_reply`/`source`/`version`/`agent_id`/`task_id`/`session_type`/`aliyun_user_type`/`model_config`/`business`） | **3 / 3** | 0 / 3 |
+
+**即**：`oa_qwen-plus-main` 不是"对任何请求都抛 NPE 的死节点"，而是**裸请求（无归因信封）被路由到的降级/异常节点**；带信封即被正常路由，稳定出正文（实测响应 5156 字节、内容完整）。插件自 0.9.9 起出站**已带完整信封**，所以插件路径本身不受影响——**"在 dsh 里用不了"的现象来自裸体探针/裸体客户端，不是插件缺陷，也不是上游死了**。
+**教训**：`probe-qoder-flash-confirm.mjs` 这类探针发的是裸体，它的红/绿**不能**用来判定 qfmodel 是否可用。要复测必须带信封。
+
+---
+
 ## 1. 两条报错分别是什么
 
 | 报错 | 归属 | 机制 |

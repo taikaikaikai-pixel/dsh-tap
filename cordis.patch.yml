@@ -111,6 +111,13 @@
         compat:
           thinkingFormat: openai
           supportsReasoningEffort: true
+        # CodeBuddy has no queue state: never retry a failed model request.
+        # The plugin mirrors the same policy into the user layer on boot
+        # (desktop profiles carry a hand-placed complete provider block, so a
+        # bundle-patch-only policy would be dropped — pitfalls #54).
+        retryPolicy:
+          mode: normal
+          maxRetries: 0
         models:
           # DeepSeek
           - id: deepseek-v3

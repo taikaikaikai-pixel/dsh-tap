@@ -39,13 +39,10 @@ import { flattenQuery, buildRemoteCreateBody, createRemoteEventParser, createRem
 import { normalizeTraeError, formatTraeErrorMessage } from '../providers/trae/errors.js'
 import { createTraeProvider } from '../providers/trae/index.js'
 
-let failures = 0
-let checks = 0
-function check(label, cond, detail = '') {
-  checks++
-  if (cond) console.log(`  ok   ${label}`)
-  else { failures++; console.log(`  FAIL ${label}${detail ? ` — ${detail}` : ''}`) }
-}
+import { createChecker } from './lib/harness.mjs'
+
+// 断言记账走共享骨架（scripts/lib/harness.mjs）。
+const { check, finish } = createChecker('verify-trae-provider')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -1382,6 +1379,8 @@ try {
       }
       check('[18] 镜像块 compat（pi-ai 出站写 reasoning_effort 的前提，#66 哑火点）',
         JSON.stringify(block?.compat) === JSON.stringify({ thinkingFormat: 'openai', supportsReasoningEffort: true }), JSON.stringify(block?.compat))
+      check('[18] 镜像块 retryPolicy maxRetries 0（无排队态 ⇒ 任何失败都不重试）',
+        JSON.stringify(block?.retryPolicy) === JSON.stringify({ mode: 'normal', maxRetries: 0 }), JSON.stringify(block?.retryPolicy))
       const glmMirror = block?.models?.find((m) => m.id === 'glm-5.3')
       const kimiMirror = block?.models?.find((m) => m.id === 'kimi-k3')
       check('[18] 镜像条目档位表 = 宿主枚举键 → 声明拼写', JSON.stringify(glmMirror?.reasoningEfforts) === JSON.stringify({ low: 'light', high: 'high' }), JSON.stringify(glmMirror?.reasoningEfforts))
@@ -1444,8 +1443,4 @@ function readFileOr(path, fallback) {
 }
 
 console.log('')
-if (failures) {
-  console.log(`verify:trae-provider FAILED — ${failures}/${checks} 项断言未通过`)
-  process.exit(1)
-}
-console.log(`verify:trae-provider OK — ${checks} 项断言全部通过`)
+finish()

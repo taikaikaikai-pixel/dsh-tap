@@ -3,7 +3,7 @@
   "at": "2026-10-03T04:00:59.756Z",
   "web": {
     "url": "http://127.0.0.1:3090",
-    "documentPath": "C:\\Users\\21613\\.dsh\\profiles\\web\\cordis.patch.yml",
+    "documentPath": "C:\\Users\\<user>\\.dsh\\profiles\\web\\cordis.patch.yml",
     "ports": {
       "bridge": 3901,
       "trae": 3902,
@@ -17,7 +17,7 @@
   },
   "desktop": {
     "url": "http://127.0.0.1:19387",
-    "documentPath": "C:\\Users\\21613\\.dsh\\profiles\\desktop\\cordis.patch.yml",
+    "documentPath": "C:\\Users\\<user>\\.dsh\\profiles\\desktop\\cordis.patch.yml",
     "ports": {
       "bridge": 3901,
       "trae": 3912,

@@ -30,11 +30,12 @@
  * 生命周期纪律（踩坑 #17）：listen 失败降级 runtime.lastError，绝不抛出。
  */
 
-import { createServer } from 'node:http'
 import { appendFileSync } from 'node:fs'
 
 import { SessionLimiter, extractSessionId } from '../../core/bridge.js'
+import { createLoopbackServer, openAICompatRoutes, failInternal } from '../../core/http-surface.js'
 import { sanitizeToolPairing, describeRepair } from '../tool-pairing.js'
+import { fetchWithTimeout, FETCH_TIMEOUTS } from '../../core/fetch-guard.js'
 import { QODER_COSY_VERSION } from './cosy.js'
 import { randomUUID } from 'node:crypto'
 
@@ -48,34 +49,6 @@ const CHAT_FIELDS = [
 // 出站 messages 的 tool 配对不变量修复：实现与根因见 providers/tool-pairing.js
 // （踩坑 #39）。本模块重新导出，保持既有 import 路径与回归断言可用。
 export { sanitizeToolPairing }
-
-/** Host 门（同 trae gateway）：回环端口是唯一防线，Host 必须回环。 */
-function isLoopbackHost(hostHeader) {
-  if (typeof hostHeader !== 'string' || !hostHeader) return false
-  let hostname
-  try {
-    hostname = new URL(`http://${hostHeader}`).hostname
-  } catch {
-    return false
-  }
-  return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1' || hostname === '[::1]'
-}
-
-/**
- * Origin 门（与 Host 门互补，index.js localGuardFailure 同口径）：浏览器
- * 跨站请求（含 navigator.sendBeacon）恒带 Origin——host:port 必须与 Host
- * 完全一致才放行，否则即借浏览器烧额度的 CSRF。无 Origin 放行：本机
- * fetch/curl 与剥 Origin 的壳转发均不带该头，Host 门仍把守回环。
- */
-function isLoopbackOrigin(req) {
-  const origin = req.headers.origin
-  if (origin === undefined) return true
-  try {
-    return new URL(origin).host === req.headers.host
-  } catch {
-    return false
-  }
-}
 
 /**
  * Qoder SSE 信封解析器：吃原始 data 文本行，产出翻译事件
@@ -95,6 +68,24 @@ export function createQoderEnvelopeParser() {
       if (eventName === 'error') {
         state.done = true
         return { error: dataText.slice(0, 400) }
+      }
+      // 官方 CLI 的**流内额度标记**（bundle 字符串实证：`[NOT_EXCEED_QUOTA]` /
+      // `[EXCEED_QUOTA]` 与 `[DONE]` 并列，官方在 SSE 循环里显式识别并 continue）。
+      // 我们此前没处理 ⇒ `[EXCEED_QUOTA]` 会掉进下面 JSON.parse 失败分支，被当成
+      // 「非法 JSON」泛化报错，用户看不到「额度耗尽」这个真实原因。
+      const bare = dataText.trim()
+      if (bare === '[NOT_EXCEED_QUOTA]') return {}          // 未超额：忽略
+      if (bare === '[EXCEED_QUOTA]') {
+        state.done = true
+        // "usage limit exceeded" 是有意为之：宿主 dsh-llm-pi-ai 的
+        // classifyPiAiError 先用 isQuotaExceededError 匹配英文短语、再匹配
+        // 429/rate limit。保留 429 状态（可等待语义），但让失败码归到 QUOTA
+        // 而不是 RATE_LIMIT —— 否则 qoder 的 retryPolicy（只重试 RATE_LIMIT
+        // 的排队态）会把额度耗尽也当成排队，30s 一次重试 24 小时。
+        return {
+          error: 'Qoder 额度已耗尽（usage limit exceeded，[EXCEED_QUOTA]）：请等待额度重置或升级套餐后重试',
+          code: 'qoder_quota_exceeded',
+        }
       }
       let frame
       try { frame = JSON.parse(dataText) } catch { return {} }
@@ -135,7 +126,7 @@ export function createQoderEnvelopeParser() {
  *   resolveCredential: (s: object) => Promise<{authorization, machineId, uid}|null>,
  *   cosy: object,                // createCosyRuntime 实例
  *   meter: { record: Function },
- *   runtime: { running, port, lastError },
+ *   runtime: { running, port, lastError, queue? },
  *   forensics?: { logPath: () => string|undefined },
  *   getCatalogProfiles: () => Array|null,  // /v1/models 端点
  *   getCatalogEntry?: (id: string) => object|null, // 目录原始条目（model_config 取数）
@@ -166,6 +157,52 @@ export function createQoderGateway(deps) {
     try {
       appendFileSync(path, JSON.stringify({ gw: 'qoder', ...record }) + '\n')
     } catch { /* best-effort */ }
+  }
+
+  /**
+   * 从错误响应体里提取上游排队信号（10605）。
+   * 信封可能多层转义（实测最深三层 JSON 字符串），故逐层尝试解析后找特征键。
+   * @returns {{isQueued?:boolean, modelKey?:string, queueType?:string,
+   *            serviceAvailable?:boolean, retryAfterSeconds?:number}|null}
+   */
+  function parseQueueSignal(text) {
+    if (typeof text !== 'string' || !text) return null
+    let cur = text
+    for (let depth = 0; depth < 4; depth++) {
+      let obj
+      try { obj = JSON.parse(cur) } catch { break }
+      const found = findQueueShape(obj, 0)
+      if (found) return found
+      // 逐层下钻 string 字段（code/message）
+      const next = typeof obj?.message === 'string' ? obj.message
+        : typeof obj?.error?.message === 'string' ? obj.error.message : null
+      if (!next) break
+      cur = next
+    }
+    return null
+  }
+
+  /** 在对象树里找带 isQueued / serviceAvailable 的节点（官方队列响应的特征键）。 */
+  function findQueueShape(node, depth) {
+    if (!node || typeof node !== 'object' || depth > 5) return null
+    if (typeof node.isQueued === 'boolean' || typeof node.serviceAvailable === 'boolean') {
+      return {
+        isQueued: node.isQueued === true,
+        modelKey: typeof node.modelKey === 'string' ? node.modelKey : undefined,
+        queueType: typeof node.queueType === 'string' ? node.queueType : undefined,
+        serviceAvailable: node.serviceAvailable === true,
+        retryAfterSeconds: Number.isFinite(node.retryAfterSeconds) ? node.retryAfterSeconds : undefined,
+      }
+    }
+    for (const v of Object.values(node)) {
+      if (typeof v === 'string') {
+        try { const hit = findQueueShape(JSON.parse(v), depth + 1); if (hit) return hit } catch {}
+      } else if (v && typeof v === 'object') {
+        const hit = findQueueShape(v, depth + 1)
+        if (hit) return hit
+      }
+    }
+    return null
   }
 
   function modelSourceOf(model) {
@@ -212,7 +249,7 @@ export function createQoderGateway(deps) {
     }
     const finishBody = JSON.stringify({ payload: JSON.stringify(inner), encodeVersion: '1' })
     const finish = await deps.cosy.prepareSigned(cred, { endpoint, path: '/api/v2/service/business/finish?Encode=1', method: 'POST', mode: 'auth', body: finishBody })
-    await fetch(finish.url, { method: 'POST', headers: { ...finish.headers, 'Content-Type': 'application/json' }, body: finish.body })
+    await fetchWithTimeout(finish.url, { method: 'POST', headers: { ...finish.headers, 'Content-Type': 'application/json' }, body: finish.body }, { timeoutMs: FETCH_TIMEOUTS.report })
     if (!usage) return
     const envelope = [{
       uuid: randomUUID(),
@@ -238,7 +275,7 @@ export function createQoderGateway(deps) {
       },
     }]
     const track = await deps.cosy.prepareSigned(cred, { endpoint, path: '/api/v1/tracking', method: 'POST', mode: 'sign', body: JSON.stringify(envelope) })
-    await fetch(track.url, { method: 'POST', headers: { ...track.headers, 'Content-Type': 'application/json' }, body: track.body })
+    await fetchWithTimeout(track.url, { method: 'POST', headers: { ...track.headers, 'Content-Type': 'application/json' }, body: track.body }, { timeoutMs: FETCH_TIMEOUTS.report })
   }
 
   async function handleChat(req, res, rawBody) {
@@ -362,8 +399,64 @@ export function createQoderGateway(deps) {
         signal: inbound.signal,
       }).finally(() => clearTimeout(firstByteTimer))
 
+      /**
+       * 排队态记入 runtime.queue（设置卡据此显示"排队中 · 约 30s 后重试"）。
+       * 与 codebuddy 的 rateLimit 同构：都是"上游此刻不可用"的真实状态。
+       */
+      const noteQueue = (q) => {
+        if (!deps.runtime) return
+        deps.runtime.queue = {
+          model: q?.modelKey ?? model,
+          queueType: q?.queueType ?? null,
+          retryAfter: q?.retryAfterSeconds ?? null,
+          at: Date.now(),
+        }
+      }
+      /**
+       * 队列态出口（10605）。上游对**业务失败也回 HTTP 200**（错误装在 SSE 信封的
+       * body 里，见实测：直连时 status=200 但 body 是 statusCodeValue:400 的失败帧），
+       * 所以这个判断必须同时挂在「流内错误」与「非 2xx」两条路径上。
+       *
+       * 为什么不能当普通错误：宿主的 pi-ai 对 502/流中断会**立刻重发**，而重发请求
+       * 会被上游按降级模型 auto 处理并按 auto 倍率扣费（控制台明细实测：496/44/48
+       * 三笔的模型列全是 Auto）。故回 429 + Retry-After，让宿主走**退避**。
+       */
+      const emitQueuedIfAny = (rawText) => {
+        const queue = parseQueueSignal(rawText)
+        if (!queue) return false
+        noteQueue(queue)
+        const retryAfter = queue.retryAfterSeconds ?? 30
+        const message = `Qoder 模型 ${queue.modelKey ?? model} 排队中（queueType=${queue.queueType ?? '?'}，服务不可用）`
+          + `，请约 ${retryAfter}s 后重试；此期间重发会被上游按降级模型计费`
+        gwLog({ dir: 'queued', model, queue, ms: Date.now() - t0 })
+        report('error', null)
+        // 只要还没写头，就一律回 429 —— 即使客户端要的是流式。
+        // 理由：200 + error 帧会被宿主当成"正常结束的流"，**不会退避**；
+        // 而 429 + Retry-After 才会让 pi-ai 走重试/退避分支。这正是本修复的目的。
+        if (!res.headersSent) {
+          res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': String(retryAfter) })
+          res.end(JSON.stringify({ error: { message, code: 'qoder_model_queued', type: 'qoder_model_queued', queue, retryAfterSeconds: retryAfter } }))
+          return true
+        }
+        // 头已发（队列态出现在流中间，理论少见）：只能就地发 error 帧，且不发 [DONE]。
+        res.write('data: ' + JSON.stringify({ error: { message, code: 'qoder_model_queued', type: 'qoder_model_queued', queue, retryAfterSeconds: retryAfter } }) + '\n\n')
+        res.end()
+        return true
+      }
+
       if (!upstreamResp.ok) {
         const text = await upstreamResp.text().catch(() => '')
+        // ── 上游排队/降级（10605）必须与普通失败分开处理 ──────────────────
+        // 实测（2026-10-20）：请求 model=dfmodel 时上游回 403，信封内
+        //   {"code":"10605","message":"{\"isQueued\":true,\"modelKey\":\"dfmodel\",
+        //    \"queueCount\":0,\"queueType\":\"p3\",\"retryAfterSeconds\":30,
+        //    \"serviceAvailable\":false,\"waitTime\":30}"}
+        // 语义 = **模型服务此刻不可用、请求已进 p3 队列**，不是鉴权/参数错误。
+        // 旧实现把它归成 502，宿主 pi-ai 随即**立刻重发**——重试请求被上游按降级
+        // 路由处理，控制台记为 auto 并按 Auto 的高倍率扣费（实测 496/44/48 credit
+        // 的离群值来源）。故这里回 429 + Retry-After（可重试语义），让宿主走退避
+        // 而不是连发；同时把队列态如实透出，供设置卡/日志诊断。
+        if (emitQueuedIfAny(text)) return
         const status = upstreamResp.status === 401 || upstreamResp.status === 429 ? upstreamResp.status : 502
         res.writeHead(status, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: { message: `qoder upstream HTTP ${upstreamResp.status}: ${text.slice(0, 200)}`, code: `qoder_${upstreamResp.status}` } }))
@@ -380,11 +473,17 @@ export function createQoderGateway(deps) {
       const toolSlots = new Map()
       const toolOrder = []
 
-      if (wantStream) {
+      // **懒写头**：上游对业务失败也回 HTTP 200（错误在 SSE 信封的 body 里），
+      // 若此处先写死 200，后面流内发现 10605/带内失败就永远无法回 4xx/5xx。
+      // 改成：收到第一个**有效** chunk 时才写 200 头（见 ensureStreamHead 调用点）。
+      const ensureStreamHead = () => {
+        if (!wantStream || res.headersSent) return
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' })
       }
       const send = (chunk) => {
-        if (wantStream) res.write(`data: ${JSON.stringify(chunk)}\n\n`)
+        if (!wantStream) return
+        ensureStreamHead()
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`)
       }
       const emitError = (message) => {
         if (!wantStream) return
@@ -420,6 +519,16 @@ export function createQoderGateway(deps) {
             if (!line.startsWith('data:')) continue
             const ev = parser.handle(lastEvent, line.slice(5).trim())
             if (ev.error) {
+              // 队列态优先：上游把 10605 也装在失败帧里（HTTP 仍是 200）
+              if (emitQueuedIfAny(ev.error)) return
+              // 额度耗尽：520 是「可等待恢复」语义，避免宿主把它当瞬时故障连发。
+              if (ev.code === 'qoder_quota_exceeded' && !res.headersSent) {
+                gwLog({ dir: 'quota-exceeded', model, ms: Date.now() - t0 })
+                report('error', null)
+                res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': '600' })
+                res.end(JSON.stringify({ error: { message: ev.error, code: 'qoder_quota_exceeded', type: 'qoder_quota_exceeded' } }))
+                return
+              }
               gwLog({ dir: 'err', model, ms: Date.now() - t0, note: 'stream-error-frame', repaired: repairedNote })
               report('error', null)
               if (wantStream) {
@@ -432,6 +541,7 @@ export function createQoderGateway(deps) {
             }
             if (!ev.chunk) continue
             const chunk = ev.chunk
+            ensureStreamHead()
             const choice = chunk.choices?.[0]
             if (choice?.delta?.content) content += choice.delta.content
             if (choice?.delta?.reasoning_content) reasoning += choice.delta.reasoning_content
@@ -476,87 +586,28 @@ export function createQoderGateway(deps) {
           usage: usage ?? {},
         }))
       }
-      if (usage) deps.meter.record({ ts: t0, kind: 'chat', model, usage })
+      if (usage) deps.meter.record({ ts: t0, kind: 'chat', model, usage, channel: 'qoder' })
       gwLog({ dir: 'out', model, ms: Date.now() - t0, bytes: content.length, usage, finishReason, repaired: repairedNote })
       report('complete', usage ?? null)
     } catch (err) {
-      if (!res.headersSent) {
-        res.writeHead(500, { 'Content-Type': 'application/json' })
-        try { res.end(JSON.stringify({ error: { message: `qoder gateway error: ${err?.message ?? err}` } })) } catch { res.end() }
-      } else {
-        try { res.end() } catch { /* already closed */ }
-      }
+      failInternal(res, err, 'qoder gateway error')
     } finally {
       release()
     }
   }
 
+  // 本机 HTTP 面（门/包体上限/413/404/500/生命周期）统一由 core/http-surface.js
+  // 提供：本文件只给处理逻辑（handleChat）与目录 id 清单（踩坑 #80）。
+  const server = createLoopbackServer({
+    runtime: deps.runtime,
+    logPrefix,
+    label: 'gateway',
+    unavailableNote: '（Qoder 分区其余功能不受影响）',
+    routes: openAICompatRoutes({ handleChat, modelIds: () => (deps.getCatalogProfiles?.() ?? []).map((p) => p.id) }),
+  })
+
   function listen(port) {
-    const server = createServer((req, res) => {
-      // Host 门 + Origin 门：Host 必须回环（防 DNS rebinding / LAN 直连），
-      // 带 Origin 时其 host:port 必须与 Host 一致（防跨站借浏览器烧额度）。
-      if (!isLoopbackHost(req.headers.host) || !isLoopbackOrigin(req)) {
-        req.resume()
-        res.writeHead(403, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: { message: 'forbidden: loopback host + same-origin required' } }))
-        return
-      }
-      // Buffer 收集 + 一次解码（踩坑 #28）；超 32MB 答 413（同 core/bridge.js），
-      // 不静默 reset——调用方能拿到真实状态码。
-      const chunks = []
-      let received = 0
-      let oversize = false
-      req.on('data', (c) => {
-        if (oversize) return
-        chunks.push(c)
-        received += c.length
-        if (received > 32 * 1024 * 1024) {
-          oversize = true
-          chunks.length = 0
-          res.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' })
-          res.end(JSON.stringify({ error: { message: 'request body too large (limit 32MiB)' } }))
-        }
-      })
-      req.on('end', () => {
-        if (oversize) return
-        const rawBody = Buffer.concat(chunks).toString('utf8')
-        const path = req.url?.split('?')[0] ?? ''
-        try {
-          if (req.method === 'POST' && (path === '/v1/chat/completions' || path === '/chat/completions')) {
-            handleChat(req, res, rawBody).catch(() => { if (!res.headersSent) { res.writeHead(500); res.end() } })
-            return
-          }
-          if (req.method === 'GET' && (path === '/v1/models' || path === '/models')) {
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({
-              object: 'list',
-              data: (deps.getCatalogProfiles() ?? []).map((p) => ({ id: p.id, object: 'model', created: Math.floor(Date.now() / 1000) })),
-            }))
-            return
-          }
-          res.writeHead(404, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ error: { message: `no route: ${req.method} ${path}` } }))
-        } catch (err) {
-          if (!res.headersSent) res.writeHead(500)
-          res.end(String(err?.message ?? err))
-        }
-      })
-    })
-    server.on('error', (err) => {
-      deps.runtime.running = false
-      deps.runtime.lastError = err?.code ?? String(err?.message ?? err)
-      process.stderr.write(`${logPrefix} gateway :${port} unavailable: ${deps.runtime.lastError}（Qoder 分区其余功能不受影响）\n`)
-    })
-    server.on('listening', () => {
-      deps.runtime.port = server.address()?.port ?? port
-      deps.runtime.running = true
-      deps.runtime.lastError = null
-    })
-    server.listen(port, '127.0.0.1')
-    return () => new Promise((resolve) => {
-      server.close(() => resolve())
-      server.closeAllConnections?.()
-    })
+    return server.listen(port)
   }
 
   return { listen, handleChat }

@@ -17,8 +17,9 @@
  *      rotation order, 500 failover transparent to the caller (still 200 SSE),
  *      cooldown skip, rejoin after cooldown.
  *
- * Module state (keyCursor/keyCooldowns) is module-global, so the two parts
- * import index.js as DISTINCT instances (?case=…) to stay independent.
+ * 轮换状态（游标/冷却表）由 host/providers/instances.js 的单例持有——0.25.0
+ * 收拢 provider 单例后，`?case=` 只能复制 index.js 这一层，复制不了依赖模块，
+ * 因此两部分改为显式 `resetRotationForTests()` 隔离（见该函数注释）。
  *
  * Usage: node scripts/verify-rotation.mjs   (no network, no credentials)
  */
@@ -232,6 +233,9 @@ async function main() {
   // ============================================================== B. bridge chat path
   console.log('\n[B] bridge /v2/chat/completions rotation')
   behavior.clear()
+  // 轮换单例是共享的：B 部分开跑前清空游标/冷却（A 部分推进过游标）。
+  const instances = await import(pathToFileURL(join(ROOT, 'host/providers/instances.js')).href)
+  instances.resetRotationForTests()
   const modB = await import(`${pathToFileURL(join(ROOT, 'index.js')).href}?case=bridge`)
   const bridgePort = await freePort()
   const ctx = {

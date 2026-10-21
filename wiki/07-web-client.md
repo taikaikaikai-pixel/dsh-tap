@@ -16,6 +16,7 @@ window.__ModuleLoader__.load({
 
 - 包声明：`dsh.client.inject = ['@deepseek-ai/dsh-client-ui-slots']`，platform web（`@deepseek-ai/dsh-client-runtime` 自 dsh 0.1.6 起不存在，已从 inject 列表删掉，踩坑 #34）。
 - 注册卡：**双槽注册**——dsh ≥ 0.1.6 卡片在 Plugin Manager 的 `plugins.item` 槽（boot 即声明，owner props `{view:'summary'|'page'}`：summary = 标题下一行简介、page = 完整表单，页面自带标题与返回 crumb ⇒ 卡片以 `embedded` 常开且不画自己的折叠头部）；≤0.1.5 回退设置页的 `settings.plugin.item` 槽。两槽都经 `slots.inject(槽名, () => slots.register({ name, id, order, label, inject }, Entry))` **等声明落地再注册**（现注册字段是 `id:"dsh-tap"` + `label` + `order:60`，`key` 是 rc.7 keyed 槽遗产、当前代码已不带）——`slots.inject` 对未声明槽是静默等待，直接 `register` 抢跑会**静默不出现且零报错**（踩坑 #30/#34）。旧槽路径的渲染前提另有宿主半 `settings.register('dsh-tap', Config)` 命名空间声明（见 [02](02-composition-root.md)）。
+- 主界面模型标签（0.21.0，装饰式）：输入框模型按钮/菜单里的倍率徽标**不注册任何槽**，而是往 `<style data-plugin-css="dsh-tap-credits">` 里铺 `[data-provider-id="…"][data-model-id="…"]::after{content:"x0.51";…}`。依据 = 官方 model-selection README「styles can target the enclosing label's `data-provider-id` / `data-model-id` attributes in all three placements」，宿主在 `trigger` / `menu` / `option` 三处都把名字包在同一组属性里。**为什么不用 `conversation.input.model.label` 槽（早期做法，已废弃）**：那是 `single` 槽，接管即对所有 provider 重写标签，会顶掉 DeepSeek 账号与 key 型服务商上的官方装饰（如官方 1017 勋章）——现在的方案只给 `codebuddy`/`trae`/`qoder` 三家各加一条 `::after`，其余标签一字不动。数据仍走模块级 `creditCache`（GET `credits` 合并表，官方压手填），`publishCredits` 时**重铺这张样式表**（幂等），失败只是没有徽标。**0.21.0 同表加限流/排队徽标**：`syncDecoratorStyles()` 铺两类规则（倍率 + `runtimeBadges()` 产出的 `限流中 · 11:42 恢复` / `排队中 · 约30s`，`TONE_WARN` = 卡里 `.cbc-badge-dead` 用的同一枚 token），铺规则的次序即优先级 ⇒ 同一模型限流覆盖倍率。数据同源同一次 GET（`bridge.rateLimit` / `qoder.bridge.queue`，加载零额外请求）；**这类"此刻状态"不能只靠一次性拉取**（踩坑 #69）⇒ 按需刷新走纯内存 `GET ?probe=runtime`，触发点只有两个：点到任一处 `[data-model-id]`（5s 节流）与页面回到前台，另在已知恢复时刻/排队窗口末端挂定时器让徽标自己消失；上游文案（`resetText`）绝不进 CSS——时刻用 epoch 本地现算，模型 id 走 `cssAttrValue` 转义 + `cssTextValue` 白名单。**trigger 例外（0.21.0 修，踩坑 #72）**：模型按钮里的模型名盒是 `text-overflow:ellipsis` 的截断盒、按钮又只有 `max-width:min(360px,45cqw)`，挂在名字 span 上的行内 `::after` 一窄就被整枚裁掉（只剩一截空白碎片）。所以 trigger 里改挂 `button[aria-haspopup="menu"]` 自己身上当 flex item（`order:1` 排在名字后、effort/箭头前，`flex:none`），名字可截断、徽标必现；label 盒里的同一枚用 `content:none` 成对关掉（宽窗防重复、窄窗防空白碎片），trigger 文案是短版 `限流 · 11:42` / `排队`，菜单与选项仍是全文。`:has()` 不可用时两条规则一起失效、退回旧行为。离线锁 = `node scripts/verify-picker-badge.mjs`。
 
 ## 卡片结构（通道手风琴，0.10.0 重设计）
 
@@ -34,10 +35,10 @@ window.__ModuleLoader__.load({
 
 | 区块 | 分区（`BLOCK_SECTIONS`） | 展开后内容 |
 |---|---|---|
-| CodeBuddy | `login` / `models` / `tools` / `bridge` | 凭据（登录方式、多 Key 管理与脱敏列表、env 引用、失败冷却）、模型（同步目录 + 筛选 + 逐模型启停 + ctx/输出幽灵输入 + 思考档位 select）、工具（搜索与抓取开关/条数/正文上限、生图开关/模型）、网关（流式桥开关、端口、会话头归因、会话头格式、每会话并发上限）、高级（`baseURL`） |
-| TraeWork CN | `trae` | 凭据（OAuth 登录/登出 + 令牌状态行 + **余额行**（IDE/work 双池，0.11.0））、模型（同步目录 + 筛选 + 逐模型启停）、网关（:3902 端口、聊天传输、首字节超时）、高级（认证 / 聊天 / 登录域）。**启用开关只在区块头** |
-| Qoder CN | `qoder` | 凭据（设备流登录/登出，pending 3s 轮询收敛、needsRelogin 引导重登 + **余额行**（附加/订阅配额，0.11.0））、模型（同步目录 + 筛选 + 启停 + 思考强度/上下文变体两个 select——**思考档位选项来自服务端 `qoder.models.efforts`（= 目录逐模型声明），无声明不出控件**，0.19.0）、网关（:3903 端口）、高级（登录域 / OpenAPI / infer / client_id）。**启用开关只在区块头** |
-| 通用 | `usage` / `providers` / `hostrecon` | 额度与用量（hero 大数字 + 周期进度条、资源包聚合、今日/累计统计卡、轮次表、手动「刷新」与时间戳）、服务商（preset/自定义添加、刷新模型、删除、本机凭据扫描导入）、宿主实况（0.11.0：镜像/web 钉选对账，自身零请求） |
+| CodeBuddy | `login` / `models` / `tools` / `bridge` | 凭据（登录方式、多 Key 管理与脱敏列表、env 引用、失败冷却）、模型（同步目录 + 筛选 + 逐模型启停 + ctx/输出幽灵输入 + 思考档位 select + **逐模型积分倍率徽标**——宿主官方 `Tag` 原语，`x0.51`；官方没标注的条目同位置可**手填**，均自 0.21.0 起）、工具（搜索与抓取开关/条数/正文上限、生图开关/模型）、网关（流式桥开关、端口、会话头归因、会话头格式、每会话并发上限）、高级（`baseURL`） |
+| TraeWork CN | `trae` | 凭据（OAuth 登录/登出 + 令牌状态行 + **余额行**（IDE/work 双池，0.11.0））、模型（同步目录 + 筛选 + 逐模型启停 + **手填积分倍率**——Trae 目录无逐模型倍率，0.21.0）、网关（:3902 端口、聊天传输、首字节超时）、高级（认证 / 聊天 / 登录域）。**启用开关只在区块头** |
+| Qoder CN | `qoder` | 凭据（设备流登录/登出，pending 3s 轮询收敛、needsRelogin 引导重登 + **余额行**（附加/订阅配额，0.11.0））、模型（同步目录 + 筛选 + 启停 + 思考强度/上下文变体两个 select——**思考档位选项来自服务端 `qoder.models.efforts`（= 目录逐模型声明），无声明不出控件**，0.19.0；+ **手填积分倍率**，0.21.0）、网关（:3903 端口）、高级（登录域 / OpenAPI / infer / client_id）。**启用开关只在区块头** |
+| 通用 | `usage` / `providers` / `hostrecon` | 额度与用量（hero 大数字 + 周期进度条、资源包聚合、今日/累计统计卡、**逐通道拆分**（CodeBuddy/Trae/Qoder，自 0.21.0 起累计）+ 可疑值提示 + **Qoder 官方配额计数**交叉校验、轮次表、手动「刷新」与时间戳）、服务商（preset/自定义添加、刷新模型、删除、本机凭据扫描导入）、宿主实况（0.11.0：镜像/web 钉选对账，自身零请求） |
 
 除上表外每个 schema 字段都有落点：`keyCooldownMs` 在 CodeBuddy·凭据、`quotaTotalManual` 在通用·额度与用量（api-key 估算语境）。
 
@@ -81,6 +82,15 @@ POST { action: 'oauth-start' | 'oauth-status' | 'oauth-logout'
 5. **`HelpNote`**：>60 字的背景说明折进原生 `details.cbc-help`（summary「使用说明」），零 JS 状态、父组件重渲染不复位；短的就地点提示保持直显。
 6. **幽灵输入 `cbc-ghost`**（模型行上限）：常态无边框、hover/focus 显边框、去数字步进器。宿主 `Input` 原语把 className 落在 **wrapper span**、内层 input 只带 CSS-module 类 ⇒ 规则必须同时写 `:focus-within`（wrapper）与 `.cbc-ghost input::-webkit-*-spin-button`（内层）双路径。
 
+## 排队重试条（0.21.0）
+
+排队态（Qoder 10605）的 UI 由 **composer 上方 dock** 的 `cbc-queue-banner` 承担，而不是宿主的 `model-retry` 行：
+
+- 注册 `conversation.input.dock`（新 id `dsh-tap-queue`，order 30），组件 `QueueRetryBanner` 用 slot 标准 prop `useChat` 读 Chat 快照里的 `model-retry` 节点；纯函数 `pickQueueRetry` 只选 `retryState === "scheduled"`、provider ∈ {qoder,codebuddy,trae}、失败文案含「排队/queue」的当前 attempt（离线锁在 verify-picker-badge `[4]`）。
+- 倒计时从 `current.delayMs` 起算（策略固定 30s，见 wiki/04）；每次新 attempt（`seq` 变化）重置，文案「排队中 · 预计 N 秒后重试」。
+- 组件存活期间渲染 `<style>[class*="retryRow"]{display:none!important}</style>`，隐藏宿主自带的「等待重试模型请求（n/max）·30s」行；组件卸载（重试开始/结束/取消）即恢复。非排队 provider 的重试不经过此组件，不受影响。
+- 数据源是会话日志里的 `llm/retry` 事件投影，不轮询、不额外请求；宿主 `model-retry` 事件语义不变（0.36 只是不再让用户看到它的 label）。
+
 ## 改 UI 后的回归（0.10.0 手风琴口径）
 
 文案/结构改动先 grep 回归脚本的选择器（一律 `.cbc-*` 类 + 行内单元格精确匹配，踩坑 #16），再跑 `dsh-ui-test/`（**仓库外**本地目录，puppeteer-core + 系统 Chrome，不进仓库）。
@@ -108,8 +118,36 @@ details.cbc-adv（高级组）/ details.cbc-help（使用说明）。
 | `shots-baseline.js` | 明/暗 × （总览 + 四区块）**元素级**基线 | 10 张 / 0 失败 |
 | `debug-dom.js` / `debug-inputs.js` | 宿主原语真实 DOM dump（选择器校准，踩坑 #44③ 的判别手法） | `debug-inputs.js` 实跑 exit 0 |
 
-**跑法**：需要一个在跑的 dsh web 实例——本机现由 `dsh-launcher` 托管（dsh 入口 `/c/Users/21613/dev/dsh-launcher/node_modules/.bin/dsh`，`dsh web` 默认 3080；当前实例在 **3090**，token 见启动行）。profile `~/.dsh/profiles/web` 已 link 本仓库 ⇒ 改 `lib/client.js` **刷新页面即生效**（不必重启；测浏览器半建议 `--disable-http-cache`）。每个脚本收 `argv[2]` = 带 `?token=` 的完整 URL（0.1.5 起 token 闸，踩坑 #30）。每轮把原始输出 tee 到 `dsh-ui-test/logs/`、日志首行回显完整 URL。**测试服务由用户侧 launcher 管理，回归轮次不启停它、不占端口。**
+**跑法**：需要一个在跑的 dsh web 实例——本机现由 `dsh-launcher` 托管（dsh 入口 `/c/Users/<user>/dev/dsh-launcher/node_modules/.bin/dsh`，`dsh web` 默认 3080；当前实例在 **3090**，token 见启动行）。profile `~/.dsh/profiles/web` 已 link 本仓库 ⇒ 改 `lib/client.js` **刷新页面即生效**（不必重启；测浏览器半建议 `--disable-http-cache`）。每个脚本收 `argv[2]` = 带 `?token=` 的完整 URL（0.1.5 起 token 闸，踩坑 #30）。每轮把原始输出 tee 到 `dsh-ui-test/logs/`、日志首行回显完整 URL。**测试服务由用户侧 launcher 管理，回归轮次不启停它、不占端口。**
 
 **零真实写入纪律**：套件里走 mock 的通道不写真实设置；走真实视图的脚本（prefs-check）基线从 GET 实况读取、收尾复原到实况（不是"复原到空"），跑前跑后对 `~/.dsh/codebuddy-plugin.json` 取 md5 对账。
 
 **截图口径**（踩坑 #48）：`page.screenshot({fullPage:true})` 在本宿主是**空操作**（卡片在内层 overflow 容器里、`document.scrollHeight` === 视口高），产物恒 1440×900——"尺寸对 ≠ 内容在"。区块级基线一律走元素句柄 `handle.screenshot()` + **逐张看图**，脚本另核对「最近滚动祖先的 client 区是否整个包住该元素」。
+
+## 通道状态口径（0.23.0）
+
+区块头的"网关未监听/运行中"不再由客户端解析中文文案，而是读 `settingsView` 的 `bridge.state`：
+
+| `bridge.state` | 含义 | 客户端用法 |
+|---|---|---|
+| `off` | 通道未启用（开关关） | 芯片 tone=off |
+| `pending` | 已启用但还没监听上（`listening` 事件未到/启动窗口） | 芯片 warn；**保存后补拉只认这个词** |
+| `listening` | 正在服务 | 芯片 ok + 端口 |
+| `error` | 监听失败（端口占用等，`lastError` 有值） | 芯片 warn + 原因 |
+
+客户端 `gwState()` 优先读该字段，旧宿主（无此字段）按 `running/lastError` 现场推导同一套词汇；`GW_STATES` 与宿主 `bridgeStateOf` 的集合由 `verify-client-logic` 静态比对（踩坑 #77）。排队重试条同理：`pickQueueRetry` 以 `?probe=runtime` 的 `queue` 为结构化判据，文案正则仅作旧版回退。
+
+## 主界面额度卡（0.22.0）
+
+设置卡之外的第二个 UI 面：输入框下方常驻一枚**额度胶囊**（折叠态只显示跨通道合计），悬停 120ms 或点击展开逐通道明细。
+
+- **槽**：`conversation.composer.dock` = **输入框卡片下方**的环境行，注册 `{ name, id: 'dsh-tap-quota', order: 2 }`；同槽已有宿主 `activity`(0) / `usage`(1)，其后宿主还直绘上下文占用环。**别和 `conversation.input.dock` 混**（那是卡片上方，本插件的排队重试条 `dsh-tap-queue` 在那里；踩坑 #74）。
+- **渲染条件（宿主侧）**：`variant === 'composer' && input !== undefined && sessionId !== undefined` ⇒ 空白新会话（hero 态）不渲染该槽，插件侧按"可选装饰"设计（不占位、不报错）。
+- **定位**：宿主 dock 行是普通 flex（`justify-content:center; gap:12px`，无 position/overflow 契约）⇒ 胶囊自带 `div.cbc-q-wrap{position:relative}` 锚点，面板 `position:absolute; bottom:calc(100% + 8px); left:50%; translateX(-50%)`，`width:min(380px, calc(100vw - 32px))`、`max-height:min(60vh,420px)` 可滚。不把浮层挂进别人的盒子赌它不裁剪（坑 #72 同族）。
+- **交互**：hover 120ms 开 / 移开 240ms 关（面板 `mouseenter` 取消收起）、点击切换、`Esc` 与点外部关闭、`Tab` + `Enter` 可达（`aria-haspopup="dialog"` / `aria-expanded` 如实翻转）；展开时 5s 心跳刷新相对时间。
+- **数据与刷新**：`POST /dsh-tap/settings {action:'quota-all', fresh?}`，服务端用 `quota-view.js` 归一三通道额度（CodeBuddy 周期/总量、Trae IDE/work 双池、Qoder 订阅/附加）。刷新策略：挂载一次 → 每完成一轮（Chat 快照 `turn-tail` +1）去抖 1.5s 强制刷新 → 回前台/展开/点刷新 → 空闲兜底 5 分钟，页面不可见零请求；服务端 60s memoize + 15s 强制地板吸收连发（口径见 `docs/rules/quota-signals.md` R-Q12）。
+- **失败自愈（0.23.0）**：只有 `404/405/501`（路由/动作不存在）或 `ok:true && enabled:false`（宿主明确关开关）才把卡片判为"没有这张卡"并停止轮询；其余失败（宿主重启窗口的 502、非 JSON 错误页、网络中断）都算瞬时——保留上一份视图，按 30/60/120/300s 退避重试（`quotaRetryDelay`）。旧实现把任意非 2xx 写成 `enabled:false`，而 300s 心跳与 `visibilitychange` 都以它为前置条件早退 ⇒ 一次瞬时失败就让胶囊整个会话消失（踩坑 #75）。
+- **响应读取也有上限**：`fetchWithTimeout` 的计时器罩到 body 读完（`r.text()`/`r.json()` 各包一层），不是收到响应头就解除——否则服务回 200 头后挂住 body，卡片会永远停在"正在读取设置…/刷新中…"（踩坑 #75 c 项）。
+- **降级**：路由不存在/旧宿主/全部未登录 ⇒ 整枚隐藏（`enabled === false` 或 `visible === false`），不报错、不重试成风暴。
+- **样式**：组件内渲染 `<style data-plugin-css="dsh-tap-quota-widget">`（卸载即移除），类前缀 `cbc-q-`，只用 `--dsw-alias-*` 与 `--dsw-elevation-panel` 令牌，无硬编码颜色。
+- **开关**：设置卡通用区块「主界面额度卡」（Config `quotaDockEnabled`，默认开；纯展示开关，不进宿主配置层镜像）。

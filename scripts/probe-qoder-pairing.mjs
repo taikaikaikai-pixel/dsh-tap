@@ -25,7 +25,7 @@ const AUTH_PATH = join(DSH_HOME, 'qoder-plugin-auth.json')
 const PROBES_DIR = join(ROOT, 'docs', 'probes')
 const INFER = process.env.QODER_INFER ?? 'https://gateway.qoder.com.cn'
 const PI_AI = process.env.PI_AI_PATH
-  ?? 'C:/Users/21613/dev/dsh-launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js'
+  ?? 'C:/Users/<user>/dev/dsh-launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js'
 
 const args = process.argv.slice(2)
 const val = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d }

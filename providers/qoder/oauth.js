@@ -32,6 +32,7 @@
  */
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { fetchWithTimeout, FETCH_TIMEOUTS } from '../../core/fetch-guard.js'
 
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000
 const LOGIN_POLL_INTERVAL_MS = 1000
@@ -141,6 +142,8 @@ export function createQoderOAuth({ readAuth, writeAuth }) {
   // 会把已登出的令牌写回（登出失效）。落盘前比对代际，过期即丢弃结果。
   let storeGeneration = 0
   let reloginNeeded = false
+  /** 最近一次令牌刷新导致的身份切换（null = 未发生）。 */
+  let accountSwitched = null
   const pending = { active: false, authUrl: '', error: '' }
 
   /** 机器标识幂等自持：首次使用生成并落盘，之后所有登录/刷新复用一个。 */
@@ -164,16 +167,26 @@ export function createQoderOAuth({ readAuth, writeAuth }) {
         const store = readAuth()
         const auth = store.auth
         if (!auth?.refreshToken) { reloginNeeded = true; return undefined }
-        const res = await fetch(api(s, '/api/v1/deviceToken/refresh'), {
+        const res = await fetchWithTimeout(api(s, '/api/v1/deviceToken/refresh'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ refresh_token: auth.refreshToken, machine_id: store.machine?.machineId ?? '' }),
-        })
+        }, { timeoutMs: FETCH_TIMEOUTS.oauth })
         if (!res.ok) { reloginNeeded = true; return undefined }
         const body = await res.json().catch(() => null)
         const next = tokenFrom(body)
         if (!next) { reloginNeeded = true; return undefined }
         // logout 竞态守卫：代际在飞期间已变（用户点了退出）→ 丢弃刷新结果
+        if (generation !== storeGeneration) return undefined
+        // **身份重校验（0.21.0）**：refresh 只保证"令牌可用"，不保证"还是同一个人"。
+        // 设备流绑定的是浏览器当前登录的账号，而 /deviceToken/refresh 由服务端决定
+        // 以哪个身份续期——多账号/组织切换场景下可能换人。旧实现直接沿用旧
+        // `account`，会造成「界面显示 A、实际请求走 B」的错位（用户报的
+        // "错误登录了另外的账号" 正是这个形态）。
+        // 故刷新后重新拉一次 userinfo 对账；拉不到才沿用旧值（不无谓清空身份）。
+        const known = readAuth().account ?? null
+        const freshAccount = await fetchAccount(s, next.accessToken)
+        // 代际再过一次：userinfo 在飞期间用户可能已 logout
         if (generation !== storeGeneration) return undefined
         // 缺字段一律沿用旧值（refresh 响应常只轮换 access token）。
         const merged = {
@@ -185,8 +198,13 @@ export function createQoderOAuth({ readAuth, writeAuth }) {
             refreshExpiresAt: next.refreshExpiresAt ?? auth.refreshExpiresAt ?? null,
             loginMethod: auth.loginMethod ?? 'browser',
           },
+          ...(freshAccount ? { account: freshAccount } : {}),
         }
         writeAuth(merged)
+        // 身份变化如实记录（设置卡展示；不阻断请求——凭据本身有效）。
+        if (freshAccount && known?.uid && freshAccount.uid && freshAccount.uid !== known.uid) {
+          accountSwitched = { at: Date.now(), from: known.uid, to: freshAccount.uid }
+        }
         reloginNeeded = false
         return merged.auth
       } catch {
@@ -265,7 +283,7 @@ export function createQoderOAuth({ readAuth, writeAuth }) {
           let res
           try {
             const q = new URLSearchParams({ nonce, verifier, challenge_method: 'S256' })
-            res = await fetch(`${api(s, '/api/v1/deviceToken/poll')}?${q}`, { headers: { Accept: 'application/json' } })
+            res = await fetchWithTimeout(`${api(s, '/api/v1/deviceToken/poll')}?${q}`, { headers: { Accept: 'application/json' } }, { timeoutMs: FETCH_TIMEOUTS.oauth })
           } catch {
             continue // 网络抖动：继续等，不当失败
           }
@@ -303,9 +321,9 @@ export function createQoderOAuth({ readAuth, writeAuth }) {
   /** 账号信息尽力而为（失败不影响登录成立）。 */
   async function fetchAccount(s, accessToken) {
     try {
-      const res = await fetch(api(s, '/api/v1/userinfo'), {
+      const res = await fetchWithTimeout(api(s, '/api/v1/userinfo'), {
         headers: { Accept: 'application/json', Authorization: `Bearer ${accessToken}` },
-      })
+      }, { timeoutMs: FETCH_TIMEOUTS.oauth })
       const body = await res.json().catch(() => null)
       if (!body || typeof body !== 'object') return null
       const uid = body.uid ?? body.user_id ?? body.id ?? null
@@ -337,6 +355,8 @@ export function createQoderOAuth({ readAuth, writeAuth }) {
       account: store.account?.nickname || store.account?.uid
         ? { nickname: store.account.nickname, uid: store.account.uid }
         : null,
+      // 令牌刷新导致的身份切换（0.21.0）：设置卡据此提示"身份已变，请确认是否本意"。
+      accountSwitched,
       accessTokenExpiresAt: auth?.expiresAt ?? null,
       refreshExpiresAt: auth?.refreshExpiresAt ?? null,
       hasMachineId: Boolean(store.machine?.machineId),

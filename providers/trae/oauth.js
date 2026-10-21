@@ -31,6 +31,7 @@ import { createServer } from 'node:http'
 import { createHash, generateKeyPairSync, randomBytes, randomInt, randomUUID, sign, createPrivateKey } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { fetchWithTimeout, FETCH_TIMEOUTS } from '../../core/fetch-guard.js'
 
 const CLIENT_ID_SOLO_LITE = 'en1oxy7wnw8j9n' // SOLO Lite 分支默认（traework-cn.md §3）
 const CLIENT_ID_TRAE = 'ono9krqynydwx5' // 普通 TRAE 分支默认
@@ -182,11 +183,11 @@ export function createTraeOAuth({ readAuth, writeAuth }) {
           },
           IDEVersion: IDE_VERSION,
         }
-        const res = await fetch(`${s.traeAuthBaseURL}/trae/api/v3/oauth/ExchangeToken`, {
+        const res = await fetchWithTimeout(`${s.traeAuthBaseURL}/trae/api/v3/oauth/ExchangeToken`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(body),
-        })
+        }, { timeoutMs: FETCH_TIMEOUTS.oauth })
         const parsed = parseExchangeResult(await res.json().catch(() => null))
         if (parsed.error) return undefined
         // logout 竞态守卫：代际在飞期间已变（用户点了退出）→ 丢弃刷新结果
@@ -350,11 +351,11 @@ export function createTraeOAuth({ readAuth, writeAuth }) {
           DeviceInfo: deviceInfoFrom(device),
           IDEVersion: IDE_VERSION,
         }
-        const res2 = await fetch(`${s.traeAuthBaseURL}/trae/api/v3/oauth/ExchangeToken`, {
+        const res2 = await fetchWithTimeout(`${s.traeAuthBaseURL}/trae/api/v3/oauth/ExchangeToken`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(body),
-        })
+        }, { timeoutMs: FETCH_TIMEOUTS.oauth })
         const parsed = parseExchangeResult(await res2.json().catch(() => null))
         if (parsed.error) {
           finish(`<h3>Token 交换失败</h3><p>${esc(parsed.error)}</p>`, parsed.error)
@@ -369,7 +370,7 @@ export function createTraeOAuth({ readAuth, writeAuth }) {
         // 账号信息尽力而为（GetUserInfo，双头形态）。
         let account = {}
         try {
-          const acc = await fetch(`${s.traeAuthBaseURL}/cloudide/api/v3/trae/GetUserInfo`, {
+          const acc = await fetchWithTimeout(`${s.traeAuthBaseURL}/cloudide/api/v3/trae/GetUserInfo`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -377,7 +378,7 @@ export function createTraeOAuth({ readAuth, writeAuth }) {
               'x-cloudide-token': auth.accessToken,
               'X-User-Region': 'CN',
             },
-          })
+          }, { timeoutMs: FETCH_TIMEOUTS.oauth })
           const accBody = await acc.json().catch(() => null)
           const r = accBody?.Result
           if (r && typeof r === 'object') {

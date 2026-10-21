@@ -1,6 +1,6 @@
 # 03 — core/ 凭据边缘层
 
-> 目录：[core/](../core)。**Provider 无关层**——四份文件不得出现任何具体上游名字（CodeBuddy/Trae/Ark…）、网关错误码或厂商头名，`scripts/verify-core-generic.mjs` 的静态扫描锁定该契约。上游特化全部经 provider 钩子注入（见 [bridge](#corebridgejs) 一节）。
+> 目录：[core/](../core)。**Provider 无关层**——本目录每份文件都不得出现任何具体上游名字（CodeBuddy/Trae/Ark…）、网关错误码或厂商头名，`scripts/verify-core-generic.mjs` 的静态扫描锁定该契约。上游特化全部经 provider 钩子注入（见 [bridge](#corebridgejs) 一节）。
 
 ## core/json-store.js — 文件持久化与凭据解析
 
@@ -57,11 +57,66 @@ flowchart TB
 export function createUsageMeter({ path }) // => { record, view, dispose }
 ```
 
-- **`record({ ts, kind, model, usage })`**：记录一次计费请求。usage 契约 = OpenAI SSE usage 对象 + 可选 `credit` 字段：`{ prompt_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, completion_tokens, credit }`（缺失字段记 0；无 usage 的请求不记录）。kind ∈ `chat | title | compaction | image | search | fetch`。写失败吞掉（计量绝不破坏数据路径）。
-- **`view()`**：设置卡载荷——`since / totalCredit / totalRequests / today{day,credit,requests} / recent（最近 20 条倒序）/ turns（最近 10 轮倒序）/ turnGapMs`。
+- **`record({ ts, kind, model, usage, channel })`**：记录一次计费请求。usage 契约 = OpenAI SSE usage 对象 + 可选 `credit` 字段：`{ prompt_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, completion_tokens, credit }`（缺失字段记 0；无 usage 的请求不记录）。kind ∈ `chat | title | compaction | image | search | fetch`。**channel 由调用方注入**（core 不认识任何上游：桥经 `createBridge({channel})` 由组合根给，两个 provider gateway 各自写死自己的通道名），缺省归 `unknown`——**不按 model id 反推**（同一 id 可能跨通道复用）。写失败吞掉（计量绝不破坏数据路径）。
+- **可疑值标注（0.21.0）**：单轮 `credit > max(2, prompt_tokens × 1e-5)` 时 entry 打 `suspect: true`。依据：正常量级实测 1e-6~3e-6 credit/token，而配额耗尽/上游异常时出现过单轮 credit 比正常量级高约 900 倍的一轮（≈1e-3 credit/token，而 prompt 仅增 6%）。**只标注、不改写历史**：可疑值不进逐通道合计，单独计入 `suspectCredit/suspectRequests` 并在 UI 提示；全局 `totalCredit` 保持原样（不静默篡改用户已看过的数字）。
+- **`view()`**：设置卡载荷——`since / totalCredit / totalRequests / today{day,credit,requests} / byChannel{ [ch]: {credit,requests,today,suspectCredit,suspectRequests} } / recent（最近 20 条倒序）/ turns（最近 10 轮倒序）/ turnGapMs`。`byChannel` **只累计本版之后的记录**（老记录无 channel 字段，不反推、不假装知道）。
 - **`dispose()`**：清定时器 + 最终 flush。
-- 常量：`USAGE_RECENT_CAP = 100`、`USAGE_DAYS_CAP = 31`、`USAGE_FLUSH_MS = 5000`（**去抖写盘**——工具循环连发只落一次盘）、`TURN_GAP_MS = 45_000`（近似轮次判定：间隔 ≤45s 的请求并为一个 turn；桥看不到宿主轮次边界，属披露过的近似）。
+- 常量：`USAGE_RECENT_CAP = 100`、`USAGE_DAYS_CAP = 31`、`USAGE_FLUSH_MS = 5000`（**去抖写盘**——工具循环连发只落一次盘）、`TURN_GAP_MS = 45_000`（近似轮次判定：间隔 ≤45s 的请求并为一个 turn；桥看不到宿主轮次边界，属披露过的近似）、`SUSPECT_CREDIT_PER_TOKEN = 1e-5` + `SUSPECT_MIN_CREDIT = 2`（见上）。
 - 持久化目标：`~/.dsh/codebuddy-plugin-usage.json`。
+
+## core/fetch-guard.js — 上游调用超时/错误归一（v0.23.0）
+
+`fetchWithTimeout(url, init, { timeoutMs, signal })`：与 `fetch` 同形，但**必须**带超时。
+按面分类的默认值在 `FETCH_TIMEOUTS`（目录 30s / 额度 15s / OAuth 10s / 纯上报 8s），
+失败统一成带 `kind` 的 Error（`timeout` / `aborted` / `network`），让适配器能给中文原因
+而不是把 undici 的英文原文丢给用户。
+
+存在理由（踩坑 #78）：本仓曾有 17 处上游 `fetch` 没有任何 `signal`，全靠 undici 默认的
+「响应头 300s」——上游连上不回应时，模型同步/额度刷新挂五分钟，而 OAuth 轮询循环的
+`deadline` 检查永远走不到（卡在 `await` 里）。新增调用点一律走本模块；确需豁免就在调用处
+写 `// no-timeout: <理由>`，`scripts/verify-net-discipline.mjs` 会静态扫全仓。
+
+## core/net-guard.js — 回环门唯一实现（v0.24.0）
+
+| 导出 | 说明 |
+|------|------|
+| `isLoopbackHostname(h)` | 已解析 hostname 是否回环（`127.0.0.1` / `localhost` / `[::1]`；裸 `::1` 只在 Host 头形态出现） |
+| `hostHeaderHostname(h)` | Host 头（可带端口）→ hostname；解析失败 null（调用方一律拒绝，不猜） |
+| `isLoopbackHostHeader(h)` | Host 头是否回环 |
+| `originMatchesHost(req)` | 无 Origin 放行；有则 `host:port` 必须与 Host 全等 |
+| `localGuardFailure(req, {allowedOrigins})` | 单入口判定：`null` 或 `{ code:'host'|'origin', host, origin }`——**只出结构化结果，不出文案** |
+
+存在理由（踩坑 #80）：本插件有四个「回环端口即唯一防线」的面（流式桥、两个翻译网关、设置路由）加两条登录门，改造前各写一份判定（六份）。语义一致性靠运气：两处抄了白名单常量、一处只认不带端口的 hostname、设置路由还在入口门之后重复跑了一遍同语义的 `sameOrigin`。文案归各面（设置面中文、网关面英文 OpenAI 信封），判定统一走这里。
+
+静态闸门：`scripts/verify-gateway-core.mjs §1/§5`（矩阵 + 「白名单字面量与门函数定义只允许出现在本文件」）。
+
+## core/http-surface.js — 本机 HTTP 面脚手架（v0.24.0）
+
+| 导出 | 说明 |
+|------|------|
+| `sendJSON(res, status, payload, headers?)` | **幂等**响应出口（已应答/已销毁/已发头直接丢弃；写失败只记 stderr） |
+| `sendError(res, status, {message, code})` | OpenAI 形错误信封 `{error:{message,code}}`（网关面的唯一出口） |
+| `failInternal(res, err, fallback)` | 500 兜底：未发头走 JSON 信封，已发头（SSE 在途）只收尾连接 |
+| `readBody(req, res, {maxBytes, onOversize, graceMs})` | Buffer 收集 + **一次** utf8 解码（#28）；超限**先排空再回 413**（#81）；`aborted/error` 收口 |
+| `createLoopbackServer({runtime, logPrefix, label, unavailableNote, maxBodyBytes, routes, onRequest})` | 门 → 排空 → 包体 → 路由 → 信封 → `runtime` 记账（含 `port:0` 回填）→ `stop()`；`listen` 失败只落 `lastError`，绝不掀翻进程 |
+| `openAICompatRoutes({handleChat, modelIds})` | 两个翻译网关共用路由表（`/v1/chat/completions`、`/chat/completions`、`/v1/models`、`/models`） |
+| `createChannelRuntime({runtime, listen, stateOf, onDisabled, onStarted})` | 通道监听生命周期：禁用撤镜像、同端口幂等、**wedge 自愈**、`retry()` 语义（#44） |
+
+存在理由：改造前三份 `createServer` 手抄（细节已分叉：403 只有桥回 text/plain、413 上限一处写数字两处写 `32MiB`、只有两家回填 `runtime.port`、只有两家拒绝前排空请求体）。三个通道现在只留自己的处理逻辑（SSE/翻译/转发）。**只动门与响应出口，不动翻译逻辑**是这一层的边界。
+
+## core/errors.js — 错误出口契约（v0.24.0）
+
+`describeError(err, { fallback, maxLen }) → { message, code, kind }`：优先 `err.message`（折叠换行、截断 400 字、敌意 getter 不抛），`code` 取 `err.code` → `err.kind` → `internal`，`kind ∈ timeout|aborted|network|internal`（取自 `core/fetch-guard.js` 的分类）。
+
+只收敛**兜底位**（500 响应、`lastError`、`sync.error`）；上游语义翻译（错误码表、特化文案）仍在各 provider 的 `errors.js`——那是协议事实，不是格式化重复。信封契约有**两条**且不许合并（踩坑 #79）：设置面 `{ok:false,error:"中文"}` vs 网关面 `{error:{message,code}}`。
+
+## core/quota-cache.js — 额度快照记忆化（v0.22.0）
+
+| 导出 | 签名 | 说明 |
+|------|------|------|
+| `createQuotaCache` | `({ load, ttlMs=60000, forceFloorMs=15000, now }) => { read, peek, reset }` | 三通道额度快照共用：TTL 内复用、`read({fresh:true})` 越过 TTL 但 15s 只放行一次、并发读者共享在飞 Promise、`load` 抛错不写缓存（不毒化） |
+
+谁在用：`providers/codebuddy/catalog.js#quotaSnapshot`、`providers/trae/quota.js`、`providers/qoder/quota.js`——三者以前各写一遍 60s memoize（Trae 另带单飞），差异只会在改动时漂移。刷新纪律与合计口径见 [quota-signals R-Q12](../docs/rules/quota-signals.md)。
 
 ## core/bridge.js — 流式桥（智能代理 + 唯一凭据入口）
 
@@ -104,6 +159,7 @@ sequenceDiagram
 | `provider` | object | 上游适配器钩子（见下表） |
 | `withCredentials` | `(attempt) => Promise<{cred,res,err}>` | 凭据执行器（组合根的轮转/OAuth 编排）；调用方 Authorization **永不转发** |
 | `meter` | `{ record }` | usage-meter 实例 |
+| `channel` | string | 用量归属的通道标识（组合根注入；core 不写死任何上游名，否则撞 `verify-core-generic` 的禁词闸门） |
 | `forensics` | `{ logPath(), dumpDir() }` | 取证落点（env 名由组合根持有，core 只收路径 getter） |
 | `runtime` | `{ running, port, lastError }` | 共享运行态对象（组合根持有，数代 apply 报告同一现实） |
 

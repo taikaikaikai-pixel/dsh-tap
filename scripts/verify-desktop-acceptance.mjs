@@ -22,7 +22,7 @@
  *   --structural（CI 硬闸门）：只锁 A 组结构性不变量——它们必须恒真、与适配进度无关；
  *     B 组结果断言（§1c codebuddy 已接入）在适配完成前必然 FAIL，不该进 CI 恒闸门。
  */
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -47,7 +47,11 @@ section('A. 离线结构性不变量')
 
 // §4a index.js 无 desktop 特化分支
 {
-  const src = readFileSync(join(root, 'index.js'), 'utf8')
+  // 0.25.0 起分流常量与 profile 信号函数在 host/config.js（组合根拆分）：
+  // 扫「index.js + host/**」的拼接源，断言仍是"全仓唯一定义"。
+  const src = [...['index.js'], ...readdirSync(join(root, 'host'), { recursive: true })
+    .filter((f) => String(f).endsWith('.js')).map((f) => `host/${f}`)]
+    .map((f) => readFileSync(join(root, f), 'utf8')).join('\n')
   // desktop 特化 = 出现 desktop 字样的条件分支；注释/字符串里提及不计。
   const branch = src.split('\n').filter((l) =>
     /\b(if|else if|case|&&|\|\||\?)\b.*desktop/i.test(l) && !/^\s*(\/\/|\*)/.test(l))
@@ -55,8 +59,8 @@ section('A. 离线结构性不变量')
     branch.length ? `命中 ${branch.length} 行：${branch[0].trim().slice(0, 80)}` : '')
   // 分流收口加固（goal bridge-port-host-split G3）：端口偏移常量与信号函数在
   // index.js 各唯一一处定义——「分流规则只在一处」机器可判，防分流逻辑散点复刻。
-  const offsetDefs = src.split('\n').filter((l) => /^\s*const\s+HOST_BRIDGE_PORT_OFFSET\s*=/.test(l))
-  const signalDefs = src.split('\n').filter((l) => /^\s*function\s+currentProfileDirName\s*\(/.test(l))
+  const offsetDefs = src.split('\n').filter((l) => /^\s*(?:export\s+)?const\s+HOST_BRIDGE_PORT_OFFSET\s*=/.test(l))
+  const signalDefs = src.split('\n').filter((l) => /^\s*(?:export\s+)?function\s+currentProfileDirName\s*\(/.test(l))
   ok('§4a+ 分流收口：HOST_BRIDGE_PORT_OFFSET 常量唯一定义', offsetDefs.length === 1,
     `定义处=${offsetDefs.length}`)
   ok('§4a+ 分流收口：currentProfileDirName 信号函数唯一定义', signalDefs.length === 1,

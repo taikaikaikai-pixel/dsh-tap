@@ -57,7 +57,7 @@
             "rid": "ff86cdc9-b61b-4207-aa74-1bef0e8e6253",
             "oid": "",
             "yid": "",
-            "uid": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0",
+            "uid": "acct-B",
             "event_data": {
               "session_id": "4de8c5b5-b1af-490d-b034-bda185f0592c",
               "business": {
@@ -219,7 +219,7 @@
             "rid": "eec3ae44-54d7-4e49-bd5e-2082361ab48a",
             "oid": "",
             "yid": "",
-            "uid": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0",
+            "uid": "acct-B",
             "event_data": {
               "session_id": "4f21754a-1dfe-474a-8ee5-ef3d5364ad73",
               "business": {

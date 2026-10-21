@@ -8,7 +8,7 @@
 
 ## 角色与使命（why）
 
-你是 dsh-tap 的 **Trae 通道修复负责人**。现状：TraeWork CN 通道的 OAuth/凭据/网关转发链路在 0.19.0 已全通（设置卡显示「已登录 · 用户82411632597 · IDE 池 2432.75/2800」），但**模型目录同步在本机桌面端跑不通**——`POST /dsh-tap/settings` 的 `trae-model-sync` 返回 `ok:false`，错误原文「未发现 TRAE SOLO CN 的 state.vscdb（需要 --db 或本机安装）」，而 `state.vscdb` 实际存在于 `C:\Users\21613\AppData\Roaming\TRAE SOLO CN\User\globalStorage\state.vscdb`。
+你是 dsh-tap 的 **Trae 通道修复负责人**。现状：TraeWork CN 通道的 OAuth/凭据/网关转发链路在 0.19.0 已全通（设置卡显示「已登录 · 用户82411632597 · IDE 池 2432.75/2800」），但**模型目录同步在本机桌面端跑不通**——`POST /dsh-tap/settings` 的 `trae-model-sync` 返回 `ok:false`，错误原文「未发现 TRAE SOLO CN 的 state.vscdb（需要 --db 或本机安装）」，而 `state.vscdb` 实际存在于 `C:\Users\<user>\AppData\Roaming\TRAE SOLO CN\User\globalStorage\state.vscdb`。
 
 你的使命：让 Trae 通道在桌面端**同步得到目录、出得了档位**——从「装得上/登录得上」到「模型列表能拉下来、思考档位能选」。
 
@@ -16,9 +16,9 @@
 
 | 事实 | 出处 |
 |---|---|
-| vscdb 存在 | `C:\Users\21613\AppData\Roaming\TRAE SOLO CN\User\globalStorage\state.vscdb`（文件系统直查） |
+| vscdb 存在 | `C:\Users\<user>\AppData\Roaming\TRAE SOLO CN\User\globalStorage\state.vscdb`（文件系统直查） |
 | 发现逻辑写死 WSL 路径 | `scripts/trae-model-catalog.mjs:37` `DEFAULT_USERS_ROOT = '/mnt/c/Users'`；`discoverStateDbs()` 扫 `/mnt/c/Users/*/AppData/Roaming/{TRAE SOLO CN,TraeWork CN}/User/globalStorage/`（:172-194）——Windows 原生进程里 `/mnt/c` 不存在 |
-| 桌面 dsh 是 Windows 原生进程 | `process.platform === 'win32'`，`os.homedir()` = `C:\Users\21613`，无 `/mnt/c` |
+| 桌面 dsh 是 Windows 原生进程 | `process.platform === 'win32'`，`os.homedir()` = `C:\Users\<user>`，无 `/mnt/c` |
 | `trae-model-sync` 失败但 UI 不显示原因 | 子代理实测：POST 200，响应 `{"ok":false,"sync":{"ok":false,"error":"未发现…","kept":false}}`，DOM 仍显示泛化「未同步」 |
 | Trae 档位方言全臂 3003 | `docs/rules/gateway-facts.md` Trae 节（2026-10-04）：`inline_chat` scene 把 thinking 置 disabled、模型默认档 high，组合非法；`chat_v3` 路径请求体根本没有 effort/thinking 字段——**档位出档的前提是先找到能传 thinking 的 scene** |
 | 手风琴收放正常 | 子代理实测：可信点击后 aria-expanded/class/hidden 三态同步翻转，无 bug |

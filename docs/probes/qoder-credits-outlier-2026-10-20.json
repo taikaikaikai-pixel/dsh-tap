@@ -1,0 +1,83 @@
+{
+  "at": "2026-10-20T16:40:00.000Z",
+  "source": "~/.dsh/codebuddy-plugin-usage.json（本机 meter 记录，Qoder 网关写入）",
+  "note": "Qoder 配额耗尽期间的 usage.credits 离群值。正常量级 1e-6~3e-6 credit/token；离群值高达 1.08e-3（约 900 倍）。只读本地记录，未发请求、未消耗额度。",
+  "quota": {
+    "endpoint": "GET https://openapi.qoder.com.cn/api/v2/quota/usage",
+    "observed": {
+      "userQuota": {
+        "total": 0,
+        "used": 0,
+        "remaining": 0,
+        "percentage": 0,
+        "unit": "credits"
+      },
+      "addOnQuota": null,
+      "isQuotaExceeded": true
+    }
+  },
+  "normalSamples": [
+    {
+      "prompt": 346093,
+      "completion": 0,
+      "credit": 0.3469,
+      "creditPerToken": 0.000001
+    },
+    {
+      "prompt": 350023,
+      "completion": 0,
+      "credit": 0.4769,
+      "creditPerToken": 0.00000136
+    },
+    {
+      "prompt": 364591,
+      "completion": 0,
+      "credit": 0.887,
+      "creditPerToken": 0.00000243
+    }
+  ],
+  "outliers": [
+    {
+      "at": "2026-10-20T07:14:45.066Z",
+      "prompt": 388929,
+      "completion": 987,
+      "credit": 8.68586466,
+      "creditPerToken": 0.0000223
+    },
+    {
+      "at": "2026-10-20T08:38:30.310Z",
+      "prompt": 460333,
+      "completion": 919,
+      "credit": 496.18094083249997,
+      "creditPerToken": 0.001078
+    },
+    {
+      "at": "2026-10-20T08:39:01.421Z",
+      "prompt": 462251,
+      "completion": 734,
+      "credit": 44.57529091400001,
+      "creditPerToken": 0.0000964
+    },
+    {
+      "at": "2026-10-20T08:39:28.203Z",
+      "prompt": 464496,
+      "completion": 1487,
+      "credit": 48.3098879725,
+      "creditPerToken": 0.000104
+    }
+  ],
+  "threshold": {
+    "rule": "credit > max(2, prompt_tokens * 1e-5)",
+    "rationale": "正常上限 3e-6 留 3 倍余量；短对话设 2 credit 下限防误伤"
+  },
+  "unresolved": "离群值真实语义无法从客户端确证（账号配额已耗尽，无法做受控对照）。在解明前不得作为计费依据。",
+  "accountContext": {
+    "note": "本次观测时的账号**不是**当前正确账号：历史证据中的 uid 为 acct-B，正确账号是 acct-A（用户 2026-10-20 更正并重登）。",
+    "implication": "该账号当时 isQuotaExceeded=true、addOnQuota 缺失、目录仅 2 个免费档 enable —— 这些状态属于该账号，不可外推到正确账号。"
+  },
+  "correctedInterpretation": {
+    "supersedes": "“上游回传非计费语义的离群值”这一解读已被 R-Q10 取代",
+    "why": "Qoder 响应的 model 字段恒回 \"auto\"，但计费随请求模型的 price_factor 单调变化（实测 mmodel 0.1→0.0099、dmodel 0.5→0.2591、kmodel_latest 1.4→1.1213 credits/1k tokens）。故 496.18 这类数值应结合“当时请求的是哪个模型”判读，而不是判为异常值。",
+    "stillValid": "R-Q9 的 10605 排队 → 502 → 宿主立刻重发 的因果链仍成立（有队列信封实证）。"
+  }
+}

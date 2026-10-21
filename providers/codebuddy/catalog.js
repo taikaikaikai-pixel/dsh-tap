@@ -16,6 +16,15 @@
  */
 
 import { USER_AGENT } from './headers.js'
+import { parseCredits } from '../../credits.js'
+import { createQuotaCache } from '../../core/quota-cache.js'
+import { fetchWithTimeout, FETCH_TIMEOUTS } from '../../core/fetch-guard.js'
+
+/**
+ * 积分倍率的解析/归一化口径统一收在 credits.js（provider 无关，可离线测）。
+ * 此处原样再导出：既有 import 路径（scripts/verify-models.mjs）保持不变。
+ */
+export { parseCredits }
 
 /**
  * 「目录在列 ≠ /v2 可路由」的已知死条目（恒 11102 service info not found，
@@ -60,7 +69,7 @@ export function createCatalog({ resolveCredential, envKey }) {
   async function fetchModelCatalog(settingsFn) {
     const headers = await dialectHeaders(settingsFn)
     if (!headers) throw new Error('凭据不可用：请先在登录区配置 API Key 或完成 OAuth 登录')
-    const res = await fetch(`${settingsFn().baseURL}/v3/config`, { headers })
+    const res = await fetchWithTimeout(`${settingsFn().baseURL}/v3/config`, { headers }, { timeoutMs: FETCH_TIMEOUTS.catalog })
     if (!res.ok) throw new Error(`模型目录 HTTP ${res.status}`)
     const body = await res.json()
     if (body?.code !== 0) throw new Error(`模型目录错误：${body?.code} ${body?.msg ?? ''}`)
@@ -90,6 +99,8 @@ export function createCatalog({ resolveCredential, envKey }) {
           maxOutputTokens: m.maxOutputTokens ?? null,
           images: m.supportsImages === true,
           cli: cliEnabled.has(m.id),
+          // 积分倍率（展示口径，parseCredits 上方注释为裁判）；缺省 = null，卡片不出徽标。
+          credits: parseCredits(m.credits),
           reasoning: !!reasoning && (reasoning.effort != null || defaultEffort != null
             || supported != null || typeof reasoning.canDisableThinking === 'boolean'),
           // 目录标注的**默认**档（legacy 的 effort 或新形态的 defaultEffort）——
@@ -108,12 +119,18 @@ export function createCatalog({ resolveCredential, envKey }) {
   }
 
   /**
-   * Quota-side signals the plugin credentials can actually reach. Cached 60s;
+   * Quota-side signals the plugin credentials can actually reach. 60s memoize
+   * + 15s 强制刷新地板（core/quota-cache.js，与 Trae/Qoder 同一口径）；
    * never throws. OAuth 模式追加数值剩余额度（/billing/meter/get-user-resource，
    * quota-signals.md R-Q7）；api-key 模式该路径族 401（OAuth-only），
    * numericQuota=false，卡片应手填总额度做估算档。
    */
-  let quotaCache = { at: 0, value: null }
+  // settingsFn 每次调用都换（resolveNow 读当前配置）⇒ 记忆化里只存"最近一次的
+  // 解析器"，load 时现取，缓存命中时不会用旧闭包读旧配置。
+  let quotaSettings = null
+  const quotaCache = createQuotaCache({
+    load: () => fetchQuotaSnapshot(quotaSettings).catch((err) => ({ error: err?.message ?? String(err) })),
+  })
 
   /** get-user-resource 的数值字段带 Precise 字符串变体；统一取数值。 */
   const num = (v) => {
@@ -122,11 +139,11 @@ export function createCatalog({ resolveCredential, envKey }) {
   }
 
   async function fetchResourceQuota(s, headers) {
-    const res = await fetch(`${s.baseURL}/billing/meter/get-user-resource`, {
+    const res = await fetchWithTimeout(`${s.baseURL}/billing/meter/get-user-resource`, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: '{}',
-    })
+    }, { timeoutMs: FETCH_TIMEOUTS.quota })
     const body = await res.json().catch(() => null)
     const data = body?.code === 0 ? body.data?.Response?.Data ?? null : null
     if (!data) return { resource: null, resourceError: `code ${body?.code ?? `http ${res.status}`}` }
@@ -157,7 +174,9 @@ export function createCatalog({ resolveCredential, envKey }) {
   async function fetchQuotaSnapshot(settingsFn) {
     const s = settingsFn()
     const cred = await resolveCredential(settingsFn)
-    if (!cred) return { error: '凭据不可用：请先配置 API Key 或完成 OAuth 登录' }
+    // unauth 是**结构化**的登录态信号：展示层按布尔归类，不再解析中文文案
+    // （文案一改，登录态就被当成真故障，胶囊出红）。
+    if (!cred) return { error: '凭据不可用：请先配置 API Key 或完成 OAuth 登录', unauth: true }
     const headers = {
       Accept: 'application/json',
       Authorization: cred.authorization,
@@ -175,12 +194,12 @@ export function createCatalog({ resolveCredential, envKey }) {
     const readJsonBody = (r) => r.json().catch(() => null)
     const oauthMode = s.authMode === 'oauth'
     const [accBody, dosageBody, resourcePart] = await Promise.all([
-      fetch(`${s.baseURL}/v2/accounts`, { headers }).then(readJsonBody, () => null),
-      fetch(`${s.baseURL}/v2/billing/meter/get-dosage-notify`, {
+      fetchWithTimeout(`${s.baseURL}/v2/accounts`, { headers }, { timeoutMs: FETCH_TIMEOUTS.report }).then(readJsonBody, () => null),
+      fetchWithTimeout(`${s.baseURL}/v2/billing/meter/get-dosage-notify`, {
         method: 'POST',
         headers: { ...headers, 'Content-Type': 'application/json' },
         body: '{}',
-      }).then(readJsonBody, () => null),
+      }, { timeoutMs: FETCH_TIMEOUTS.report }).then(readJsonBody, () => null),
       // 数值额度：OAuth-only（R-Q7）；api-key 模式不浪费一次 401。
       oauthMode
         ? fetchResourceQuota(s, headers).catch(() => ({ resource: null, resourceError: 'network' }))
@@ -211,16 +230,13 @@ export function createCatalog({ resolveCredential, envKey }) {
     }
   }
 
-  function quotaSnapshot(settingsFn) {
-    if (quotaCache.value && Date.now() - quotaCache.at < 60_000) {
-      return Promise.resolve(quotaCache.value)
-    }
-    return fetchQuotaSnapshot(settingsFn)
-      .catch((err) => ({ error: err?.message ?? String(err) }))
-      .then((value) => {
-        quotaCache = { at: Date.now(), value }
-        return value
-      })
+  /**
+   * 额度快照。`fresh:true` 用于主界面额度卡"刚花完就要看新数"的场景，仍受
+   * 15s 地板约束（点开/悬停连击不会变成上游洪峰）。
+   */
+  function quotaSnapshot(settingsFn, { fresh = false } = {}) {
+    quotaSettings = settingsFn
+    return quotaCache.read({ fresh })
   }
 
   return { fetchModelCatalog, quotaSnapshot }

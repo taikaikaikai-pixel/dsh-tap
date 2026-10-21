@@ -19,6 +19,7 @@
 
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
+import { hostSource } from './lib/host-sources.mjs'
 
 import { PROVIDER_ID_RE, keyRefFor, fetchOpenAIModels, probeChatKey, providerBlock, createOpenAICompatProvider, rebuildAdapterForEntry } from '../providers/openai-compat.js'
 import ark from '../providers/ark/index.js'
@@ -234,7 +235,9 @@ const GOOD = 'sk-good-key'
     block10b.models[0].reasoningEfforts === undefined && block10b.compat === undefined,
     JSON.stringify(block10b))
 
-  const tapSrc = readFileSync(new URL('../index.js', import.meta.url), 'utf8')
+  // 0.25.0 起 provider 登记册在 host/providers/registry.js：这些"调用点形状"断言
+  // 扫宿主半拼接源，与文件位置解耦（拆分前后同一份期望）。
+  const tapSrc = hostSource()
   const fnSrc = (name) => {
     const at = tapSrc.indexOf(`async function ${name}`)
     return at < 0 ? '' : tapSrc.slice(at, at + tapSrc.slice(at).indexOf('\n}'))

@@ -18,7 +18,7 @@ const provider = createCodeBuddyProvider({
 | 成员 | 说明 |
 |------|------|
 | `bridgeHeaders()` | 出站静态头组（`{...CLIENT_HEADERS}`，见 headers.js） |
-| `transformChatPayload(payload)` | **developer → system 重写**（0.7.4 content_filter 修复）：网关入口校验层对含字面量 `role:"developer"` 的 payload 单列拒绝（500/11128 unapproved channel）；触发源是 pi-ai 把推理模型 system prompt 序列化为 developer。网关对 developer/system 指令语义等价，直接重写。回归锁 verify-bridge §9 |
+| `transformChatPayload(payload)` | **developer → system 重写**（0.7.4 content_filter 修复）：网关入口校验层对含字面量 `role:"developer"` 的 payload 单列拒绝（500/11128 unapproved channel）；触发源是 pi-ai 把推理模型 system prompt 序列化为 developer。网关对 developer/system 指令语义等价，直接重写。回归锁 verify-bridge §9。**并调用 `sanitizeChannelFingerprints`**（2026-10-21）：system 首句精确指纹 → 400/11128，改写口径见 channel-guard.js、R-M4 与踩坑 #70；回归锁 verify-bridge [20] |
 | `extractUsage(chunk)` | `chunk.usage ?? null`（网关每 chunk 重复携带，含 credit 与缓存计数） |
 | `extractStreamError(chunk)` | `chunk.error` 或信封 `code !== 0` |
 | `bridgeResponseId` | `'codebuddy-stream-bridge'`（聚合响应 id，保持线上值不变） |
@@ -43,6 +43,31 @@ export const CLIENT_HEADERS = { 'User-Agent': USER_AGENT, 'X-IDE-Type': 'CLI', .
 | X-IDE-* 四头 / X-Requested-With / X-Private-Data / X-Product: SaaS | **迷信**（缺失不影响任何端点 200），零行为变更保留，不作为能力依赖也不贸然下线 |
 
 历史注："/agenttool UA 必须 CLI 形态（12403）"已过时——2026-08-19 复测 /agenttool 无 UA 门。
+另注（2026-10-21）：11128 渠道指纹事件中，换官方 UA（`CLI/2.168.2 CodeBuddy/2.168.2`）、补官方会话头均`无效`——本案与 headers 无关，别把"不是官方客户端"的提示误读成 UA 指纹。
+
+## channel-guard.js — system 渠道指纹改写（2026-10-21）
+
+```js
+export function sanitizeChannelFingerprints(payload) // 就地改写；返回命中次数
+```
+
+- **触发**：system 消息含精确句 `You are an AI agent powered by DeepSeek Harness.` → 400/11128（displayTips："可能不是官方客户端发出的"）。只扫 system/developer；同句放 user → 200；整句判定（去句号仍拒、单独品牌词放行）。
+- **改写**：`powered by DeepSeek Harness` → `powered by the host harness`（语义等价，只动上游出站字节；本地会话/设置卡不受影响）。
+- **位置**：`transformChatPayload` 在 developer→system 之后调用（developer 也是被扫面）。
+- **证据/复跑**：`docs/probes/codebuddy-channel-2026-10-21.json` · `node scripts/probe-codebuddy-channel.mjs`（A 原样 11128 / B 改写 200 / C user 200 / D 无句号 11128）。规则见 docs/rules/content-moderation.md R-M4，踩坑 #70。
+- **回归**：`verify-bridge [20]` 覆盖纯函数、system/user 边界、真实适配器、端到端捕获桥出站 body、其他 400 不误翻。
+
+## 重试策略（0.21.0，宿主 `dsh-llm-retry`）
+
+provider 块的 `retryPolicy` 由宿主 `dsh-llm-retry` 消费（`agent/request-error` waterfall）：
+
+| 通道 | policy | 行为 |
+|---|---|---|
+| codebuddy | `{mode:'normal', maxRetries:0}` | 任何失败都不重试（429/5xx/11128 直接结束，turn-error 显示文本） |
+| trae | `{mode:'normal', maxRetries:0}` | 同上（无排队态） |
+| qoder | `{mode:'normal', maxRetries:2880, retryableCodes:['RATE_LIMIT'], backoff:{30000,30000,0}}` | 只重试排队 429；每 30s 一次（宿主忽略 Retry-After，固定 initial=max）；配额被分类成 QUOTA ⇒ 不重试 |
+
+codebuddy 的 policy 同时写 `cordis.patch.yml` 与用户层镜像（desktop 用户层是 hand-placed 完整块，只写 patch 会被丢，踩坑 #54）；qoder/trae 随整块镜像写入。**额度/排队同码**的处置见 docs/rules/gateway-facts.md 与踩坑 #71；UI 排队条见 wiki/07。
 
 ## errors.js — 错误码表
 
@@ -54,7 +79,7 @@ export const CLIENT_HEADERS = { 'User-Agent': USER_AGENT, 'X-IDE-Type': 'CLI', .
 | 12403 | user-agent gate（/v3/config） |
 | 14401 / 14407 | 路由注册层/配置缺失（image、video/3d 家族） |
 | 11102 / 11103 | chat 家族路由未注册 / 后端派发失败 |
-| 11128 | unapproved channel（developer 角色的当前拒绝面） |
+| 11128 | unapproved channel：**两张脸**——① developer 角色（500/400）；② system 精确句渠道指纹（400，见 channel-guard.js / R-M4）。桥对 400/11128 翻 `codebuddy_channel_blocked` |
 | 10001 / 11217 / 12153 | OAuth：缺参 / state 未完成（三态同码）/ refresh 无效 |
 
 `CREDENTIAL_UNAVAILABLE_MESSAGE`：空候选错误文案（调用方按此串识别并原样透传，保持 0.7.4 线上一致）。

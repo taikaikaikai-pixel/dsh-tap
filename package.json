@@ -1,6 +1,6 @@
 {
   "name": "dsh-tap",
-  "version": "0.20.0",
+  "version": "0.26.0",
   "description": "Unofficial upstream bundle for DeepSeek Harness (dsh): CodeBuddy (copilot.tencent.com) with a runtime-synced model catalogue, web search/fetch, image generation and a streaming bridge; TraeWork CN and Qoder CN subscription channels via local OpenAI translation gateways; plus a key-type OpenAI-compatible provider registry - all managed from a 4-block accordion settings card.",
   "type": "module",
   "main": "index.js",
@@ -11,8 +11,11 @@
   },
   "files": [
     "index.js",
+    "host/",
     "local-scan.js",
     "host-config.js",
+    "credits.js",
+    "quota-view.js",
     "core/",
     "providers/",
     "lib/client.js",
@@ -25,14 +28,17 @@
     "docs/diagnosis-cache-quota.md",
     "docs/diagnosis-trae-3003.md",
     "docs/diagnosis-qoder-flash.md",
+    "docs/diagnosis-codebuddy-11140.md",
     "README.md",
     "README.en.md",
     "LICENSE",
     "CHANGELOG.md",
-    "AGENTS.md"
+    "AGENTS.md",
+    "package.json"
   ],
   "scripts": {
-    "verify": "node scripts/verify-models.mjs",
+    "verify": "node scripts/verify-all.mjs",
+    "verify:live": "node scripts/verify-models.mjs",
     "verify:bridge": "node scripts/verify-bridge.mjs",
     "verify:core": "node scripts/verify-core-generic.mjs",
     "verify:providers": "node scripts/verify-providers.mjs",
@@ -40,6 +46,11 @@
     "verify:trae-provider": "node scripts/verify-trae-provider.mjs",
     "verify:qoder": "node scripts/verify-qoder-provider.mjs",
     "verify:host-config": "node scripts/verify-host-config.mjs",
+    "verify:picker-badge": "node scripts/verify-picker-badge.mjs",
+    "verify:client": "node scripts/verify-client-logic.mjs",
+    "verify:gateway": "node scripts/verify-gateway-core.mjs",
+    "verify:net": "node scripts/verify-net-discipline.mjs",
+    "verify:quota": "node scripts/verify-quota-view.mjs",
     "verify:desktop-acceptance": "node scripts/verify-desktop-acceptance.mjs"
   },
   "keywords": [

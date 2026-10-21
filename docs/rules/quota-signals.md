@@ -36,6 +36,9 @@
 **规则**：目录每个模型带字符串字段 `credits: "xN.NN credits"`（本账号实测：v4-pro x0.51、v4-flash x0.17、v3-2-volc x0.29、glm-5.2 x0.79、kimi-k2.6 x0.52、hy3 x0.00）。它是**相对展示倍率**：与实测 credit/1k tokens 不成线性（glm-5.2 倍率最高 0.79，实测 0.171 credit/1k 却低于 v4-pro 的 0.257）；唯一成立的硬映射是 **x0.00 ⟺ 实测零计费**。
 **验证**：倍率字段本轮发现于 P-Q1b 的体扫描；**P-Q5 预注册命中**——读 `hy3 = x0.00` 后预测"hy3 微调用 usage.credit === 0"，实测 200 / credit=0 / 16 tokens ✓。
 **推翻记录**："credits 是每 1k token 费率"假设被实测单价对比推翻（非线性）。
+**展示落地（0.21.0）**：设置卡 CodeBuddy 模型行显示 `xN.NN` 徽标（宿主官方 `Tag` 原语，`x0.00` 用 success 调）。提取层 = `providers/codebuddy/catalog.js` 的 `parseCredits()`：**只原样取 token，不换算、不排序、不补缺失值**；缺 `credits` 的条目不出徽标。展示层**不得**把它当单价表做成本推算——本规则的非线性结论是硬约束。
+**手填兜底（0.21.0）**：官方目录没标倍率的模型（Trae/Qoder 全量、CodeBuddy 缺字段条目）允许用户在设置卡逐模型手填，存文件层 `manualCredits`（按通道隔离）。这份值是**用户断言、不是网关事实**，与 R-Q4 的官方倍率共用同一展示位置但语义不同：**官方值优先、手填只在官方缺位时渲染，且两者都只用于展示，禁止进入任何计费/额度推算**。归一化口径唯一真源 = `credits.js`（`parseCredits` / `normalizeCredits`）。
+**选择器同源（0.21.0）**：主界面输入框的模型按钮/菜单也显示同一枚徽标，实现是 **CSS `::after` 装饰**——给 `<style data-plugin-css="dsh-tap-credits">` 铺 `[data-provider-id][data-model-id]::after` 规则（官方 README 认可的三处标签扩展点），**不注册 `conversation.input.model.label` 槽**（早期曾用 `priority: -1` 接管，因会顶掉 DeepSeek 账号与 key 型服务商上的官方装饰而废弃）。数据 = 服务端 `creditsView()` 产出的合并表（`mergeCredits`：官方压手填），与设置卡同源同口径；**该表只走展示通道，不进 profiles/镜像**（踩坑 #12 的 schema 白名单会静默丢键）。**限流/排队徽标的 trigger 锚点例外（0.21.0，踩坑 #72）**：输入框模型按钮的模型名盒是截断盒（`text-overflow:ellipsis` + `overflow:hidden`）且按钮 `max-width:min(360px,45cqw)`，挂在名字 span 上的行内 `::after` 会被整枚裁掉 ⇒ trigger 里改挂到 `button[aria-haspopup="menu"]` 自身（flex item，`order:1`），label 盒里的同一枚用 `content:none` 关掉；trigger 用短文案（`限流 · 11:42` / `排队`），菜单与选项仍是全文。
 
 ### R-Q5 计费正信号：仅 chat SSE 的 usage.credit
 
@@ -83,6 +86,88 @@ P-QP3 HIT；P-QP4/P-QP5（"控制台 API 拒绝 Bearer"）**MISS 推翻**——`
 「数值剩余额度——任何端点都没有」**对 OAuth token 作废**；对 `ck_` key 依然成立
 （quota4-resource-ck-key → 401）。插件在 OAuth 模式下可显示真实剩余额度。
 
+### R-Q8 Qoder CN 目录的 `price_factor`：官方逐模型倍率（2026-10 新增）
+
+**规则**：`GET /algo/api/v2/model/list`（COSY 签名）的 `chat[]` 条目新增 `price_factor`（数值 = 逐模型倍率），与 CodeBuddy `/v3/config` 的 `credits` 同义，属**官方标注的倍率**。限免/促销条目另带 `original_price_factor`（原价倍率）与 `is_free:true`。
+**实测**（2026-10-20，证据 `docs/probes/qoder-price-factor-2026-10-20.json`）：14 条 chat 条目里 `price_factor` 取值为 0 / 0.1 / 0.5 / 0.6 / 0.8 / 1.4；**只有两个 `enable:true` 的现售条目**（`qfmodel`、`dfmodel`）为 `0` + `original_price_factor:0.1` + `is_free:true`。同次实测该账号 `enable:false` 的条目达 12 条（Auto / Qwen3.8-Max / DeepSeek-V4-Pro / GLM / Kimi / MiniMax 等），即目录里能进选择器的只有两个免费档模型——这是**账号侧可见集**，不是插件过滤造成的。
+**与已证结论的一致性**：`qfmodel` 免费档「帧 `billable:false`、不耗 credits」在 2026-09 就实测过（docs/diagnosis-qoder-flash.md 同族），与 `price_factor:0` 吻合——这是该字段**唯一被交叉验证**的语义点。其余数值（0.1/0.5/1.4 …）与实测 credit 消耗是否线性**未验证**，故与 R-Q4 同一纪律：**只展示、不换算、不当单价表**。
+**落地**：`providers/qoder/catalog.js` 投影 `credits` 表（`credits.js` 的 `creditTokenFromNumber`：0 → `"0.00"`，其余保留至多两位小数），经 `catalogView()` 出到 `index.js` 的 `creditsView()` 合并表（官方压手填）；**不进 profiles/镜像**（踩坑 #12 的 schema 白名单）。设置卡 Qoder 模型行与输入框模型选择器的装饰随之自动生效。
+
+### R-Q9 Qoder 排队降级（10605）会被按 `auto` 计费——`usage.credits` 离群值的真实成因
+
+**根因（2026-10-20 定位；用户提供的控制台明细是决定性证据）**：那几笔离群值**不是上游乱发数字**，而是**真的按 `auto` 模型计费了**——控制台明细里同一时段的 496.18 / 44.57 / 48.30 三笔，模型列全部是 **`Auto`**（正常请求记的是 `DeepSeek-Flash`）。因果链：
+1. 指定模型此刻进上游队列——实测 `POST model=dfmodel` → 上游 403 + `{"code":"10605","isQueued":true,"modelKey":"dfmodel","queueType":"p3","serviceAvailable":false,"retryAfterSeconds":30}`；
+2. 旧网关把它归一成 **502** 抛给宿主，宿主 pi-ai 随即**立刻重发**；
+3. 重发请求被上游按**降级模型 `auto`** 处理并按 auto 的倍率扣费（auto 的 `price_factor` = 0.5，dfmodel = 0，量级差与实测吻合）。
+
+**规则**：Qoder 聊天 SSE 末帧的 `usage.credits` 在**正常**情况下是可用的每轮计费量（本机 100 轮实测 1e-6~3e-6 credit/token），但**排队降级时回传的是按 `auto` 计费的数字**——实测同一会话内 prompt 仅增长 6%（43.4 万 → 46 万 token），单轮 credit 却从 `0.54` 跳到 `496.18`（≈1.08e-3 credit/token，**比正常量级高 900 倍**），随后两轮 `44.6` / `48.3` 同样离群。同期官方配额面为 `isQuotaExceeded:true`、`userQuota` 全 0、`addOnQuota` 字段整个消失。
+**处置（0.21.0）**：`core/usage-meter.js` 按 `credit > max(2, prompt_tokens × 1e-5)` 打 `suspect` 标注——**只标注、不改写历史**：可疑值不进逐通道合计，单独计入 `suspectCredit/suspectRequests` 并在设置卡提示；全局 `totalCredit` 保持原样（不静默篡改用户已看过的数字）。阈值依据 = 正常量级实测上限（3e-6）留 3 倍余量，并对短对话设 2 credit 下限防误伤。
+**修法（0.21.0，初版 + 补全）**：`providers/qoder/gateway.js` 识别 10605 队列信封（多层转义下钻找 `isQueued`/`serviceAvailable` 特征键），回 **429 + `Retry-After`** + `code: qoder_model_queued`，让宿主走**退避**而不是立刻重发；网关侧绝不自行重发。
+**关键前提（0.21.0 实测修正）**：① **上游对业务失败也回 HTTP 200**——错误装在 SSE 信封的 `body` 里（`statusCodeValue`），所以队列识别必须同时挂在「非 2xx」与「流内 `ev.error`」两条路径，只写在 `!upstreamResp.ok` 里对主聊天（流式）**永远不触发**；② 旧代码在开始读流**之前**就 `writeHead(200)`，导致流内错误无法回 4xx——已改为「首个有效 chunk 才写头」（`ensureStreamHead`）。
+`verify-qoder-provider` 由 `[18b]`(6) + `[18c]`(3) + `[18d]`(3) 共 12 条断言锁定。
+**仍存疑**：为何重发会精确落到 `auto`（上游按可用性路由，还是 10605 后的既定降级策略）未定；但「立刻重发 = 触发降级计费」这条因果已被控制台明细证实，故按最坏情况设防。
+
+### R-Q10 Qoder 响应的 `model` 字段恒回 `auto`——**不能当路由证据**（2026-10-20 更正）
+
+**规则**：Qoder infer 面的成功响应里，chunk/响应的 `model` 字段**恒为 `"auto"`**，与请求指定的模型无关。但它**不代表请求被路由到 Auto**——用 `price_factor` 做判别可证明计费确实跟着请求模型走。
+**实测（正确账号 `acct-A…`，同一 prompt / max_tokens=8，证据见本节表）**：
+
+| 请求模型 | price_factor | prompt/completion | credit | credit/1k tokens |
+|---|---|---|---|---|
+| `mmodel` | 0.1 | 204 / 18 | 0.002193 | 0.0099 |
+| `dmodel` | 0.5 | 98 / 17 | 0.029797 | 0.2591 |
+| `kmodel_latest` | 1.4 | 87 / 47 | 0.150252 | 1.1213 |
+
+credit 随请求模型的 `price_factor` 单调放大（跨度约 100 倍）⇒ **路由与计费都按指定模型**，`model:"auto"` 只是回显标签。
+**推论**：`usage.credits` 的绝对值必须结合**请求的是哪个模型**才能判读；早期把它当作"离群值/上游乱发数字"（R-Q9 v1 的表述）是**读错**——当时缺的是"请求模型"这一维。R-Q9 的 10605 队列因果链仍然成立（有队列信封实证），但"数值不可信"的说法作废。
+**另注（已更正）**：`qfmodel` / `dfmodel` 的 `[FAIL]node:oa_qwen-plus-main` 失败**不是上游节点持久故障**——A/B 实测（同账号、同模型、各 3 次）：**裸 OpenAI 体 0/3 成功**，**补齐官方归因信封后 3/3 成功**。即该失败是"裸请求被路由到降级节点"，插件出站自 0.9.9 起就带完整信封，故插件路径不受影响。详见 docs/diagnosis-qoder-flash.md §0。
+
+### R-Q11 CodeBuddy 限流态（429 / code 6004）：带确定性重置时刻，必须展示而非裸传
+
+**规则**：模型级频率限制回 **HTTP 429** + `{"code":6004,"msg":"您的使用量已超出频率限制，将在 2026-10-21 11:42:24 UTC+8 重置，您也可以切换其他模型继续使用。","requestId":"…"}`。语义三要素齐全：① 是**限流**不是故障；② 有**确定重置时刻**（UTC+8）；③ 官方明示**可切换其他模型**。
+**实测（2026-10-20）**：同一会话里 `deepseek-v4.1-flash` 限流（429/6004），而 `deepseek-v4-pro` / `glm-5.3-flash` / `step-5-preview` / `default` 全部 200 ⇒ **限流是按模型的账号级配额**，不是通道整体故障。
+**为何必须专门处理**：桥此前原样透传裸 JSON，用户看到的是 `{"code":6004,...}`，既不知道是限流、也不知道何时恢复、更不知道可以换模型。且 429 若按普通错误处理，宿主 pi-ai 会**连发**，继续撞限流。
+**落地（0.21.0）**：`providers/codebuddy/rate-limit.js` 解析该形态（含从文案归算 resetAt）；`provider.describeUpstreamError()` 提供语义、`core/bridge.js` 只做通用转发（core 禁上游词闸门）；桥双路径回 429 + `Retry-After` + `code:codebuddy_rate_limited`；`runtime.rateLimit` 下发到设置卡（区块头 + 模型行徽标 + 恢复时刻）。
+**重试策略（0.21.0）**：限流有明确重置点，重试只会继续撞墙 ⇒ CodeBuddy provider 的 `retryPolicy` 设为 `{mode:'normal', maxRetries:0}`（不重试），429 直接落到 turn-error 显示"限流 + 恢复时刻 + 可换模型"。Qoder 侧只有排队 10605 重试（30s 一次），额度 `[EXCEED_QUOTA]` 的 429 消息带 `usage limit exceeded` 让宿主分类成 `QUOTA`（非 retryable），两者不会被混为一谈（踩坑 #71）。
+
+### R-Q12 跨通道额度聚合与刷新纪律（2026-10-21，0.22.0）
+
+**规则**：主界面额度卡（`lib/client.js` 的 `QuotaPill`，槽 `conversation.composer.dock`）里那个
+"合计额度"是**展示口径**，不参与任何计费、也不做跨厂商换算：
+
+- 单位判据**按语义**：上游 `unit` 有 `credit`（CodeBuddy 计费口径）与 `credits`（Qoder
+  `/api/v2/quota/usage` 实测写法）两种，归一成同一单位再求和；其它单位（如 token）照显示、
+  不进合计。（发布前实测踩到：按字面比较会把 Qoder 整通道排除，合计只剩单家。）
+- 合计**只加** `state==='ok'` 且 `unit==='credit'`（归一后）且 `primary!=null` 的通道。不同厂商的 credit
+  不可换算（R-Q4/R-Q8 已证倍率非线性）⇒ 面板页脚必须写「跨通道 credit 不可换算，合计仅作量级参考」。
+- api-key 档（CodeBuddy 无数值额度接口，R-Q7）用「手填总额 − 本机计量」算估算值，标 `estimate`：
+  **不混进精确合计**，只在没有精确值时作为合计展示（客户端加 `≈`）。
+- 缺字段一律 `null`，不补 0（0 是真实读数）；失败绝不回填旧值、也不编数字。
+- **登录态判据是结构化的**（0.23.0）：三个额度快照在未登录时回 `unauth: true`，`quota-view` 优先读这个
+  布尔；中文文案正则（`/^(未登录|凭据不可用)/`）只保留为旧快照的兼容回退。`unauth` 归 `unavailable`
+  （不触发显示），真故障（`code N` / `http N` / 上游异常）归 `error`（带原因、触发显示）。
+  原因：按措辞分类 = 文案一改，登录态就被画成「读取失败」并参与胶囊可见性（踩坑 #77）。
+- 全通道 `unavailable` ⇒ 整枚胶囊不渲染（纯 key 型用户的界面不变）。
+
+**刷新纪律（省上游）**：三条额度端点各自 60s memoize，本轮改为共享 `core/quota-cache.js`（并发单飞）；
+`fresh:true` 越过 TTL，但**每 15s 只放行一次**。客户端触发点：挂载一次（走缓存）、每完成一轮
+（Chat 快照 `turn-tail` +1）1.5s 去抖后强制刷新、回前台 / 展开面板 / 点「刷新」、空闲兜底 5 分钟、
+页面不可见零请求。⇒ 稳态约每 5 分钟 5 发（3+1+1），而"刚花完钱"的那一刻数一定在 2s 内变新。
+
+**为什么不轮询得更快**：「额度只会因为花钱而变」——事件驱动已等价于实时；更快的轮询只会在踩坑 #73
+的风控背景下徒增上游请求。
+
+**失败自愈（0.23.0，踩坑 #75）**：客户端只有 `404/405/501`（路由/动作不存在）或 `ok:true && enabled:false`
+（宿主明确关掉 `quotaDockEnabled`）才判定"没有这张卡"并停止轮询；其余失败（宿主重启窗口的 502、
+非 JSON 错误页、断网）算**瞬时**——保留上一份视图，按 30/60/120/300s 退避重试（`quotaRetryDelay`）。
+旧实现把任意非 2xx 写成 `enabled:false`，而 300s 心跳与 `visibilitychange` 刷新都以它为前置条件早退，
+一次瞬时失败就让胶囊整个会话消失。服务端取数同样有上限：`core/fetch-guard.js` 的额度面 15s（R-Q12
+只谈展示口径；成本纪律见 `wiki/03-core-layer.md` 的 `core/fetch-guard.js`）。
+
+**新增路由动作**：`POST /dsh-tap/settings {action:'quota-all', fresh?}` → `{ok, enabled, quota}`。
+归一化在根模块 `quota-view.js`（纯函数，离线测 `scripts/verify-quota-view.mjs`）；设置卡的
+`usage` 动作与其返回结构保持原样（`usage` 加 `trae` 不划算：那是设置卡不用的第三发上游请求）。
+
 ## 3. 额度信号完整地图（结论表）
 
 | 端点 | 响应头额度信号 | 响应体额度信号 |
@@ -96,6 +181,9 @@ P-QP3 HIT；P-QP4/P-QP5（"控制台 API 拒绝 Bearer"）**MISS 推翻**——`
 | POST /billing/meter/get-enterprise-user-usage | 无 | 套餐 credit/limitNum/周期（OAuth-only，需 X-Enterprise-Id） |
 | POST /billing/meter/get-user-daily-usage、/get-user-request-usage | 无 | 用量明细（OAuth-only，需 X-Enterprise-Id 作用域；personal 实测空，存疑） |
 | GET /v3/config | 无 | `models[].credits` 展示倍率（x0.00=零计费已验证） |
+| Qoder `GET /algo/api/v2/model/list` | 无 | `chat[].price_factor` 逐模型倍率（R-Q8）；`original_price_factor`/`is_free` 仅限免条目 |
+| Qoder `GET /api/v2/quota/usage` | 无 | `userQuota`/`addOnQuota`（total/used/remaining，整数计数器，实时）；耗尽时 addOnQuota 字段消失（R-Q9 同次观测） |
+| Qoder 聊天 SSE | 无 | `usage.credits`（每轮计费量；**耗尽/限额时出现非计费语义离群值**，R-Q9） |
 | /agenttool/v1/search、/webfetch | 无 | 无 |
 | /v2/images/generations | 无 | 无（media 证据） |
 | 错误信封（12403 等） | 无 | 无 |

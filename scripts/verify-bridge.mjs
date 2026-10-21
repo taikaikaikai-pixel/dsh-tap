@@ -58,6 +58,8 @@
 import { createServer } from 'node:http'
 import { connect } from 'node:net'
 import { EventEmitter } from 'node:events'
+
+import { createChecker } from './lib/harness.mjs'
 import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -198,17 +200,22 @@ const upstream = createServer((req, res) => {
 
 // ---------------------------------------------------------------- test harness
 
-let failures = 0
-function check(label, cond, detail = '') {
-  if (cond) {
-    console.log(`  ok   ${label}`)
-  } else {
-    failures++
-    console.log(`  FAIL ${label}${detail ? ` — ${detail}` : ''}`)
-  }
-}
+// 断言记账走共享骨架（scripts/lib/harness.mjs）——各套件只保留自己的 fixture。
+const { check, finish } = createChecker('verify-bridge')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * 未来时刻的 UTC+8 文案（`YYYY-MM-DD HH:mm:ss`）。限流 fixture 专用：
+ * **fixture 禁绝对日期**（踩坑 #38）——写死「明天 11:42」这类时刻会在钟点
+ * 过后把「Retry-After 为正」测成 null，测试自带时间炸弹（2026-10-21 实发）。
+ * @param {number} ts epoch ms
+ */
+function utc8Text(ts) {
+  const d = new Date(ts + 8 * 3600 * 1000)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
+}
 
 /** Ephemeral port: bind 0, read it, release. */
 async function freePort() {
@@ -735,6 +742,33 @@ async function main() {
     res = await callRoute(routes, null)
     check('rejected patches persisted nothing (baseURL unchanged)',
       res.json?.value?.baseURL === `http://127.0.0.1:${upstreamPort}`, res.json?.value?.baseURL)
+
+    // 13d. 入站体积上限（0.23.0）：无上限时一个超大 POST 就能撑爆宿主内存。
+    //     设置面最大合法请求是 apiKeysAdd / provider-add 的几 KB，1MiB 上限足够宽。
+    {
+      const raw = await new Promise((resolve) => {
+        const handler = routes['/dsh-tap/settings']
+        const req = new EventEmitter()
+        req.method = 'POST'
+        req.headers = { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' }
+        req.destroy = () => {}
+        const res = {
+          status: 0,
+          writeHead(s) { this.status = s },
+          end(b) {
+            let json = null
+            try { json = JSON.parse(b) } catch { /* non-JSON */ }
+            resolve({ status: this.status, json })
+          },
+        }
+        handler(req, res)
+        const big = Buffer.alloc(1024 * 1024 + 64, 0x20)
+        req.emit('data', big.subarray(0, 700 * 1024))
+        req.emit('data', big.subarray(700 * 1024))
+      })
+      check('oversize POST body → 413 with reason',
+        raw.status === 413 && /过大/.test(raw.json?.error ?? ''), JSON.stringify(raw.json))
+    }
   }
 
   // ------------------------------------------------- 14. G8 思考强度注入
@@ -850,7 +884,8 @@ async function main() {
       })
       let out = ''
       sock.on('data', (d) => { out += d.toString('utf8') })
-      // 413 在收满 32MB 即回；剩余字节撞在关闭中的 socket 上不算失败。
+      // 桥先排空这一轮上传再回 413（core/http-surface.js readBody 的时序），
+      // 所以这里应当稳定拿到完整响应；'error' 分支只做兜底。
       sock.on('error', (err) => { out ? resolve(out) : reject(err) })
       sock.on('close', () => resolve(out))
     })
@@ -999,6 +1034,8 @@ async function main() {
     check('mirror carries reasoningEfforts for the catalog model (host Effort picker)',
       /glm-5\.3-flash[\s\S]{0,400}?reasoningEfforts/.test(mirror)
         && /reasoningEfforts:[\s\S]{0,200}?high: high/.test(mirror), mirror.slice(0, 0))
+    check('mirror carries retryPolicy maxRetries 0 (CodeBuddy 非排队失败不重试)',
+      /retryPolicy:[\s\S]{0,120}?maxRetries: 0/.test(mirror), mirror.slice(0, 0))
 
     writeLayer({ effortByModel: { 'glm-5.3-flash': 'max' } })
     let before = arrivals.length
@@ -1031,8 +1068,269 @@ async function main() {
     writeLayer({})
   }
 
-  console.log(failures === 0 ? '\nall bridge checks passed' : `\n${failures} check(s) FAILED`)
-  process.exit(failures === 0 ? 0 : 1)
+  // ── [18] 限流态（429 / 6004）：桥把它翻成人话 + 429/Retry-After ──
+  // 实测错误体：HTTP 429 {"code":6004,"msg":"您的使用量已超出频率限制，将在
+  // 2026-10-21 11:42:24 UTC+8 重置，您也可以切换其他模型继续使用。","requestId":"…"}
+  // 语义：账号级限流、有明确重置点；必须让宿主退避，不能当瞬时错误连发。
+  console.log('\n[18] rate-limit state (429/6004) → human text + Retry-After')
+  {
+    const { parseRateLimit, rateLimitRetryAfterSeconds } = await import('../providers/codebuddy/rate-limit.js')
+    // 重置时刻 = 未来 30 分钟（动态生成，理由见 utc8Text 注释 / 踩坑 #38）。
+    const RESET_AT = Math.floor((Date.now() + 30 * 60 * 1000) / 1000) * 1000
+    const RESET_TEXT = utc8Text(RESET_AT)
+    const RAW = JSON.stringify({
+      code: 6004,
+      msg: `您的使用量已超出频率限制，将在 ${RESET_TEXT} UTC+8 重置，您也可以切换其他模型继续使用。`,
+      requestId: 'req-1',
+    })
+    const rl = parseRateLimit(RAW)
+    check('6004 被识别为限流态', rl?.limited === true)
+    check('重置时刻从文案解析出 epoch（UTC+8 归算）',
+      rl?.resetAt === RESET_AT,
+      String(rl?.resetAt))
+    check('resetText 原样保留（UTC+8 后缀）', rl?.resetText === `${RESET_TEXT} (UTC+8)`, rl?.resetText)
+    const secs = rateLimitRetryAfterSeconds(rl)
+    check('Retry-After 为正且到重置点为止', Number.isFinite(secs) && secs > 0, String(secs))
+    check('非限流码 → null（不误判）', parseRateLimit(JSON.stringify({ code: 11103, msg: 'x' })) === null)
+    check('非 JSON → null（不炸）', parseRateLimit('<html>503</html>') === null)
+    check('已过重置点 → null（不拖一个永久的退避）', rateLimitRetryAfterSeconds({ limited: true, resetAt: Date.now() - 1000 }) === null)
+    check('抽不到时刻 → 无 resetAt，不编造', parseRateLimit(JSON.stringify({ code: 6004, msg: '限流' })).resetAt === undefined)
+  }
+
+  // ── [19] 限流态端到端：429 穿过桥 → 429 + Retry-After + runtime.rateLimit ──
+  // 这条断言正是当初抓出 `payload` 作用域 bug 的那类测试（聚合路径里引用了不存在的
+  // payload，非流式直接 500）。上游 mock 回 429/6004，看桥的真实出口。
+  console.log('\n[19] rate-limit end-to-end through the bridge')
+  {
+    const { createServer } = await import('node:http')
+    const { createBridge } = await import('../core/bridge.js')
+    const { parseRateLimit, rateLimitRetryAfterSeconds } = await import('../providers/codebuddy/rate-limit.js')
+
+    // 与 [18] 同口径：未来 30 分钟，不用绝对日期（踩坑 #38）。
+    const RL_RESET_AT = Math.floor((Date.now() + 30 * 60 * 1000) / 1000) * 1000
+    const RL_RESET_TEXT = utc8Text(RL_RESET_AT)
+
+    const upstream = createServer((req, res) => {
+      req.resume()
+      req.on('end', () => {
+        res.writeHead(429, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ code: 6004, msg: `限流，将在 ${RL_RESET_TEXT} UTC+8 重置`, requestId: 'r' }))
+      })
+    })
+    await new Promise((r) => upstream.listen(0, '127.0.0.1', r))
+    const upstreamUrl = `http://127.0.0.1:${upstream.address().port}/v2/chat/completions`
+
+    const probe = createServer()
+    await new Promise((r) => probe.listen(0, '127.0.0.1', r))
+    const bridgePort = probe.address().port
+    await new Promise((r) => probe.close(r))
+
+    const provider = {
+      logPrefix: '[t]', bridgeResponseId: 't', logHeaderNames: [], sentinelAuth: 'Bearer s',
+      texts: { credentialUnavailable: 'x' }, bridgeHeaders: () => ({}), transformChatPayload: (p) => p,
+      extractUsage: () => null, extractStreamError: () => null,
+      describeUpstreamError(status, body) {
+        const rl = parseRateLimit(body)
+        if (!rl) return null
+        return { message: '限流', code: 'codebuddy_rate_limited',
+          retryAfter: rateLimitRetryAfterSeconds(rl), rateLimit: { resetAt: rl.resetAt, resetText: rl.resetText } }
+      },
+    }
+    const runtime = { running: false, port: null, lastError: null, rateLimit: null }
+    const bridge = createBridge({
+      settings: () => ({ baseURL: upstreamUrl, authMode: 'oauth' }),
+      provider,
+      withCredentials: async () => {
+        const res = await fetch(upstreamUrl, { method: 'POST',
+          headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        return { cred: { authorization: 'Bearer x', keyName: 'k' }, res }
+      },
+      meter: { record: () => {} },
+      forensics: { logPath: () => undefined, dumpDir: () => undefined },
+      runtime, channel: 'codebuddy',
+    })
+    const stop = bridge.listen(bridgePort)
+    for (let i = 0; i < 60 && !runtime.running; i++) await sleep(50)
+
+    for (const stream of [false, true]) {
+      const r = await fetch(`http://127.0.0.1:${bridgePort}/v1/chat/completions`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'm1', stream, messages: [{ role: 'user', content: 'hi' }] }),
+      })
+      const body = await r.text()
+      const tag = 'stream=' + stream
+      check(tag + ': 429 透传', r.status === 429, String(r.status))
+      check(tag + ': Retry-After 有值', !!r.headers.get('retry-after'), String(r.headers.get('retry-after')))
+      check(tag + ': 错误码可辨识', body.includes('codebuddy_rate_limited'), body.slice(0, 120))
+    }
+    check('runtime.rateLimit 已记录（供设置卡显示）',
+      runtime.rateLimit?.model === 'm1' && runtime.rateLimit?.resetText === `${RL_RESET_TEXT} (UTC+8)`,
+      JSON.stringify(runtime.rateLimit))
+    stop()
+    await new Promise((r) => upstream.close(r))
+  }
+
+  // ── [20] 渠道指纹（2026-10-21）：system 首句精确指纹 → 改写 + 11128 语义 ──
+  // 实测（scripts/probe-codebuddy-channel.mjs，docs/probes/codebuddy-channel-2026-10-21.json）：
+  // 国内站网关对 system 消息里的精确句 "You are an AI agent powered by DeepSeek
+  // Harness." 回 400/11128；同一句在 user 消息里放行。DSH 系统提示首句正是它，
+  // 故出站必须改写，否则 CodeBuddy 通道对全量 DSH 会话恒失败。
+  console.log('\n[20] channel fingerprint (400/11128) + account restriction (403/11140)')
+  {
+    const { sanitizeChannelFingerprints, CHANNEL_FINGERPRINTS } = await import('../providers/codebuddy/channel-guard.js')
+    const RAW_SYS = 'You are an AI agent powered by DeepSeek Harness.\n\nSecond line.'
+    const EXPECT_SYS = 'You are an AI agent powered by the host harness.\n\nSecond line.'
+
+    const p1 = { messages: [{ role: 'system', content: RAW_SYS }, { role: 'user', content: RAW_SYS }] }
+    const hits = sanitizeChannelFingerprints(p1)
+    check('system 文本里的精确指纹被改写', p1.messages[0].content === EXPECT_SYS, p1.messages[0].content.slice(0, 80))
+    check('user 文本不参与改写（实测同一句在 user 里放行）', p1.messages[1].content === RAW_SYS)
+    check('返回命中次数', hits === 1, String(hits))
+    check('幂等：再跑一次不再命中', sanitizeChannelFingerprints(p1) === 0)
+
+    const p2 = {
+      messages: [
+        { role: 'developer', content: [{ type: 'text', text: RAW_SYS }, { type: 'image_url', image_url: { url: 'x' } }] },
+        { role: 'assistant', content: RAW_SYS },
+        { role: 'system', content: [{ type: 'text', text: 'no fingerprint here' }] },
+      ],
+    }
+    const hits2 = sanitizeChannelFingerprints(p2)
+    check('developer 的 text block 也被改写', p2.messages[0].content[0].text === EXPECT_SYS, p2.messages[0].content[0].text)
+    check('非 text block 原样保留', p2.messages[0].content[1].type === 'image_url')
+    check('assistant/user 不扫', p2.messages[1].content === RAW_SYS)
+    check('无命中的 system 不重写（引用不变）', p2.messages[2].content[0].text === 'no fingerprint here')
+    check('命中次数按短语累计', hits2 === 1, String(hits2))
+    check('指纹表带证据口径（非空）', CHANNEL_FINGERPRINTS.length >= 1)
+
+    // 真实适配器：transformChatPayload 把 developer→system 与指纹改写串在一起。
+    const { createCodeBuddyProvider } = await import('../providers/codebuddy/index.js')
+    const { parseRateLimit } = await import('../providers/codebuddy/rate-limit.js')
+    const provider = createCodeBuddyProvider({
+      meter: { record: () => {} }, readAuth: () => ({}), writeAuth: () => {},
+      envKey: () => null, withKeyRotation: async (fn) => fn(), resolveCredential: async () => null,
+      effortWireFor: () => undefined, dshHome: '/tmp',
+    })
+    const p3 = { model: 'm', messages: [{ role: 'developer', content: RAW_SYS }] }
+    provider.transformChatPayload(p3)
+    check('适配器：developer→system 且指纹同时被改写',
+      p3.messages[0].role === 'system' && p3.messages[0].content === EXPECT_SYS, JSON.stringify(p3.messages[0]).slice(0, 120))
+
+    const desc = provider.describeUpstreamError(400, JSON.stringify({
+      code: 11128, msg: 'Illegal API invocation from an unapproved channel', requestId: 'r',
+    }))
+    check('400/11128 有特化语义（code + 400）',
+      desc?.code === 'codebuddy_channel_blocked' && desc?.status === 400, JSON.stringify(desc))
+    check('11128 不被当成限流', parseRateLimit(JSON.stringify({ code: 11128 })) === null)
+    check('其他 400 无特化语义（保持原样透传）',
+      provider.describeUpstreamError(400, JSON.stringify({ code: 11101 })) === null)
+    check('429/6004 语义未被 11128 分支影响',
+      provider.describeUpstreamError(429, JSON.stringify({ code: 6004, msg: '限流' }))?.code === 'codebuddy_rate_limited')
+
+    // 403/11140（账号级风控封禁，2026-10-21）：目录/账户面仍 200、聊天面全模型
+    // 被拒。宿主把 401/403 归 AUTH 并把失败行文案替换成「API 密钥无效」⇒ 适配器
+    // 必须翻成 400 + 独立 code，真实原因才到得了用户眼前（诊断见
+    // docs/diagnosis-codebuddy-11140.md）。
+    const restricted = provider.describeUpstreamError(403, JSON.stringify({
+      code: 11140, msg: 'request illegal', requestId: 'req-abc',
+      displayMsg: { zh: '账号存在异常行为，已被限制使用' },
+    }))
+    check('403/11140 有特化语义（code + 400 + 带 requestId）',
+      restricted?.code === 'codebuddy_account_restricted' && restricted?.status === 400
+        && restricted?.message.includes('req-abc'), JSON.stringify(restricted))
+    check('11140 不被当成限流', parseRateLimit(JSON.stringify({ code: 11140 })) === null)
+    check('403 其他 code 无特化语义（保持原样透传）',
+      provider.describeUpstreamError(403, JSON.stringify({ code: 11101 })) === null)
+    check('403 非 JSON 体无特化语义（不误翻）',
+      provider.describeUpstreamError(403, '<html>forbidden</html>') === null)
+
+    // 端到端：桥 → mock 上游（捕获桥真正发出的 body）→ 400/11128 或
+    // 403/11140 → 结构化 400。
+    const { createServer } = await import('node:http')
+    const { createBridge } = await import('../core/bridge.js')
+    let mode = 'channel'
+    let seen = null
+    const UPSTREAM_REPLIES = {
+      channel: [400, { code: 11128, msg: 'Illegal API invocation from an unapproved channel', requestId: 'r' }],
+      restricted: [403, {
+        code: 11140,
+        msg: 'request illegal',
+        requestId: 'req-11140-e2e',
+        displayMsg: { en: 'Your account has been restricted due to unusual activity', zh: '账号存在异常行为，已被限制使用' },
+      }],
+      other: [400, { code: 11101, msg: 'chat requires stream:true', requestId: 'r' }],
+    }
+    const upstream = createServer((req, res) => {
+      let body = ''
+      req.on('data', (chunk) => { body += chunk })
+      req.on('end', () => {
+        try { seen = JSON.parse(body) } catch { seen = null }
+        const [status, payload] = UPSTREAM_REPLIES[mode] ?? UPSTREAM_REPLIES.other
+        res.writeHead(status, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(payload))
+      })
+    })
+    await new Promise((r) => upstream.listen(0, '127.0.0.1', r))
+    const upstreamUrl = `http://127.0.0.1:${upstream.address().port}/v2/chat/completions`
+    const probe = createServer()
+    await new Promise((r) => probe.listen(0, '127.0.0.1', r))
+    const bridgePort = probe.address().port
+    await new Promise((r) => probe.close(r))
+
+    const runtime = { running: false, port: null, lastError: null, rateLimit: null }
+    const bridge = createBridge({
+      settings: () => ({ baseURL: upstreamUrl, authMode: 'oauth' }),
+      provider,
+      channel: 'codebuddy',
+      withCredentials: async (attempt) => {
+        const cred = { authorization: 'Bearer x', keyName: 'k' }
+        const res = await attempt(cred)
+        return { cred, res }
+      },
+      meter: { record: () => {} },
+      forensics: { logPath: () => undefined, dumpDir: () => undefined },
+      runtime,
+    })
+    const stop = bridge.listen(bridgePort)
+    for (let i = 0; i < 60 && !runtime.running; i++) await sleep(50)
+    const chat = (stream, sys) => fetch(`http://127.0.0.1:${bridgePort}/v1/chat/completions`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'm1', stream, messages: [{ role: 'system', content: sys }, { role: 'user', content: 'hi' }] }),
+    })
+    for (const stream of [true, false]) {
+      seen = null
+      const r = await chat(stream, RAW_SYS)
+      const body = await r.text()
+      const tag = `e2e stream=${stream}`
+      check(tag + ': 上游收到改写后的 system', seen?.messages?.[0]?.content === EXPECT_SYS,
+        JSON.stringify(seen?.messages?.[0]?.content).slice(0, 100))
+      check(tag + ': 11128 回结构化 400', r.status === 400 && body.includes('codebuddy_channel_blocked'), body.slice(0, 180))
+      check(tag + ': 用户可见文案带可执行提示', body.includes('已自动改写已知指纹'), body.slice(0, 200))
+    }
+    // 403/11140：流式与非流式两条路径都必须回结构化 400（宿主对 401/403 会
+    // 替换文案为「API 密钥无效」），且不能落进限流分支。
+    mode = 'restricted'
+    for (const stream of [true, false]) {
+      const rr = await chat(stream, RAW_SYS)
+      const rb = await rr.text()
+      const tag = `e2e 403/11140 stream=${stream}`
+      check(tag + ': 回结构化 400（不再是宿主 AUTH 文案）',
+        rr.status === 400 && rb.includes('codebuddy_account_restricted'), rb.slice(0, 200))
+      check(tag + ': 文案带真实原因 + requestId + 申诉指引',
+        rb.includes('账号存在异常行为') && rb.includes('req-11140-e2e') && rb.includes('申诉'), rb.slice(0, 260))
+      check(tag + ': 不被误当限流', !rb.includes('codebuddy_rate_limited'), rb.slice(0, 160))
+    }
+    mode = 'other'
+    const r = await chat(true, RAW_SYS)
+    const body = await r.text()
+    check('其他 400 原样透传（不误翻）',
+      r.status === 400 && body.includes('11101') && !body.includes('codebuddy_channel_blocked'), body.slice(0, 180))
+    stop()
+    await new Promise((r) => upstream.close(r))
+  }
+
+  // 桥/模拟上游的监听 socket 还开着：显式退出，别等事件循环自己空（旧代码的 process.exit 语义）。
+  process.exit(finish() ? 0 : 1)
 }
 
 main().catch((err) => {

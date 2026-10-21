@@ -1,7 +1,28 @@
-# 02 — 组合根 index.js + host-config.js
+# 02 — 组合根 index.js + host/** + host-config.js
 
-> 文件：[index.js](../index.js)（~1740 行，插件入口与导出契约所在）+ [host-config.js](../host-config.js)（宿主配置层统一写入点）。
+> 文件：[index.js](../index.js)（**~330 行**，插件入口与导出契约所在）+ `host/`（组合根支撑模块，见下表）+ [host-config.js](../host-config.js)（宿主配置层统一写入点）。
 > 上游无关的机制在 [03-core-layer.md](03-core-layer.md)；上游事实在 [04](04-provider-codebuddy.md)/[05](05-provider-trae.md)/[10](10-provider-qoder.md)。
+
+## 文件地图（0.25.0 组合根拆分；`scripts/verify-host-split.mjs` 锁行数与依赖方向）
+
+| 文件 | 职责 | 不许做 |
+|------|------|--------|
+| `index.js` | `name`/`inject`/`Config` 再导出、`apply()` 生命周期装配、偏好的迟绑定槽注册 | 不写路由/动作/patch/视图（≤1200 行） |
+| `host/config.js` | DSH 路径、Config schema、`SETTINGS_FIELDS`、baseURL 校验、文件层读写、桥端口分流、hostConfig 实例 | 无业务逻辑 |
+| `host/runtime.js` | 三通道运行态台账（running/port/lastError/rateLimit/queue） | 不持业务状态 |
+| `host/redact.js` | `maskKey` / `maskedUserLayer`（回传浏览器前的脱敏原语） | 零依赖 |
+| `host/providers/instances.js` | 三个 provider 单例 + 凭据编排（多 key 轮换/OAuth 单候选）+ 重试策略 | 不 import models/settings 层 |
+| `host/providers/registry.js` | key 型上游登记册：预设表、受管清单、凭据引用、provider 块写入、`extraProvidersView` | 不碰模型清单 |
+| `host/models/state.js` | 静态清单 × 动态目录 × 文件层 modelState ⇒ 基/有效清单；倍率；档位表 | 不碰镜像与网络 |
+| `host/models/mirror.js` | 三块 `llm-pi-ai.providers.<id>.models` 镜像 + 成败台账 + 目录同步 | 不碰视图 |
+| `host/models/channels.js` | qoder/trae 的模型状态、偏好、逐模型镜像 | 不碰 codebuddy |
+| `host/channels/<id>.js` + `index.js` | 通道描述符（契约 = `providers/channel.js`）：settings 键、runtime、listen、额度、目录、镜像钩子；`createChannels()` 是唯一清单 | 描述符里不写 Host/Origin 门与响应出口 |
+| `host/settings/view.js` | GET 视图（设置/宿主对账/运行态/模型视图），只读 | 不写文件层 |
+| `host/settings/route.js` | 路由外壳：门 → GET → 包体 → 分发（≤120 行） | 不内联动作语义 |
+| `host/settings/actions.js` | 28 个 action 表（`createActions`） | 不拼响应（统一 `reply`） |
+| `host/settings/patch.js` | patch 分支：模型 setter / 通用设置白名单 / 副作用先于响应 | 不 handle 包体 |
+
+依赖方向（单向，闸门锁）：`index → host/settings → host/models → host/providers → host/config`；`core/**` 不 import `host/**`。
 
 ## 模块导出契约
 

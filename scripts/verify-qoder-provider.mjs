@@ -29,11 +29,12 @@ import {
   createQoderOAuth, createPkce, createMachineId, normalizeExpiry, QODER_CLIENT_ID,
 } from '../providers/qoder/oauth.js'
 
-let pass = 0, fail = 0
-const ok = (cond, label, extra = '') => {
-  if (cond) { pass++; console.log(`  ok  ${label}`) }
-  else { fail++; console.log(`  FAIL ${label} ${extra}`) }
-}
+import { createChecker } from './lib/harness.mjs'
+
+// 断言记账走共享骨架（scripts/lib/harness.mjs）；本套件历史参数顺序是 (cond, label)，
+// 适配层保留原调点不动。
+const { check, finish } = createChecker('verify-qoder-provider')
+const ok = (cond, label, extra = '') => check(label, cond, extra)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // ── mock 上游 ──────────────────────────────────────────────────────────────
@@ -231,6 +232,33 @@ console.log('\n[7] 临期自动刷新')
   ok(mock.refreshHits === h, '未临期不触发刷新')
 }
 
+// ── [5b] 刷新后身份重校验（0.21.0）─────────────────────────────────────────
+// 设备流绑定浏览器当前账号，refresh 由服务端决定以谁续期；旧实现沿用旧 account，
+// 会造成「界面显示 A、请求走 B」——用户报的"错误登录了另外的账号"即此形态。
+console.log('\n[5b] 令牌刷新后的身份重校验')
+{
+  // 让令牌临期以触发刷新
+  store.auth = { ...store.auth, expiresAt: Date.now() - 1 }
+  mock.refreshReply = { status: 200, body: { device_token: 'qt-access-9', expires_at: 3600 } }
+  mock.userinfo = { status: 200, body: { uid: 'u-switched', name: 'other@example.com' } }
+  await oauth.resolveQoderCredential(SETTINGS)
+  const st = oauth.oauthStatus()
+  ok(st.account?.uid === 'u-switched', '刷新后按新令牌重拉身份（不再沿用旧 account）', JSON.stringify(st.account))
+  ok(st.accountSwitched?.from === 'u-1' && st.accountSwitched?.to === 'u-switched',
+    '身份被换掉时如实记录切换事件（供 UI 提示）', JSON.stringify(st.accountSwitched))
+  // 身份未变时不产生误报
+  store.auth = { ...store.auth, expiresAt: Date.now() - 1 }
+  mock.refreshReply = { status: 200, body: { device_token: 'qt-access-10', expires_at: 3600 } }
+  mock.userinfo = { status: 200, body: { uid: 'u-switched', name: 'other@example.com' } }
+  await oauth.resolveQoderCredential(SETTINGS)
+  ok(oauth.oauthStatus().accountSwitched?.to === 'u-switched', '身份不变时仍报告最近一次切换记录（不重复触发新事件）')
+  // 复原，避免影响后续用例
+  mock.userinfo = null
+  store.auth = { ...store.auth, expiresAt: Date.now() + 3600_000 }
+  store.account = { uid: 'u-1', nickname: 'tester' }
+  writeAuth(store)
+}
+
 // ── [6] refresh 失败 → needsRelogin ────────────────────────────────────────
 console.log('\n[6] refresh 失败形态')
 {
@@ -311,12 +339,13 @@ console.log('\n[13] 真实 poll 响应形态回放')
   // expires_at, refresh_token_id, created_at, updated_at, refresh_token,
   // expires_in, refresh_token_expires_in, refresh_token_expires_at
   const real = {
-    id: 'dt-abc', token: 'dt-realshape', user_id: '019efdac-1bf3-792a-a63d-1b94c1ea9fb0',
+    id: 'dt-abc', token: 'dt-realshape', user_id: 'acct-B',
     code_challenge: 'x', code_challenge_method: 'S256', nonce: 'n-1',
     expires_at: new Date(Date.now() + 36e5).toISOString(), refresh_token_id: 'rtr-1',
     created_at: '2026-09-19T11:03:28.128Z', updated_at: '2026-09-19T11:03:28.128Z',
     refresh_token: 'drt-realshape', expires_in: 86400,
-    refresh_token_expires_in: 2592000, refresh_token_expires_at: '2026-10-19T11:03:28.128Z',
+    // 相对时间（踩坑 #38）：夹具写死绝对日期会在到期日之后把「新鲜登录」判成需重登。
+    refresh_token_expires_in: 2592000, refresh_token_expires_at: new Date(Date.now() + 2592000e3).toISOString(),
   }
   writeAuth({ machine: { machineId: 'f'.repeat(48) } })
   mock.pollHits = 0
@@ -653,8 +682,8 @@ console.log('\n[15] 目录投影（fetchQoderCatalog）')
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({
       chat: [
-        { key: 'auto', format: 'openai', source: 'system', enable: true, display_name: 'Auto', is_vl: true, max_input_tokens: 180000 },
-        { key: 'qmodel_38max', format: 'openai', source: 'system', enable: true, display_name: 'Qwen3.8-Max', is_vl: true, context_config: { '200K': { token_count: 200000, is_default: true }, '1M': { token_count: 1000000 } }, thinking_config: { disabled: {}, enabled: { efforts: { low: {}, medium: { is_default: true }, xhigh: {} }, is_default: true } } },
+        { key: 'auto', format: 'openai', source: 'system', enable: true, display_name: 'Auto', is_vl: true, max_input_tokens: 180000, price_factor: 0, is_free: true },
+        { key: 'qmodel_38max', format: 'openai', source: 'system', enable: true, display_name: 'Qwen3.8-Max', is_vl: true, price_factor: 0.5, context_config: { '200K': { token_count: 200000, is_default: true }, '1M': { token_count: 1000000 } }, thinking_config: { disabled: {}, enabled: { efforts: { low: {}, medium: { is_default: true }, xhigh: {} }, is_default: true } } },
         { key: 'disabled-m', format: 'openai', enable: false },
         { key: 'other-fmt', format: 'anthropic', enable: true },
       ],
@@ -685,6 +714,11 @@ console.log('\n[15] 目录投影（fetchQoderCatalog）')
   ok(applyQoderContextVariant(result.profiles[1], '1M', result.variants.qmodel_38max).contextWindow === 1000000, '选中变体 → contextWindow 覆盖')
   ok(applyQoderContextVariant(result.profiles[1], '404K', result.variants.qmodel_38max).contextWindow === 200000, '变体名不在目录 → 维持默认档')
   ok(applyQoderContextVariant(result.profiles[1], undefined, result.variants.qmodel_38max) === result.profiles[1], '未选变体 → profile 原样（镜像形状不变）')
+  // 官方倍率（2026-10 起 price_factor）：只进展示表，不进 profiles/镜像。
+  ok(result.credits.auto === '0.00', 'price_factor 0 → "0.00"（零计费语义，展示层据此出 success 调）')
+  ok(result.credits.qmodel_38max === '0.5', 'price_factor 数字 → token 字符串（不虚增精度）')
+  ok(!('disabled-m' in result.credits) && !('other-fmt' in result.credits), '未进 profiles 的条目不出 credits')
+  ok(result.profiles.every((p) => !('credits' in p)), 'credits 不进 profiles（镜像/选择器形状不变）')
   catServer.close()
 }
 
@@ -876,6 +910,10 @@ console.log('\n[17] qoderModelSetPrefs 全链路：apply() 起真组合根，moc
   ok(JSON.stringify(Object.keys(block.models.find((m) => m.id === 'qmodel_38max')).sort()) === JSON.stringify(['contextWindow', 'id', 'input', 'maxTokens', 'name', 'reasoningEfforts']), '镜像条目形状：variants 不进 settings.yaml，档位表进 reasoningEfforts')
   ok(JSON.stringify(block.models.find((m) => m.id === 'qmodel_38max').reasoningEfforts) === JSON.stringify({ off: null, low: 'low', medium: 'medium', xhigh: 'xhigh' }), '镜像带目录声明的档位表（宿主 Model/Effort 选择器数据源）')
   ok(JSON.stringify(block.compat) === JSON.stringify({ thinkingFormat: 'openai', supportsReasoningEffort: true }), '镜像块声明 compat（pi-ai 才会把选中档位写成 reasoning_effort）')
+  ok(JSON.stringify(block.retryPolicy) === JSON.stringify({
+    mode: 'normal', maxRetries: 2880, retryableCodes: ['RATE_LIMIT'],
+    backoff: { initialDelayMs: 30000, maxDelayMs: 30000, jitterRatio: 0 },
+  }), '镜像块声明排队重试策略（只重试 RATE_LIMIT · 每 30s）')
   ok(block.models.find((m) => m.id === 'qmodel_38max').contextWindow === 200000, '未选变体 → contextWindow 维持目录默认档')
 
   let r = await call('POST', { patch: { qoderModelSetPrefs: { id: 'qmodel_38max', prefs: { effort: 'xhigh', contextVariant: '1M' } } } })
@@ -926,6 +964,246 @@ console.log('\n[17] qoderModelSetPrefs 全链路：apply() 起真组合根，moc
   if (disposeFn) disposeFn()
   ui.close()
   cat.close()
+}
+
+// ── [18b] 上游排队/降级（10605）：识别队列态并按可重试语义回 429 ──
+// 实测 2026-10-20：请求 model=dfmodel，上游回 403 且信封内 isQueued/serviceAvailable/p3 队列；
+// 旧实现归一成 502 → 宿主立刻重发 → 上游按降级路由计费（控制台记 auto，实扣 496 credit）。
+console.log('\n[18b] 上游排队信号（10605）识别与处置')
+{
+  const { createServer } = await import('node:http')
+  const { createCosyRuntime } = await import('../providers/qoder/cosy.js')
+  const { createQoderGateway } = await import('../providers/qoder/gateway.js')
+
+  const queueBody = JSON.stringify({
+    code: '10605',
+    message: JSON.stringify({
+      isQueued: true, modelKey: 'dfmodel', queueCount: 0,
+      queueType: 'p3', retryAfterSeconds: 30, serviceAvailable: false, waitTime: 30,
+    }),
+  })
+  const seen = []
+  const upstream = createServer((req, res) => {
+    let body = ''
+    req.on('data', (c) => { body += c })
+    req.on('end', () => {
+      seen.push(body)
+      res.writeHead(403, { 'Content-Type': 'application/json' })
+      res.end(queueBody)
+    })
+  })
+  await new Promise((r) => upstream.listen(0, '127.0.0.1', r))
+  const origin = `http://127.0.0.1:${upstream.address().port}`
+  const { fileURLToPath: fup } = await import('node:url')
+  const wasmPath = join(dirname(fup(import.meta.url)), '..', 'providers', 'qoder', 'qoder_auth.wasm')
+  const cosy = createCosyRuntime({ wasmPath })
+  const qRuntime = { running: false, port: null, lastError: null }
+  const gw = createQoderGateway({
+    settings: () => ({ qoderInferBaseURL: origin, maxConcurrentPerSession: 4, upstreamFirstByteTimeoutMs: 5000 }),
+    resolveCredential: async () => ({ authorization: 'Bearer dt-test', machineId: 'a'.repeat(48), uid: 'u-1' }),
+    cosy,
+    meter: { record: () => {} },
+    runtime: qRuntime,
+    forensics: { logPath: () => undefined },
+    getCatalogEntry: () => ({ display_name: 'DeepSeek-Flash', format: 'openai' }),
+    getCatalogProfiles: () => [{ id: 'dfmodel', maxTokens: 32768 }],
+    getModelPrefs: () => ({}),
+    getModelSource: () => 'system',
+  })
+  const stopGw = gw.listen(0)
+  for (let i = 0; i < 50 && !qRuntime.running; i++) await sleep(50)
+  const r = await fetch(`http://127.0.0.1:${qRuntime.port}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'dfmodel', stream: true, messages: [{ role: 'user', content: 'ping' }] }),
+  })
+  ok(r.status === 429, '队列态回 429（可重试语义）而非 502', String(r.status))
+  ok(r.headers.get('retry-after') === '30', '带 Retry-After=30 供宿主退避', String(r.headers.get('retry-after')))
+  const body = await r.json().catch(() => ({}))
+  ok(body.error?.code === 'qoder_model_queued', '错误码可辨识（qoder_model_queued）', JSON.stringify(body.error?.code))
+  ok(body.error?.queue?.modelKey === 'dfmodel' && body.error?.queue?.queueType === 'p3', '队列信息如实透出（modelKey/queueType）', JSON.stringify(body.error?.queue))
+  ok(seen.length === 1, '未在网关侧自行重发（重发会触发上游降级计费）', String(seen.length))
+  // 出站 body 由 wasm 加密（不可读明文），故用「恰好一次投递 + 队列回包回显的 modelKey」双证：
+  // 队列响应里的 modelKey=dfmodel 是上游按我们实际请求的模型回显的，等于证明没被改写成 auto。
+  ok(typeof seen[0] === 'string' && seen[0].length > 0, '出站 body 已投递（加密体非空）')
+  stopGw()
+  await new Promise((r2) => upstream.close(r2))
+}
+
+// ── [18c] 队列态装在「流内失败帧」里（上游对业务失败也回 HTTP 200）──
+// 实测 2026-10-20 直连上游：status=200 但 SSE body 是 {"code":"400","message":"..."} 的失败帧；
+// 10605 同样走这条形态。若只判 !upstreamResp.ok，这条路径永远漏掉。
+console.log('\n[18c] 队列态出现在流内失败帧（HTTP 200 + 带内 10605）')
+{
+  const { createServer } = await import('node:http')
+  const { createCosyRuntime } = await import('../providers/qoder/cosy.js')
+  const { createQoderGateway } = await import('../providers/qoder/gateway.js')
+
+  const inner = JSON.stringify({ isQueued: true, modelKey: 'dfmodel', queueType: 'p3', serviceAvailable: false, retryAfterSeconds: 30 })
+  const outer = JSON.stringify({ code: '10605', message: inner })
+  const upstream2 = createServer((req, res) => {
+    req.resume()
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream;charset=UTF-8' })
+      // 上游形态：外层信封 body 是字符串化的失败对象
+      res.write('data:' + JSON.stringify({ headers: { 'Content-Type': ['application/json'] }, body: outer, statusCodeValue: 403, statusCode: 'FORBIDDEN' }) + '\n\n')
+      res.end()
+    })
+  })
+  await new Promise((r) => upstream2.listen(0, '127.0.0.1', r))
+  const origin2 = `http://127.0.0.1:${upstream2.address().port}`
+  const { fileURLToPath: fup2 } = await import('node:url')
+  const wasmPath2 = join(dirname(fup2(import.meta.url)), '..', 'providers', 'qoder', 'qoder_auth.wasm')
+  const cosy2 = createCosyRuntime({ wasmPath: wasmPath2 })
+  const rt2 = { running: false, port: null, lastError: null }
+  const gw2b = createQoderGateway({
+    settings: () => ({ qoderInferBaseURL: origin2, maxConcurrentPerSession: 4, upstreamFirstByteTimeoutMs: 5000 }),
+    resolveCredential: async () => ({ authorization: 'Bearer dt-test', machineId: 'a'.repeat(48), uid: 'u-1' }),
+    cosy: cosy2, meter: { record: () => {} }, runtime: rt2,
+    forensics: { logPath: () => undefined },
+    getCatalogEntry: () => ({ display_name: 'DeepSeek-Flash', format: 'openai' }),
+    getCatalogProfiles: () => [{ id: 'dfmodel', maxTokens: 32768 }],
+    getModelPrefs: () => ({}), getModelSource: () => 'system',
+  })
+  const stop2 = gw2b.listen(0)
+  for (let i = 0; i < 60 && !rt2.running; i++) await sleep(50)
+  const r2b = await fetch(`http://127.0.0.1:${rt2.port}/v1/chat/completions`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'dfmodel', stream: true, messages: [{ role: 'user', content: 'ping' }] }),
+  })
+  ok(r2b.status === 429, '流内 10605 也回 429（不只判 !ok）', String(r2b.status))
+  ok(r2b.headers.get('retry-after') === '30', '流内队列态同样带 Retry-After')
+  const b2 = await r2b.json().catch(() => ({}))
+  ok(b2.error?.code === 'qoder_model_queued', '流内队列态错误码一致', JSON.stringify(b2.error?.code))
+  stop2()
+  await new Promise((r) => upstream2.close(r))
+}
+
+// ── [18d] 懒写头回归：正常流式仍须 200 + 逐帧 + [DONE] ──
+// 为让流内 10605 能回 429，200 头改为「首个有效 chunk 才写」；此断言防它把正常流写坏。
+console.log('\n[18d] 懒写头后正常流式不回归')
+{
+  const { createServer } = await import('node:http')
+  const { createCosyRuntime } = await import('../providers/qoder/cosy.js')
+  const { createQoderGateway } = await import('../providers/qoder/gateway.js')
+
+  const frame = (o) => 'data:' + JSON.stringify({ body: JSON.stringify(o) }) + '\n\n'
+  const up3 = createServer((req, res) => {
+    req.resume()
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      res.write(frame({ choices: [{ index: 0, delta: { role: 'assistant', content: 'Hel' } }] }))
+      res.write(frame({ choices: [{ index: 0, delta: { content: 'lo' } }] }))
+      res.write(frame({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 2, credits: 0.01 } }))
+      res.write('data:[DONE]\n\n')
+      res.end()
+    })
+  })
+  await new Promise((r) => up3.listen(0, '127.0.0.1', r))
+  const { fileURLToPath: fup3 } = await import('node:url')
+  const cosy3 = createCosyRuntime({ wasmPath: join(dirname(fup3(import.meta.url)), '..', 'providers', 'qoder', 'qoder_auth.wasm') })
+  const rt3 = { running: false, port: null, lastError: null }
+  const recorded3 = []
+  const gw3 = createQoderGateway({
+    settings: () => ({ qoderInferBaseURL: `http://127.0.0.1:${up3.address().port}`, maxConcurrentPerSession: 4, upstreamFirstByteTimeoutMs: 5000 }),
+    resolveCredential: async () => ({ authorization: 'Bearer dt-test', machineId: 'a'.repeat(48), uid: 'u-1' }),
+    cosy: cosy3, meter: { record: (e) => recorded3.push(e) }, runtime: rt3,
+    forensics: { logPath: () => undefined },
+    getCatalogEntry: () => ({ display_name: 'DeepSeek-Flash', format: 'openai' }),
+    getCatalogProfiles: () => [{ id: 'dfmodel', maxTokens: 32768 }],
+    getModelPrefs: () => ({}), getModelSource: () => 'system',
+  })
+  const stop3 = gw3.listen(0)
+  for (let i = 0; i < 60 && !rt3.running; i++) await sleep(50)
+  const r3 = await fetch(`http://127.0.0.1:${rt3.port}/v1/chat/completions`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'dfmodel', stream: true, messages: [{ role: 'user', content: 'hi' }] }),
+  })
+  const txt3 = await r3.text()
+  ok(r3.status === 200, '正常流式仍回 200', String(r3.status))
+  ok(txt3.includes('[DONE]'), '正常流式仍以 [DONE] 收尾')
+  ok(recorded3.length === 1 && recorded3[0].channel === 'qoder', '正常流式仍计量且带 channel', JSON.stringify(recorded3.map((e) => e.channel)))
+  stop3()
+  await new Promise((r) => up3.close(r))
+}
+
+// ── [18e] 官方流内额度标记：[EXCEED_QUOTA] / [NOT_EXCEED_QUOTA] ──
+// bundle 字符串实证：官方 CLI 在 SSE 循环里显式识别这两个标记（与 [DONE] 并列）。
+// 我们此前未处理 ⇒ [EXCEED_QUOTA] 落进 JSON.parse 失败分支，被泛化成"非法 JSON"。
+console.log('\n[18e] 官方流内额度标记')
+{
+  const { createServer } = await import('node:http')
+  const { createCosyRuntime } = await import('../providers/qoder/cosy.js')
+  const { createQoderGateway } = await import('../providers/qoder/gateway.js')
+
+  async function runWith(firstPayload) {
+    const up = createServer((req, res) => {
+      req.resume()
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+        res.write(firstPayload)
+        res.write('data:[DONE]\n\n')
+        res.end()
+      })
+    })
+    await new Promise((r) => up.listen(0, '127.0.0.1', r))
+    const { fileURLToPath: f } = await import('node:url')
+    const cos = createCosyRuntime({ wasmPath: join(dirname(f(import.meta.url)), '..', 'providers', 'qoder', 'qoder_auth.wasm') })
+    const rt = { running: false, port: null, lastError: null }
+    const g = createQoderGateway({
+      settings: () => ({ qoderInferBaseURL: `http://127.0.0.1:${up.address().port}`, maxConcurrentPerSession: 4, upstreamFirstByteTimeoutMs: 5000 }),
+      resolveCredential: async () => ({ authorization: 'Bearer dt-test', machineId: 'a'.repeat(48), uid: 'u-1' }),
+      cosy: cos, meter: { record: () => {} }, runtime: rt,
+      forensics: { logPath: () => undefined },
+      getCatalogEntry: () => ({ display_name: 'DeepSeek-Flash', format: 'openai' }),
+      getCatalogProfiles: () => [{ id: 'dfmodel', maxTokens: 32768 }],
+      getModelPrefs: () => ({}), getModelSource: () => 'system',
+    })
+    const stop = g.listen(0)
+    for (let i = 0; i < 60 && !rt.running; i++) await sleep(50)
+    const resp = await fetch(`http://127.0.0.1:${rt.port}/v1/chat/completions`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'dfmodel', stream: true, messages: [{ role: 'user', content: 'hi' }] }),
+    })
+    const out = { status: resp.status, retryAfter: resp.headers.get('retry-after'), body: await resp.text() }
+    stop()
+    await new Promise((r) => up.close(r))
+    return out
+  }
+
+  const exceeded = await runWith('data:[EXCEED_QUOTA]\n\n')
+  ok(exceeded.status === 429, '[EXCEED_QUOTA] → 429（可等待恢复语义）', String(exceeded.status))
+  ok(exceeded.retryAfter === '600', '[EXCEED_QUOTA] 带较长 Retry-After（600s）', String(exceeded.retryAfter))
+  ok(/"qoder_quota_exceeded"/.test(exceeded.body), '[EXCEED_QUOTA] 错误码可辨识（不再是"非法 JSON"）')
+  ok(/usage limit exceeded/.test(exceeded.body), '[EXCEED_QUOTA] 文案带 usage limit exceeded（宿主分类为 QUOTA ⇒ 不进入排队重试）')
+
+  const normal = await runWith('data:[NOT_EXCEED_QUOTA]\n\ndata:' + JSON.stringify({ body: JSON.stringify({ choices: [{ index: 0, delta: { content: 'ok' } }] }) }) + '\n\n')
+  ok(normal.status === 200 && normal.body.includes('"ok"') || normal.body.includes('ok'), '[NOT_EXCEED_QUOTA] 被忽略，正常继续', String(normal.status))
+}
+
+// ── [18f] 模型行勋章位投影（与 CodeBuddy 模型行同构）──
+// 目标：Qoder 模型列表要和 CodeBuddy 一样显示 插件/CLI/图 等勋章。
+// CodeBuddy 的勋章来自目录（cli/images/reasoning）+ 静态清单（插件）；
+// Qoder 无静态清单，故映射为：CLI=source system、图=is_vl、思考=is_reasoning、
+// 免费=price_factor 0（R-Q8 已交叉验证）、新=is_new。
+console.log('\n[18f] 模型行勋章投影（qoderBadges）')
+{
+  const { qoderBadges } = await import('../providers/qoder/index.js')
+  const b = qoderBadges({
+    qfmodel: { key: 'qfmodel', source: 'system', is_vl: true, is_reasoning: true, price_factor: 0, is_new: true },
+    dfmodel: { key: 'dfmodel', source: 'system', is_vl: true, is_reasoning: false, price_factor: 0 },
+    dmodel: { key: 'dmodel', source: 'system', is_vl: true, is_reasoning: true, price_factor: 0.5 },
+    mmodel: { key: 'mmodel', source: 'user', is_vl: false, is_reasoning: false, price_factor: 0.1 },
+    sparse: { key: 'sparse' },
+  })
+  ok(b.qfmodel.cli === true && b.qfmodel.image === true && b.qfmodel.think === true && b.qfmodel.free === true && b.qfmodel.fresh === true,
+    '全字段条目：五个勋章位全部置真', JSON.stringify(b.qfmodel))
+  ok(b.dfmodel.think === false, 'is_reasoning false → 不出「思考」', JSON.stringify(b.dfmodel))
+  ok(b.dmodel.free === false, 'price_factor 0.5 → 不出「免费」', JSON.stringify(b.dmodel))
+  ok(b.mmodel.cli === false && b.mmodel.image === false, 'source=user / is_vl false → 无 CLI、无图', JSON.stringify(b.mmodel))
+  ok(b.sparse.cli === false && b.sparse.image === false && b.sparse.think === false && b.sparse.free === false && b.sparse.fresh === false,
+    '缺字段一律 false（不编造）', JSON.stringify(b.sparse))
+  ok(qoderBadges(undefined) && Object.keys(qoderBadges(undefined)).length === 0, '无目录 → 空表不炸')
 }
 
 // ── [19] 用量归因：出站信封归因字段 + 收尾 business/finish 与 tracking 上报 ──
@@ -1016,5 +1294,4 @@ console.log('\n[19] 用量归因信封与收尾上报（官方客户端同构）
 }
 
 server.close()
-console.log(`\n=== verify-qoder-provider: ${pass} 通过 / ${fail} 失败 ===`)
-process.exit(fail ? 1 : 0)
+finish()

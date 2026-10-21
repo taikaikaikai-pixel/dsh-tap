@@ -25,20 +25,12 @@ jobs:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
     - run: npm ci
-    - run: node scripts/verify-models.mjs --list
-    - run: node scripts/verify-bridge.mjs
-    - run: node scripts/verify-rotation.mjs
-    - run: node scripts/verify-core-generic.mjs
-    - run: node scripts/verify-providers.mjs
-    - run: node scripts/verify-trae-provider.mjs
-    - run: node scripts/verify-qoder-provider.mjs
-    - run: node scripts/verify-host-config.mjs
-    - run: node scripts/verify-agents-md.mjs
-    - name: desktop 适配可执行验收·结构闸门（goal 验收的机器可判恒真部分）
-      # --structural：CI 只锁 A 组离线结构性不变量（index.js 无 desktop 特化 / 差异收口 / goal 锚点）——
-      # 它们必须恒真、与适配进度无关。B 组结果断言（codebuddy 已接入）在适配完成前必然 FAIL，
-      # 不进 CI 恒闸门；C 组活实例断言恒 SKIP（由探针/GUI 套件承担，不伪造）。
-      run: node scripts/verify-desktop-acceptance.mjs --structural
+    - name: 全部离线回归（自动发现 scripts/verify-*.mjs，新增套件零登记）
+      # 0.24.0 起不再手写 step 清单：清单靠手维护就一定会有一次忘加
+      # （verify-trae-model-catalog 曾漏跑两个版本）。聚合入口自带参数：
+      # verify-models --list / verify-desktop-acceptance --structural。
+      # 在线 18 次真实探测是 `npm run verify:live`，不进 CI（耗额度）。
+      run: npm run verify
     - name: AGENTS.md 体积硬闸门（agents-md lint，PyPI agent-context-md）
       # --threshold 0：质量评分面向英文模板结构（## Commands/Testing/Boundaries），对本仓库的中文薄索引恒 0 分；
       # 只用它的硬闸门（行数/字节/占位符），评分不参与判定（实测：不带 --threshold 0 时预算全过也 exit 1）
