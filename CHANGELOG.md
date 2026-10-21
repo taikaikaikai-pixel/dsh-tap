@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.21.1 (2026-10-21)
+
+- **CodeBuddy 账号级风控封禁（403/11140）不再伪装成「API 密钥无效」**（用户报「所有 CodeBuddy 模型都报 API 密钥无效，但设置卡测试正常」）。诊断：上游对**聊天面**全模型回 `403 {"code":11140,"msg":"request illegal"}`（`displayMsg.zh`「账号存在异常行为，已被限制使用」，带 `requestId` 与申诉提示），而 `/v3/config`、`/v2/accounts`、`/agenttool/*` 仍 200 ⇒ 设置卡「测试一下」（只打目录面）显示正常；宿主把 401/403 一律分类为 `AUTH` 并把失败行文案替换为「API 密钥无效」（`message.failure.auth`），真实原因被吞。实测：4 种 UA/头形态同拒（与客户端指纹无关）、目录/账户/agenttool 正常、刷新 access token 后新令牌同拒、≥3h 未自解 ⇒ 账号级封禁，只能申诉/等待。修法：`providers/codebuddy/index.js` 的 `describeUpstreamError` 新增 `403/11140` 分支 → **400 + `codebuddy_account_restricted`** + 真实原因/requestId/申诉指引（400 不在宿主 AUTH 替换名单，真实文案可达聊天界面；该路由 `retryPolicy.maxRetries: 0`，状态码变化不引重试），其他 403 原样透传。`providers/codebuddy/errors.js` 收录 11140（含边界说明）并注明官方 CLI 同族码（11141/11142/17271–17276）未线上实测、不入表。回归：`verify-bridge [20]` 增适配器 4 条 + 端到端 3×2 条断言（stream true/false：400、结构化 code、requestId、申诉文案、不误当限流、403 其他码/非 JSON 不误翻）。
+- **探针频率纪律（防风控封禁）**：新增 `docs/diagnosis-codebuddy-11140.md`（现象 / 判定矩阵 / 宿主文案映射 / 申诉处置 / 复跑）；`docs/rules/gateway-facts.md` 增 11140 事实条（「目录面 200 ≠ 聊天面可用」）；`docs/pitfalls.md` 新增踩坑 #73；AGENTS.md 踩坑速查加 `#73` 标签、维护纪律加「拒绝面探测串行 ≥20s / 单轮 ≤3 发 / 命中即停 / 封禁期零请求」，文档地图指向新诊断文档；`wiki/09-run-and-test.md` 增「探针频率纪律」小节。
+- **测试自身的时间炸弹**：`verify-bridge [18]/[19]` 曾把限流重置时刻写死为 `2026-10-21 11:42:24 UTC+8`，过了该时刻后「Retry-After 为正」必然测成 null（踩坑 #38「fixture 禁绝对日期」的又一次实例）——改为运行时生成「未来 30 分钟」的 UTC+8 文案（`utc8Text()`），断言改为动态期望值。
+
 ## 0.21.0 (2026-10-21)
 
 > 本版把 `v0.20.0` 之后的一批改动（2026-10-20 ~ 10-21，开发期原按 0.21.0–0.36.0 逐批记录、**均未单独发版也无独立 tag**）合并为一条发布记录，随 `v0.21.0` 出货；条目改按主题归并，开发期内部迭代不再单独成节。账号/身份类细节已脱敏（见「身份」条）。

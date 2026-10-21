@@ -97,6 +97,16 @@ CODEBUDDY_BRIDGE_LOG=/tmp/bridge.jsonl dsh web   # 请求哈希/头特征/usage�
 CODEBUDDY_BRIDGE_DUMP=/tmp/dump dsh web           # 叠加请求体明文（仅本地诊断，慎开）
 ```
 
+## 探针频率纪律（防风控封禁，2026-10-21 起）
+
+上游（尤其 CodeBuddy CN 站）对「非常规客户端 / 高频请求」有**账号级**风控：一旦命中，聊天面全模型回 `403/11140`（「账号存在异常行为，已被限制使用」），而目录面 `/v3/config` 仍 200——设置卡「测试一下」照常显示正常，极易误判成密钥问题（诊断全本 [diagnosis-codebuddy-11140](../docs/diagnosis-codebuddy-11140.md)，踩坑 #73）。在线探测按下面纪律执行：
+
+- **串行**：同一上游的 4xx 语义探测不并发；两次请求间隔 **≥20s**（与 Trae 4011 的 20s 纪律同源）。
+- **单轮 ≤3 发**：一轮探测（判定一个假设）最多 3 发，打完就停，不「再跑一遍确认」；命中拒绝即停手记录（code / msg / requestId）。
+- **只探目标面**：验证聊天可用性必须打 chat completions；目录 / 账户面 200 不能推出聊天面可用。
+- **封禁期零请求**：看到 11140 就停掉一切上游调用（含设置卡同步、模型测试、探针），先带 `requestId` 申诉或等待；重登 / 刷新令牌 / 重装均无效。
+- **真实 payload 回放只做「一次定位」**：它能复现 11128 这类内容面判据，但也是风控眼里的异常流量——打通即停，不要集群重放。
+
 ## 浏览器回归（UI 改动后）
 
 脚本位于**仓库外**本地目录 `dsh-ui-test/`（puppeteer-core + 系统 Chrome，不进仓库）。**套件清单、断言基线、区块驱动口径、实例与 token、零真实写入纪律的唯一真源 = 项目 skill `.agents/skills/dsh-ui-regression/`**（跑 UI 回归前先加载它）；断言数沿革见 [CHANGELOG](../CHANGELOG.md)（0.10.0 手风琴换代 `card-accordion.js` 为唯一设置卡套件，详见 [07](07-web-client.md)）。

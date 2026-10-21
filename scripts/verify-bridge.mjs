@@ -210,6 +210,18 @@ function check(label, cond, detail = '') {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+/**
+ * 未来时刻的 UTC+8 文案（`YYYY-MM-DD HH:mm:ss`）。限流 fixture 专用：
+ * **fixture 禁绝对日期**（踩坑 #38）——写死「明天 11:42」这类时刻会在钟点
+ * 过后把「Retry-After 为正」测成 null，测试自带时间炸弹（2026-10-21 实发）。
+ * @param {number} ts epoch ms
+ */
+function utc8Text(ts) {
+  const d = new Date(ts + 8 * 3600 * 1000)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
+}
+
 /** Ephemeral port: bind 0, read it, release. */
 async function freePort() {
   const probe = createServer()
@@ -1040,17 +1052,20 @@ async function main() {
   console.log('\n[18] rate-limit state (429/6004) → human text + Retry-After')
   {
     const { parseRateLimit, rateLimitRetryAfterSeconds } = await import('../providers/codebuddy/rate-limit.js')
+    // 重置时刻 = 未来 30 分钟（动态生成，理由见 utc8Text 注释 / 踩坑 #38）。
+    const RESET_AT = Math.floor((Date.now() + 30 * 60 * 1000) / 1000) * 1000
+    const RESET_TEXT = utc8Text(RESET_AT)
     const RAW = JSON.stringify({
       code: 6004,
-      msg: '您的使用量已超出频率限制，将在 2026-10-21 11:42:24 UTC+8 重置，您也可以切换其他模型继续使用。',
+      msg: `您的使用量已超出频率限制，将在 ${RESET_TEXT} UTC+8 重置，您也可以切换其他模型继续使用。`,
       requestId: 'req-1',
     })
     const rl = parseRateLimit(RAW)
     check('6004 被识别为限流态', rl?.limited === true)
     check('重置时刻从文案解析出 epoch（UTC+8 归算）',
-      rl?.resetAt === Date.parse('2026-10-21T11:42:24Z') - 8 * 3600 * 1000,
+      rl?.resetAt === RESET_AT,
       String(rl?.resetAt))
-    check('resetText 原样保留（UTC+8 后缀）', rl?.resetText === '2026-10-21 11:42:24 (UTC+8)', rl?.resetText)
+    check('resetText 原样保留（UTC+8 后缀）', rl?.resetText === `${RESET_TEXT} (UTC+8)`, rl?.resetText)
     const secs = rateLimitRetryAfterSeconds(rl)
     check('Retry-After 为正且到重置点为止', Number.isFinite(secs) && secs > 0, String(secs))
     check('非限流码 → null（不误判）', parseRateLimit(JSON.stringify({ code: 11103, msg: 'x' })) === null)
@@ -1068,11 +1083,15 @@ async function main() {
     const { createBridge } = await import('../core/bridge.js')
     const { parseRateLimit, rateLimitRetryAfterSeconds } = await import('../providers/codebuddy/rate-limit.js')
 
+    // 与 [18] 同口径：未来 30 分钟，不用绝对日期（踩坑 #38）。
+    const RL_RESET_AT = Math.floor((Date.now() + 30 * 60 * 1000) / 1000) * 1000
+    const RL_RESET_TEXT = utc8Text(RL_RESET_AT)
+
     const upstream = createServer((req, res) => {
       req.resume()
       req.on('end', () => {
         res.writeHead(429, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ code: 6004, msg: '限流，将在 2026-10-21 11:42:24 UTC+8 重置', requestId: 'r' }))
+        res.end(JSON.stringify({ code: 6004, msg: `限流，将在 ${RL_RESET_TEXT} UTC+8 重置`, requestId: 'r' }))
       })
     })
     await new Promise((r) => upstream.listen(0, '127.0.0.1', r))
@@ -1122,7 +1141,7 @@ async function main() {
       check(tag + ': 错误码可辨识', body.includes('codebuddy_rate_limited'), body.slice(0, 120))
     }
     check('runtime.rateLimit 已记录（供设置卡显示）',
-      runtime.rateLimit?.model === 'm1' && runtime.rateLimit?.resetText === '2026-10-21 11:42:24 (UTC+8)',
+      runtime.rateLimit?.model === 'm1' && runtime.rateLimit?.resetText === `${RL_RESET_TEXT} (UTC+8)`,
       JSON.stringify(runtime.rateLimit))
     stop()
     await new Promise((r) => upstream.close(r))
@@ -1133,7 +1152,7 @@ async function main() {
   // 国内站网关对 system 消息里的精确句 "You are an AI agent powered by DeepSeek
   // Harness." 回 400/11128；同一句在 user 消息里放行。DSH 系统提示首句正是它，
   // 故出站必须改写，否则 CodeBuddy 通道对全量 DSH 会话恒失败。
-  console.log('\n[20] channel fingerprint: system rewrite + 400/11128 mapping')
+  console.log('\n[20] channel fingerprint (400/11128) + account restriction (403/11140)')
   {
     const { sanitizeChannelFingerprints, CHANNEL_FINGERPRINTS } = await import('../providers/codebuddy/channel-guard.js')
     const RAW_SYS = 'You are an AI agent powered by DeepSeek Harness.\n\nSecond line.'
@@ -1185,20 +1204,47 @@ async function main() {
     check('429/6004 语义未被 11128 分支影响',
       provider.describeUpstreamError(429, JSON.stringify({ code: 6004, msg: '限流' }))?.code === 'codebuddy_rate_limited')
 
-    // 端到端：桥 → mock 上游（捕获桥真正发出的 body）→ 400/11128 → 结构化 400。
+    // 403/11140（账号级风控封禁，2026-10-21）：目录/账户面仍 200、聊天面全模型
+    // 被拒。宿主把 401/403 归 AUTH 并把失败行文案替换成「API 密钥无效」⇒ 适配器
+    // 必须翻成 400 + 独立 code，真实原因才到得了用户眼前（诊断见
+    // docs/diagnosis-codebuddy-11140.md）。
+    const restricted = provider.describeUpstreamError(403, JSON.stringify({
+      code: 11140, msg: 'request illegal', requestId: 'req-abc',
+      displayMsg: { zh: '账号存在异常行为，已被限制使用' },
+    }))
+    check('403/11140 有特化语义（code + 400 + 带 requestId）',
+      restricted?.code === 'codebuddy_account_restricted' && restricted?.status === 400
+        && restricted?.message.includes('req-abc'), JSON.stringify(restricted))
+    check('11140 不被当成限流', parseRateLimit(JSON.stringify({ code: 11140 })) === null)
+    check('403 其他 code 无特化语义（保持原样透传）',
+      provider.describeUpstreamError(403, JSON.stringify({ code: 11101 })) === null)
+    check('403 非 JSON 体无特化语义（不误翻）',
+      provider.describeUpstreamError(403, '<html>forbidden</html>') === null)
+
+    // 端到端：桥 → mock 上游（捕获桥真正发出的 body）→ 400/11128 或
+    // 403/11140 → 结构化 400。
     const { createServer } = await import('node:http')
     const { createBridge } = await import('../core/bridge.js')
     let mode = 'channel'
     let seen = null
+    const UPSTREAM_REPLIES = {
+      channel: [400, { code: 11128, msg: 'Illegal API invocation from an unapproved channel', requestId: 'r' }],
+      restricted: [403, {
+        code: 11140,
+        msg: 'request illegal',
+        requestId: 'req-11140-e2e',
+        displayMsg: { en: 'Your account has been restricted due to unusual activity', zh: '账号存在异常行为，已被限制使用' },
+      }],
+      other: [400, { code: 11101, msg: 'chat requires stream:true', requestId: 'r' }],
+    }
     const upstream = createServer((req, res) => {
       let body = ''
       req.on('data', (chunk) => { body += chunk })
       req.on('end', () => {
         try { seen = JSON.parse(body) } catch { seen = null }
-        res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify(mode === 'channel'
-          ? { code: 11128, msg: 'Illegal API invocation from an unapproved channel', requestId: 'r' }
-          : { code: 11101, msg: 'chat requires stream:true', requestId: 'r' }))
+        const [status, payload] = UPSTREAM_REPLIES[mode] ?? UPSTREAM_REPLIES.other
+        res.writeHead(status, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(payload))
       })
     })
     await new Promise((r) => upstream.listen(0, '127.0.0.1', r))
@@ -1237,6 +1283,19 @@ async function main() {
         JSON.stringify(seen?.messages?.[0]?.content).slice(0, 100))
       check(tag + ': 11128 回结构化 400', r.status === 400 && body.includes('codebuddy_channel_blocked'), body.slice(0, 180))
       check(tag + ': 用户可见文案带可执行提示', body.includes('已自动改写已知指纹'), body.slice(0, 200))
+    }
+    // 403/11140：流式与非流式两条路径都必须回结构化 400（宿主对 401/403 会
+    // 替换文案为「API 密钥无效」），且不能落进限流分支。
+    mode = 'restricted'
+    for (const stream of [true, false]) {
+      const rr = await chat(stream, RAW_SYS)
+      const rb = await rr.text()
+      const tag = `e2e 403/11140 stream=${stream}`
+      check(tag + ': 回结构化 400（不再是宿主 AUTH 文案）',
+        rr.status === 400 && rb.includes('codebuddy_account_restricted'), rb.slice(0, 200))
+      check(tag + ': 文案带真实原因 + requestId + 申诉指引',
+        rb.includes('账号存在异常行为') && rb.includes('req-11140-e2e') && rb.includes('申诉'), rb.slice(0, 260))
+      check(tag + ': 不被误当限流', !rb.includes('codebuddy_rate_limited'), rb.slice(0, 160))
     }
     mode = 'other'
     const r = await chat(true, RAW_SYS)

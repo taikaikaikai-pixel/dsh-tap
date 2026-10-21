@@ -135,18 +135,41 @@ export function createCodeBuddyProvider(deps) {
           rateLimit: { resetAt: rl.resetAt, resetText: rl.resetText },
         }
       }
+      // 4xx 的语义识别都从同一个 JSON 体取 code；非 JSON 体不特化、原样透传。
+      let parsed = null
+      if (status === 400 || status === 403) {
+        try { parsed = JSON.parse(body) } catch { parsed = null }
+      }
+      const upstreamCode = parsed?.code ?? null
       // 入口渠道校验层（2026-10-21）：400/11128。插件已改写已知 system 指纹
       // （channel-guard.js），走到这里说明上游又在灰度新规则或命中了未知指纹；
       // 翻成可辨识的 code + 可执行提示，别让用户只看到一串裸 JSON。
-      if (status === 400) {
-        let upstreamCode = null
-        try { upstreamCode = JSON.parse(body)?.code ?? null } catch { upstreamCode = null }
-        if (upstreamCode === 11128) {
-          return {
-            status: 400,
-            code: 'codebuddy_channel_blocked',
-            message: 'CodeBuddy 渠道校验未通过（11128）：上游按「非官方客户端 / 系统提示指纹」拦下了这次请求。插件已自动改写已知指纹；若仍出现，请确认已重启 dsh 载入最新版本，或稍后重试（上游可能在灰度更新校验规则）。',
-          }
+      if (status === 400 && upstreamCode === 11128) {
+        return {
+          status: 400,
+          code: 'codebuddy_channel_blocked',
+          message: 'CodeBuddy 渠道校验未通过（11128）：上游按「非官方客户端 / 系统提示指纹」拦下了这次请求。插件已自动改写已知指纹；若仍出现，请确认已重启 dsh 载入最新版本，或稍后重试（上游可能在灰度更新校验规则）。',
+        }
+      }
+      // 账号级风控封禁（2026-10-21 实测）：403/11140。
+      // 聊天面**全部模型**被拒，而 /v3/config（目录）、/v2/accounts、/agenttool
+      // 仍 200——所以设置卡「测试一下」照常显示正常，只有聊天失败。证据与处置
+      // 见 docs/diagnosis-codebuddy-11140.md。
+      //
+      // 状态码**刻意改写为 400**：宿主把 401/403 一律分类成 AUTH，并把失败行
+      // 文案替换为「API 密钥无效」（dsh-client-ui-chat `failureMessage`）——
+      // 真实原因被吞掉，还会把用户引向重登 / 换 key 的错误方向。400 不在该
+      // 替换名单里，宿主会原样显示本条 message；codebuddy 路由 retryPolicy
+      // `maxRetries: 0`，状态码变化不引入重试。语义上它不是请求错误，故 code
+      // 单列（`codebuddy_account_restricted`），调用方仍可结构化识别。
+      if (status === 403 && upstreamCode === 11140) {
+        const requestId = parsed?.requestId ?? null
+        return {
+          status: 400,
+          code: 'codebuddy_account_restricted',
+          message: 'CodeBuddy 账号被上游风控限制（11140 request illegal：账号存在异常行为，已被限制使用）——聊天面全部模型暂不可用，与 API Key / OAuth 令牌无关。'
+            + (requestId ? `申诉请带上 requestId ${requestId}。` : '')
+            + '可在 CodeBuddy 客户端「帮助与反馈」提交申诉，或等待数小时后重试；期间不要高频重试（高频会延长风控）。设置卡「测试一下」只验证目录面，仍会显示正常。',
         }
       }
       return null

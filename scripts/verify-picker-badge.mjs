@@ -55,7 +55,11 @@ const css = () => doc.querySelector().textContent;
 let pass = 0, fail = 0;
 const ok = (d, c, e = "") => { c ? (pass++, console.log(`  ok   ${d}`)) : (fail++, console.log(`  FAIL ${d}${e ? " — " + e : ""}`)) };
 
-const resetAt = new Date(2026, 9, 21, 11, 42).getTime(); // 本地 11:42，用来验"本地时钟现算"
+// 恢复时刻取「未来 30 分钟」并现算 HH:mm——fixture 禁绝对日期（踩坑 #38）：
+// 写死本地时刻的测试在钟点过后必然把「限流徽标」测成空（2026-10-21 实发）。
+const pad = (n) => String(n).padStart(2, "0");
+const resetAt = Math.floor((Date.now() + 30 * 60 * 1000) / 1000) * 1000;
+const resetHHMM = `${pad(new Date(resetAt).getHours())}:${pad(new Date(resetAt).getMinutes())}`;
 view = {
 	credits: { codebuddy: { "glm-5.3": "0.51" } },
 	bridge: { rateLimit: { model: "deepseek-v4.1-flash", resetAt, resetText: "2026-10-21 11:42:24 UTC+8 重置…", at: Date.now() } },
@@ -65,7 +69,7 @@ view = {
 console.log("[1] 加载即出徽标（搭全量 GET 的便车）");
 exports_.apply({ inject: () => {} });
 await flush();
-ok("限流徽标 + 本地时钟恢复时刻", css().includes('content:"限流中 · 11:42 恢复"'), css());
+ok("限流徽标 + 本地时钟恢复时刻", css().includes(`content:"限流中 · ${resetHHMM} 恢复"`), css());
 ok("排队徽标 + retryAfter", css().includes('content:"排队中 · 约30s"'));
 ok("倍率徽标同表共存", css().includes('content:"x0.51"'));
 ok("零额外请求", calls.length === 1, JSON.stringify(calls));
@@ -75,11 +79,11 @@ console.log("[1b] trigger 换锚点（label 是截断盒，行内末尾的 ::aft
 	const t = css();
 	const trig = 'button[aria-haspopup="menu"]:has([data-provider-id="codebuddy"][data-model-id="deepseek-v4.1-flash"])';
 	ok("trigger 规则挂在 button 上（:has 锚点）", t.includes(trig + "::after{order:1;flex:none;"), t);
-	ok("trigger 用短文案（限流 · 11:42，不带「恢复」）", t.includes('content:"限流 · 11:42"'));
+	ok("trigger 用短文案（限流 · HH:mm，不带「恢复」）", t.includes(`content:"限流 · ${resetHHMM}"`));
 	ok("label 盒里的同一枚被 content:none 关掉（不重复、不留空白碎片）",
 		t.includes(':has([data-provider-id="codebuddy"][data-model-id="deepseek-v4.1-flash"]) [data-provider-id="codebuddy"][data-model-id="deepseek-v4.1-flash"]::after{content:none}'));
 	ok("effort/箭头排到徽标之后（恰一条 order 规则）", t.split("nth-child(n+3){order:2}").length - 1 === 1, t);
-	ok("菜单/选项里仍是全文徽标", t.includes('content:"限流中 · 11:42 恢复"'));
+	ok("菜单/选项里仍是全文徽标", t.includes(`content:"限流中 · ${resetHHMM} 恢复"`));
 	ok("排队 trigger 短文案 = 排队", t.includes('content:"排队"'));
 	ok("倍率模型不被误关（仍走 label 盒）", !t.includes(':has([data-provider-id="codebuddy"][data-model-id="glm-5.3"])'));
 }

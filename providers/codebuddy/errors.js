@@ -24,6 +24,15 @@ export const ERROR_CODES = {
    *  变迁为 500/11128）；② system 消息精确句指纹（DSH 首句，2026-10-21 为
    *  400/11128，出站改写见 channel-guard.js）。docs/rules/content-moderation.md */
   11128: 'unapproved channel',
+  /** 账号级风控封禁（HTTP 403，"request illegal"）：聊天面**全部模型**被拒，
+   *  body 带 `displayMsg.zh`「账号存在异常行为，已被限制使用」与申诉提示。
+   *  边界：/v3/config（目录）、/v2/accounts、/agenttool 仍 200——所以设置卡
+   *  「测试一下」照常显示正常，只有聊天失败。刷新 access token / 重新登录
+   *  **无效**（已实测新令牌同拒）；只能带 requestId 申诉或等风控自解。
+   *  2026-10-21 实测。桥把它翻成 400 + `codebuddy_account_restricted`
+   *  （宿主对 401/403 恒显示「API 密钥无效」，会掩盖真实原因）。
+   *  证据与处置：docs/diagnosis-codebuddy-11140.md */
+  11140: 'account restricted (risk control)',
   /** 缺少必填参数（OAuth state 创建省略 platform 时观测）。docs/rules/oauth-handshake.md */
   10001: 'missing required parameter',
   /** OAuth token 轮询未完成——pending/bogus/过期三态同码，不可区分。docs/rules/oauth-handshake.md */
@@ -36,6 +45,14 @@ export const ERROR_CODES = {
    *  档位表只列实测/目录声明过的拼写。证据 docs/probes/codebuddy-efforts-*.json */
   11150: 'invalid_reasoning_effort',
 }
+
+/*
+ * 未入表的同族码说明：官方 CLI（`@tencent-ai/codebuddy-code` 2.170.0）的
+ * 静态分类表把 11140 / 11141 / 11142 与 17271–17276 一并归入 auth 族
+ * （11140 / 11142 = auth_forbidden，11141 = model_behavior_error）。其中只有
+ * 11140 在本仓线上实测过；其余号码未观测到真实响应，按本文件纪律
+ * **不入表、不写语义**，等实测再补。
+ */
 
 /**
  * 凭据不可用错误（组合根在候选为空时抛出；各出站路径凭 message 识别并
