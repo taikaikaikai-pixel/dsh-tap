@@ -24,6 +24,143 @@ import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { parseCredits, normalizeCredits, mergeCredits, creditTokenFromNumber, CREDIT_CHANNELS } from '../credits.js'
+
+/**
+ * 离线硬闸门：积分倍率提取（catalog.js `parseCredits`）。CI 用 `--list` 跑本脚本，
+ * 断言置于一切分支之前 ⇒ 任何模式都执行。口径见 docs/rules/quota-signals.md R-Q4：
+ * 只原样提取 token、不换算式；`x0.00` 必须原样保留（不可被 Number() 抹成 `0`）。
+ */
+function assertCreditsParser() {
+  const cases = [
+    ['x0.51 credits', '0.51'],
+    ['x0.00 credits', '0.00'],
+    ['x1 credits', '1'],
+    [undefined, null],
+    ['abc', null],
+  ]
+  const failed = []
+  for (const [raw, want] of cases) {
+    const got = parseCredits(raw)
+    if (got !== want) {
+      failed.push(`parseCredits(${JSON.stringify(raw)}) = ${JSON.stringify(got)}, want ${JSON.stringify(want)}`)
+    }
+  }
+  if (failed.length > 0) {
+    console.error(`credits parser FAIL ${failed.length}/${cases.length}`)
+    for (const line of failed) console.error(`  ${line}`)
+    process.exit(1)
+  }
+  console.log(`credits parser ${cases.length}/${cases.length} PASS`)
+}
+assertCreditsParser()
+
+/**
+ * 离线硬闸门：手填倍率归一化（credits.js `normalizeCredits`）——官方目录
+ * 没有倍率的模型（Trae/Qoder 全量、CodeBuddy 缺字段条目）由用户手填，服务端用它
+ * 做权威校验。非法输入必须抛错（→ HTTP 400），空值必须归一成 null（= 删除记录）。
+ */
+function assertCreditsNormalizer() {
+  const cases = [
+    ['0.5', '0.5'],
+    [' 2 ', '2'],
+    ['0.00', '0.00'],
+    ['999', '999'],
+    ['', null],
+    [null, null],
+    [undefined, null],
+  ]
+  const failed = []
+  for (const [raw, want] of cases) {
+    let got
+    try { got = normalizeCredits(raw) } catch (err) { got = `threw: ${err.message}` }
+    if (got !== want) {
+      failed.push(`normalizeCredits(${JSON.stringify(raw)}) = ${JSON.stringify(got)}, want ${JSON.stringify(want)}`)
+    }
+  }
+  for (const bad of ['abc', '-1', '1.234', '1000', '1e3']) {
+    let threw = false
+    try { normalizeCredits(bad) } catch { threw = true }
+    if (!threw) failed.push(`normalizeCredits(${JSON.stringify(bad)}) 应抛错但通过了`)
+  }
+  if (failed.length > 0) {
+    console.error(`credits normalizer FAIL ${failed.length}`)
+    for (const line of failed) console.error(`  ${line}`)
+    process.exit(1)
+  }
+  console.log(`credits normalizer ${cases.length + 5}/${cases.length + 5} PASS`)
+}
+assertCreditsNormalizer()
+
+/**
+ * 离线硬闸门：展示用合并表（credits.js `mergeCredits`）——设置卡与输入框模型选择器
+ * 共读这一份。不变量：**官方压手填**、非本插件通道被丢弃、垃圾输入退化为空表。
+ */
+function assertMergeCredits() {
+  const failed = []
+  const eq = (label, got, want) => {
+    if (JSON.stringify(got) !== JSON.stringify(want)) {
+      failed.push(`${label}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`)
+    }
+  }
+  const empty = { codebuddy: {}, trae: {}, qoder: {} }
+
+  eq('两表皆空', mergeCredits(undefined, undefined), empty)
+  eq('官方压手填', mergeCredits(
+    { codebuddy: { a: '0.10' } },
+    { codebuddy: { a: '0.90', b: '0.50' } },
+  ), { codebuddy: { a: '0.10', b: '0.50' }, trae: {}, qoder: {} })
+  eq('非本插件通道丢弃', mergeCredits(
+    { deepseek: { x: '1' }, codebuddy: { y: '0.20' } },
+    { trae: { z: '0.30' } },
+  ), { codebuddy: { y: '0.20' }, trae: { z: '0.30' }, qoder: {} })
+  eq('数组/字符串退化为空', mergeCredits(
+    { codebuddy: ['bad'] },
+    { trae: 'bad' },
+  ), empty)
+  eq('通道清单稳定', CREDIT_CHANNELS, ['codebuddy', 'trae', 'qoder'])
+
+  if (failed.length > 0) {
+    console.error(`credits merge FAIL ${failed.length}`)
+    for (const line of failed) console.error(`  ${line}`)
+    process.exit(1)
+  }
+  console.log('credits merge 5/5 PASS')
+}
+assertMergeCredits()
+
+/**
+ * 离线硬闸门：数值倍率 → 展示 token（credits.js `creditTokenFromNumber`）。
+ * Qoder 目录 2026-10 起用数字 `price_factor`（0 / 0.1 / 0.5 / 1.4），必须与 CodeBuddy
+ * 的字符串 token 同构；**零值统一成 "0.00"**——展示层靠这个字面量判定「零计费」绿调。
+ */
+function assertCreditTokenFromNumber() {
+  const cases = [
+    [0, '0.00'],
+    [0.5, '0.5'],
+    [0.1, '0.1'],
+    [1.4, '1.4'],
+    [2, '2'],
+    [0.333, '0.33'],
+    [NaN, null],
+    [-1, null],
+    [undefined, null],
+    ['abc', null],
+  ]
+  const failed = []
+  for (const [raw, want] of cases) {
+    const got = creditTokenFromNumber(raw)
+    if (got !== want) failed.push(`creditTokenFromNumber(${JSON.stringify(raw)}) = ${JSON.stringify(got)}, want ${JSON.stringify(want)}`)
+  }
+  if (failed.length > 0) {
+    console.error(`credits token FAIL ${failed.length}/${cases.length}`)
+    for (const line of failed) console.error(`  ${line}`)
+    process.exit(1)
+  }
+  console.log(`credits token ${cases.length}/${cases.length} PASS`)
+}
+assertCreditTokenFromNumber()
+
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const PATCH_FILE = join(ROOT, 'cordis.patch.yml')
 const BASE_URL = 'https://copilot.tencent.com/v2'

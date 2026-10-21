@@ -94,7 +94,7 @@
 - 网关：`https://copilot.tencent.com`；UA 门只认 `/codebuddy\/[^a-z\s]*\./i`（含点即可，版本数值不查）。
 - `/v2/chat/completions` 必须 `stream:true`（否则 11101），无 UA 门；`/agenttool/*` 当前无 UA 门。
 - 探测纪律：1.5s+ 间隔、单账号、只读优先；证据落 `docs/probes/<课题>-<日期>.jsonl`，预测须预注册（脚本内 expect 字段）。
-- 工作区注意：**2026-09-21 起正本在 Windows** `C:\Users\21613\dev\dsh-tap`（git 历史已通过本地 fetch 从 WSL 并入，v0.8.3 分支连续）；WSL 侧 `/root/dev/dsh-tap` 已退役留作备份，别再往那边改（见上「分支拓扑」节与下「上次会话 2026-09-21」）。
+- 工作区注意：**2026-09-21 起正本在 Windows** `C:\Users\<user>\dev\dsh-tap`（git 历史已通过本地 fetch 从 WSL 并入，v0.8.3 分支连续）；WSL 侧 `/root/dev/dsh-tap` 已退役留作备份，别再往那边改（见上「分支拓扑」节与下「上次会话 2026-09-21」）。
 
 ## desktop 适配 goal（2026-10-03，G3–G7 一轮落地，docs/goals/desktop-adaptation.md）
 
@@ -115,7 +115,7 @@
 2. **破坏性变化 = 配置持久化整体改向**（踩坑 #43）：`@deepseek-ai/dsh-settings-file` **被删除**（0.1.7-alpha.2 在 npm 上 404），`settings` 服务改由 `dsh-settings` 提供；`~/.dsh/settings.yaml` 降级为 legacy——首启由 Loader 稳定后**一次性导入** profile 的 `cordis.patch.yml`，随即改名 `settings.yaml.imported`；`ctx.settings.register(ns, schema)` **消失**（调用即 TypeError），改为 `configure({auto}, fiber)` + `describe/update/replace/mutate(ns=profile entry id, …, expectedRevision)`，只有 `.volatile()` 字段可表单编辑。新增 `dsh-config-editor`（`ctx.configEditor.edit()`，写 `profileContext.patchPath`）。`dsh-llm-pi-ai` 的 `providers` 恰好改成 `.volatile()` ⇒ 本插件的镜像/路由存在性管理能平移。**零破坏面**：`dsh-client-ui-slots`（`plugins.item` 仍在，另加 `plugins.detail.*`/`plugins.bundle.activation`）、`dsh-launch-environment`（哨兵 Authorization 机制不动）、`dsh-credentials(-local)`（`.credentials.yaml` 写路径不动）、`dsh-base` 三个 patch 行 id 不变；`dsh-package-manifest` 纯增量（`icon`、本地化 `title/description`、`bundle.patch` 可为数组）。
 3. **隔离实测的关键教训**：隔离 DSH_HOME（无本插件）下 `llm-pi-ai` 段被**整段拒绝导入**——因为段里 `codebuddy: {models:…}` 缺 `api`/`baseURL`，而基座路由由**本插件的 patch** 提供；真实 profile 下同一份文件导入成功（patch 1.6KB → 12KB，providers = codebuddy/kimi-coding/qoder）。⇒ 隔离实例的"段能否导入/校验"结论**不可外推**。
 4. **插件改动**：新增 `host-config.js`（宿主配置层能力选路：0.1.7+ 走 forms seam——写前比对同值不写、`SETTINGS_CONFLICT` 重读 revision 重试 ≤3 次、`writable===false` 降级为结果对象；≤0.1.6 回退注释保留的 settings.yaml 文档编辑；写入永不 reject，失败落 `lastError`）；`index.js` 四个 writer（codebuddy 模型镜像 / G6 provider 块 / trae / qoder 整块铺删）全部改成产出 `ops`，`readSettingsProviders()` 改读 `describe()` 的 live value；`attach(ctx)` 按能力选 `configure({auto:false})`（自带设置卡，宿主不再自动生成页面）或旧 `register('dsh-tap', Config)`；新增诊断 `GET /dsh-tap/settings?probe=host-config`。index.js 里**再无一处直写 settings.yaml**。设置卡两处文案与 G6/trae 注释同步改口径。
-5. **部署侧三必修**（都已做）：①`~/.dsh/profiles/web/package.json` 的 bundles 删掉 0.1.7 已移除的 `@deepseek-ai/dsh-experimental-agent-team-web-profile`（否则每次启动刷 `skipping profile bundle …cannot resolve`）；②`dsh-launcher/repair-profile-links.js`（删断链 72 条含 `dsh-settings-file`、补缺链 43 条含 `dsh-config-editor`/`dsh-client-ui-primitives`/`dsh-client-ui-slots`/`dsh-plugin-manager`）；③`dsh-launcher` 的 `start.js`/`stop.js` **实际不存在**（编排者是 tray.js），升级前必须按命令行杀进程，否则旧进程带着已替换的 node_modules 继续跑 = 混版半态。备份在 `C:\Users\21613\dev\dsh-update-backup-20260923\`（settings.yaml / .credentials.yaml / 两个 profile 的 package.json+patch+lock / launcher 的 package.json+lock + 275 行版本快照）。npm 的 allow-scripts 会跳过 `node-pty`/`koffi`/`dsh-subprocess-local` 的 install 脚本——**升级前后原生模块状态一致**（koffi 的真二进制来自 `@koromix/koffi-win32-x64` 预编译包），无回退。
+5. **部署侧三必修**（都已做）：①`~/.dsh/profiles/web/package.json` 的 bundles 删掉 0.1.7 已移除的 `@deepseek-ai/dsh-experimental-agent-team-web-profile`（否则每次启动刷 `skipping profile bundle …cannot resolve`）；②`dsh-launcher/repair-profile-links.js`（删断链 72 条含 `dsh-settings-file`、补缺链 43 条含 `dsh-config-editor`/`dsh-client-ui-primitives`/`dsh-client-ui-slots`/`dsh-plugin-manager`）；③`dsh-launcher` 的 `start.js`/`stop.js` **实际不存在**（编排者是 tray.js），升级前必须按命令行杀进程，否则旧进程带着已替换的 node_modules 继续跑 = 混版半态。备份在 `C:\Users\<user>\dev\dsh-update-backup-20260923\`（settings.yaml / .credentials.yaml / 两个 profile 的 package.json+patch+lock / launcher 的 package.json+lock + 275 行版本快照）。npm 的 allow-scripts 会跳过 `node-pty`/`koffi`/`dsh-subprocess-local` 的 install 脚本——**升级前后原生模块状态一致**（koffi 的真二进制来自 `@koromix/koffi-win32-x64` 预编译包），无回退。
 6. **验证**：新增 `scripts/verify-host-config.mjs`（**32 断言**，`npm run verify:host-config`）；存量六套件回归绿（verify-bridge / verify-core-generic / verify-rotation / verify-providers / verify-trae 89 / verify-qoder 154）。**真实实例端到端**（Windows :3090）18 PASS / 0 FAIL：桥聊天 `deepseek-v3.2` 回"可以" + `finish_reason=stop`、codebuddy+qoder OAuth 均 signedIn、桥 3901/翻译网关 3903 在听（trae 3902 未启用）、`probe=host-config` 全绿（`mode=forms`、`writable=true`、`documentPath=…\profiles\web\cordis.patch.yml`、`entryNs=llm-pi-ai rev=1 applies=live`、`autoGenerate=false`、`providerIds=[codebuddy,kimi-coding,qoder]`、无 attach/last 错误），且 profile patch 被镜像**实时改写**（陈旧导入清单 → 当前网关实况 36 个模型 id）。
 7. **WSL 侧**：全局 dsh 一并升到 `0.1.7-alpha.2`（`npm i -g`，41s；profile 无残留 bundle 引用；复验 `dsh --version` = 0.1.7-alpha.2、`/usr/local/bin/dsh`、`npm ls -g` 一致）。**legacy 导入在 WSL 也已发生**（本会话内一次启动触发）：`/root/.dsh/settings.yaml` 已不存在，改名件 `settings.yaml.imported`（3936 B）+ `profiles/web/cordis.patch.yml` 3950 B 含 `dsh-llm-pi-ai` 段（**12 个模型** = 那份陈旧 settings.yaml 的内容，不是 Windows 侧的 28）；备份 `/root/dsh-update-backup-20260923/{settings.yaml,profile-web-cordis.patch.yml}`。WSL 当前**无 dsh 进程、无监听端口**（只有 systemd-resolved），状态干净。**注意**：WSL 的 `/root/dev/dsh-tap` 自 2026-09-21 起已退役为备份（见「关键运行环境事实」），未同步本次插件改动（git head `8c0aa87`，落后 Windows 正本 `b1856ff` 8 个提交，工作树干净）⇒ 若在 WSL 起 dsh，插件会跑**未适配**代码（`register` 报错被 try/catch 兜住不致命，但模型镜像会写进已改名的死文件 = 静默失效，且会把导入好的 12 条清单当作"当前实况"读回）。要复活 WSL 侧必须先从 Windows 正本整树同步（不能只拷 index.js/host-config.js——WSL 树缺 Windows 领先 8 个提交里的 `providers/codebuddy/catalog.js` 等配套改动）。
 8. **待办**：①**【已销账 · 0.10.0 跨分支终审】**~~浏览器端回归未跑（`dsh-ui-test/` 的 step20/22/25… 与 `qoder-slot-check.js`）——设置卡在 0.1.7 Plugin Manager 里的渲染与八标签交互需实测一轮~~：本条先由下面第 10 条完成（八标签时代口径），随后**整个前提被 0.10.0 通道手风琴重设计作废**——八标签 UI 已退役、`card-regression.js` 同日退役删除，设置卡回归现在是 **`dsh-ui-test/card-accordion.js`（唯一套件，终审残余与复审修复后 **129** 通过 / 0 失败）** + `qoder-slot-check.js` 13 / `qoder-tab-phase2.js` 11 / `qoder-prefs-check.js` 37 + `shots-baseline.js` 10 张**元素级**明暗基线，均已在 `:3090` 活实例上实测绿且零真实写入；**留下的不是"没跑"，而是口径变更**：新结构的驱动方式是"点 `.cbc-acc-toggle[data-block=<id>]` 再查 `.cbc-acc-body[data-block=<id>]`"，选择器清单与断言处置表已固化进 `card-accordion.js` 头注释（详见 CHANGELOG 0.10.0）；②`0.1.7` 新增的 `icon` / 本地化 `title`+`description` 清单字段可选接入（Plugin Manager 卡片观感），未做；③`bundle.patch` 现可为数组，未来拆分 patch 时可用；④上游 alpha 线仍会变，复跑 `npm pack` 逐包 diff + `verify-host-config` + `?probe=host-config` 三件套即可复检。
@@ -174,7 +174,7 @@
 
 1. **Qoder CN 通道 Phase 1 接线**（v0.9.7）：providers/qoder/oauth.js 接入组合根——Config 三字段（qoderLoginHost/qoderOpenapiBaseURL/qoderClientId）+ SETTINGS_FIELDS + `createQoderOAuth` 绑 `~/.dsh/qoder-plugin-auth.json` + 路由 `qoder-oauth-start/-status/-logout` + GET 视图 `qoder.oauth`；设置卡新增第 8 标签「Qoder CN」（登录/登出/状态/高级连接折叠组）。仅登录；聊天面与目录待 COSY WASM 签名（docs/goals/qoder-cn-provider-design.md §5b，Phase 2a 是唯一前置）。
 2. **dsh 0.1.6 设置卡迁移**（踩坑 #34）：0.1.5-rc.2 → 0.1.6-alpha.2 拆除了 `settings.plugin.item` 槽，卡片"消失且零报错"（dshmarket 同受害）。修复 = 双槽注册（Plugin Manager `plugins.item` + 旧槽回退）+ 卡片按 `{view}` 分形（summary 一行简介 / page embedded 常开）+ package.json 删掉已不存在的 `@deepseek-ai/dsh-client-runtime`。
-3. **验证**：四个离线套件全绿（verify-qoder-provider 65 / verify-providers / verify-rotation / verify-bridge）；dsh 0.1.6-alpha.2 真实实例（:3099）API 端到端（GET 含 qoder.oauth 脱敏、oauth-start 出合法 S256 授权 URL、pending 超时自愈令牌不动）；Windows 侧重建浏览器 harness（`C:\Users\21613\dev\dsh-ui-test\qoder-slot-check.js`）10/10。改动未同步 WSL 侧（两边手工同步纪律照旧）。
+3. **验证**：四个离线套件全绿（verify-qoder-provider 65 / verify-providers / verify-rotation / verify-bridge）；dsh 0.1.6-alpha.2 真实实例（:3099）API 端到端（GET 含 qoder.oauth 脱敏、oauth-start 出合法 S256 授权 URL、pending 超时自愈令牌不动）；Windows 侧重建浏览器 harness（`C:\Users\<user>\dev\dsh-ui-test\qoder-slot-check.js`）10/10。改动未同步 WSL 侧（两边手工同步纪律照旧）。
 4. 注意：`scripts/probe-qoder-live.mjs --login` 时代的真实令牌仍在 `~/.dsh/qoder-plugin-auth.json`，别在测试里调 `qoder-oauth-logout`（会清令牌；pending 超时无害可随便起）。
 
 ## 上次会话（2026-08-19）干了什么
@@ -192,3 +192,30 @@
 课题 6（同日晚）规则成立：新建 `scripts/probe-moderation.mjs`，6 条证据定位 developer 拒绝在**网关入口通道校验层**（模型无关 P-M1✓、位置无关 P-M3✓、计费前无 usage、system 控制臂放行 P-M4✓）；**拒绝面已变迁**：200/content_filter（08-18）→ 500/11128 "unapproved channel"（现在）；P-M5 推翻"角色白名单"（hacker 角色放行）锁定为**字面量 developer 单列拒绝**。case 变体按红线刻意不测。产出 `docs/rules/content-moderation.md`。
 
 六课题全部关闭；架构重构（完成标准 2、3）同日晚完成：core/ + providers/codebuddy/ 切分落地、证伪测试 verify-core-generic 全绿、四项回归全绿。长期目标三条完成标准至此全部满足。剩余未解子项（UA 宽松路径 flapping、oauth token 权限边界/refresh 轮换、耗尽错误码、账号维度路由）均为探测红线或单账号限制的诚实标注，解锁条件见各规则文档。
+
+## 渠道校验 system 指纹闸门（2026-10-21 定案，0.21.0）
+
+> 状态：**规则成立 + 已修**。驱动：用户报「使用 CodeBuddy 的模型有新提示 400/11128」。
+> 根因：上游渠道校验层对 system 消息里的精确句 `You are an AI agent powered by DeepSeek Harness.`（DSH 系统提示首句）返回 400/11128 "Illegal API invocation from an unapproved channel"；与 UA/headers/模型无关，只扫 system/developer，整句判定（去句号仍拒、单独品牌词放行、同句放 user 放行）。
+> 定位关键：从失败会话 transcript 取**真实 messages**（system 7.5KB + 5 条上下文 + 40 个工具）原样回放稳定复现；短 system 手搓请求全 200，差点误判成账号风控。判据、A/B 与边界见 docs/rules/content-moderation.md R-M4、docs/rules/gateway-facts.md。
+> 修复：`providers/codebuddy/channel-guard.js` 在 `transformChatPayload` 改写 system/developer 指纹（`powered by DeepSeek Harness` → `powered by the host harness`）；`describeUpstreamError` 把 400/11128 翻 `codebuddy_channel_blocked`；`core/bridge.js` 4xx 语义翻转从仅 429 泛化到全部 4xx（无特化语义原样透传）。
+> 验证：`verify-bridge [20]` 22 断言；`scripts/probe-codebuddy-channel.mjs` 四臂 PASS（证据 docs/probes/codebuddy-channel-2026-10-21.json）；改后代码起临时桥回放真实失败 payload → 200 SSE 出正文；`verify-qoder-provider` 日期夹具顺带修为相对时间（200/0）。
+> 生效：providers/ + core/ + index.js 属宿主半 ⇒ 重启 dsh / 退出并重启桌面应用；踩坑 #70。
+
+## 重试策略分流（2026-10-21 定案，0.21.0）
+
+> 状态：**已落地**。驱动：用户要求排队态在「原重试次数位置」显示排队中并每 30s 重试到结束；非排队失败不再重试 5 次。
+> 宿主事实（读 `dsh-llm-retry` + `dsh-llm-pi-ai` 源码）：provider 块 `retryPolicy` 决定重试；normal 模式只认 `retryableCodes`；**pi-ai 不传 Retry-After**（`providerRetryAfterMs` 恒空）⇒ 固定 30s 要 `initialDelayMs=maxDelayMs=30000`、jitter 0；429 排队/额度同分类 `RATE_LIMIT` ⇒ 额度消息加 `usage limit exceeded` 让 `isQuotaExceededError` 先匹配成 `QUOTA`。
+> 落位：codebuddy/trae `maxRetries:0`；qoder `maxRetries:2880 + RATE_LIMIT + 30s`；codebuddy policy 双写 patch 与用户层（desktop 完整块，踩坑 #54）。
+> UI：`lib/client.js` 的 `conversation.input.dock` 新条目 `dsh-tap-queue`，用 `useChat` 读 `model-retry` 节点，显示「排队中 · 预计 N 秒后重试」并隐藏宿主重试行；非排队 provider 不受影响。
+> 验证：verify-picker-badge 26（含 `[1b]` trigger 换锚点 7 断言）、qoder 202/0、trae 142、bridge [17] 新断言；踩坑 #71、#72。
+> 生效：index.js + providers/qoder 属宿主半 ⇒ 重启 dsh / 桌面应用；浏览器半刷新页面。
+
+## 版本记录合并（2026-10-21）
+
+> 状态：**已合并**。驱动：用户要求「合并并整理 0.21.0 ～ 0.36.0 的更新记录，重新记录为 0.21.0，注意脱敏」。
+> 背景：`v0.20.0` 是最后一个带 tag 的发布；之后 16 个开发批次只改 `package.json` 与 CHANGELOG、从未发版也无 tag ⇒ 「版本号跑到 0.36.0、tag 停在 0.20.0」的错位（处理口径同 2026-09-23 的「0.9.10（未发布）转正式发版节」）。
+> 动作：CHANGELOG 的 0.21.0–0.36.0 十六节**合并为一条 `0.21.0`**（按主题归并、去掉开发期迭代叙事、保留硬事实与证据指针）；`package.json` 0.36.0 → **0.21.0**；annotated tag `v0.21.0` 打在发布提交上（此前本地误打的 `v0.36.0` 已撤）；仓库内版本引用（wiki / docs / 代码与套件注释）统一改写为 `0.21.0`，指代开发期先后的措辞改为「早期做法 / 同版补全 / 退回装新规则前」。
+> 脱敏（公开仓库）：CHANGELOG 移除账号 uid、邮箱、账号侧额度与用量绝对值、逐通道请求数，改用「账号 A / 账号 B」与量级比；第二轮（同日）把 `docs/probes/` 等 40 个文件里的账号 uid 与机器用户名一并替换为占位符 `acct-A` / `acct-B` / `<user>`（只改标识、不改结论与数值），仓库内容面至此不再出现账号标识。
+> 历史压缩（同日，用户要求「从 `0d7776c` 开始压缩」）：`0d7776c`..`ac2e9a1` 共 18 个开发提交压成 1 个，提交总数 152 → 135，树逐字节不变；26 个 tag 全部落在压缩点之前故不受影响。备份 = 分支 `backup/pre-squash-*` + 全量 bundle。**注意压缩只改历史、不改内容**：tip 提交的树里仍带着未打码的 `docs/probes/`，故本轮按「先打码、后压缩」的顺序把打码并入该压缩提交。更早的 12/15 个提交（2026-09-03 起）仍含账号标识与机器名，是否继续前移压缩点待定。
+> 纪律：此后不在「未发版」状态下推进 `package.json` 版本号——先发版（commit + annotated tag + push）再开下一轮，避免同类错位复发。

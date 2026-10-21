@@ -7,7 +7,7 @@
       "step": "before",
       "data": {
         "quotaUsage": {
-          "userId": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0",
+          "userId": "acct-B",
           "userType": "personal_standard",
           "usageType": "credits",
           "totalUsagePercentage": 0.92,
@@ -33,7 +33,7 @@
           "isPlanQuotaProrated": false
         },
         "quotaUsageOuter": {
-          "userId": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0",
+          "userId": "acct-B",
           "userType": "personal_standard",
           "usageType": "credits",
           "totalUsagePercentage": 0.92,
@@ -65,7 +65,7 @@
         "meUsage": {
           "displayMode": "qoder",
           "qoderUsage": {
-            "userId": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0",
+            "userId": "acct-B",
             "userType": "personal_standard",
             "usageType": "credits",
             "totalUsagePercentage": 0.92,

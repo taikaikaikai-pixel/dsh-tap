@@ -16,6 +16,13 @@
  */
 
 import { USER_AGENT } from './headers.js'
+import { parseCredits } from '../../credits.js'
+
+/**
+ * 积分倍率的解析/归一化口径统一收在 credits.js（provider 无关，可离线测）。
+ * 此处原样再导出：既有 import 路径（scripts/verify-models.mjs）保持不变。
+ */
+export { parseCredits }
 
 /**
  * 「目录在列 ≠ /v2 可路由」的已知死条目（恒 11102 service info not found，
@@ -90,6 +97,8 @@ export function createCatalog({ resolveCredential, envKey }) {
           maxOutputTokens: m.maxOutputTokens ?? null,
           images: m.supportsImages === true,
           cli: cliEnabled.has(m.id),
+          // 积分倍率（展示口径，parseCredits 上方注释为裁判）；缺省 = null，卡片不出徽标。
+          credits: parseCredits(m.credits),
           reasoning: !!reasoning && (reasoning.effort != null || defaultEffort != null
             || supported != null || typeof reasoning.canDisableThinking === 'boolean'),
           // 目录标注的**默认**档（legacy 的 effort 或新形态的 defaultEffort）——

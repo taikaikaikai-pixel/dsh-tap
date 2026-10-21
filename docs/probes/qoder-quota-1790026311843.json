@@ -7,7 +7,7 @@
       "step": "before",
       "data": {
         "quotaUsage": {
-          "userId": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0",
+          "userId": "acct-B",
           "userType": "personal_standard",
           "usageType": "credits",
           "totalUsagePercentage": 0.05,
@@ -33,7 +33,7 @@
           "isPlanQuotaProrated": false
         },
         "quotaUsageOuter": {
-          "userId": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0",
+          "userId": "acct-B",
           "userType": "personal_standard",
           "usageType": "credits",
           "totalUsagePercentage": 0.05,
@@ -65,7 +65,7 @@
         "meUsage": {
           "displayMode": "qoder",
           "qoderUsage": {
-            "userId": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0",
+            "userId": "acct-B",
             "userType": "personal_standard",
             "usageType": "credits",
             "totalUsagePercentage": 0.05,
@@ -158,7 +158,7 @@
       "step": "after5s",
       "data": {
         "quotaUsage": {
-          "userId": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0",
+          "userId": "acct-B",
           "userType": "personal_standard",
           "usageType": "credits",
           "totalUsagePercentage": 0.05,
@@ -184,7 +184,7 @@
           "isPlanQuotaProrated": false
         },
         "quotaUsageOuter": {
-          "userId": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0",
+          "userId": "acct-B",
           "userType": "personal_standard",
           "usageType": "credits",
           "totalUsagePercentage": 0.05,
@@ -216,7 +216,7 @@
         "meUsage": {
           "displayMode": "qoder",
           "qoderUsage": {
-            "userId": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0",
+            "userId": "acct-B",
             "userType": "personal_standard",
             "usageType": "credits",
             "totalUsagePercentage": 0.05,
@@ -285,7 +285,7 @@
       "step": "after25s",
       "data": {
         "quotaUsage": {
-          "userId": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0",
+          "userId": "acct-B",
           "userType": "personal_standard",
           "usageType": "credits",
           "totalUsagePercentage": 0.05,
@@ -311,7 +311,7 @@
           "isPlanQuotaProrated": false
         },
         "quotaUsageOuter": {
-          "userId": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0",
+          "userId": "acct-B",
           "userType": "personal_standard",
           "usageType": "credits",
           "totalUsagePercentage": 0.05,
@@ -343,7 +343,7 @@
         "meUsage": {
           "displayMode": "qoder",
           "qoderUsage": {
-            "userId": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0",
+            "userId": "acct-B",
             "userType": "personal_standard",
             "usageType": "credits",
             "totalUsagePercentage": 0.05,

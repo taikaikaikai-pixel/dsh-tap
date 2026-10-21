@@ -1,10 +1,10 @@
 {
   "status": 200,
   "body": {
-    "id": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0",
+    "id": "acct-B",
     "name": "aliyun1985984145",
     "username": "7e6bc229-9b16-4539-a9ea-f8a15a200e18",
-    "avatar": "https://qoder.com.cn/users/019efdac-1bf3-792a-a63d-1b94c1ea9fb0/default/avatars",
+    "avatar": "https://qoder.com.cn/users/acct-B/default/avatars",
     "source": "sso.aliyun",
     "current_sign_in_at": {
       "seconds": 1789382095,

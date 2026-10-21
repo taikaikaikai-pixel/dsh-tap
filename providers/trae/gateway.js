@@ -558,7 +558,7 @@ export function createTraeGateway(deps) {
           usage: usage ?? {},
         }))
       }
-      if (usage) deps.meter.record({ ts: t0, kind: 'chat', model: actualModel || null, usage })
+      if (usage) deps.meter.record({ ts: t0, kind: 'chat', model: actualModel || null, usage, channel: 'trae' })
       gwLog({ dir: 'out', transport: 'remote', model, actualModel, ms: Date.now() - t0, usage })
     } catch (err) {
       if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json' })
@@ -752,7 +752,7 @@ export function createTraeGateway(deps) {
           usage: usage ?? {},
         }))
       }
-      if (usage) deps.meter.record({ ts: t0, kind: 'chat', model: actualModel || null, usage })
+      if (usage) deps.meter.record({ ts: t0, kind: 'chat', model: actualModel || null, usage, channel: 'trae' })
       gwLog({ dir: 'out', model, actualModel, rerouted: actualModel !== model, ms: Date.now() - t0, bytes: content.length, usage, finishReason, fn: fnValue })
       return 'done'
     }

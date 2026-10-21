@@ -233,6 +233,37 @@ async function main() {
     check('credit recorded as 0 when the upstream has no credit field', v.totalCredit === 0)
     check('tokens recorded', v.recent[0]?.prompt === 5 && v.recent[0]?.completion === 2,
       JSON.stringify(v.recent[0]))
+    // 逐通道归属：bridge 由组合根注入 channel（core/ 不认识上游），未注入归 unknown。
+    check('byChannel 按注入的 channel 分桶（本套件未注入 → unknown）',
+      Object.keys(v.byChannel).length === 1 && v.byChannel.unknown?.requests === 5,
+      JSON.stringify(v.byChannel))
+  }
+
+  console.log('\n[R5b] 通道归属与可疑值判定（纯 meter 语义，不走网络）')
+  {
+    const m2 = createUsageMeter({ path: join(tmp, 'usage2.json') })
+    const base = { kind: 'chat', model: 'm1' }
+    // 正常量级：0.4 credit / 40 万 prompt token（≈1e-6）
+    m2.record({ ...base, ts: Date.now(), channel: 'alpha', usage: { prompt_tokens: 400000, completion_tokens: 100, credit: 0.4 } })
+    // 另一个通道，正常
+    m2.record({ ...base, ts: Date.now(), channel: 'beta', usage: { prompt_tokens: 100000, completion_tokens: 50, credit: 0.2 } })
+    // 可疑：496 credit / 46 万 token（≈1.08e-3，正常量级 900 倍）
+    m2.record({ ...base, ts: Date.now(), channel: 'alpha', usage: { prompt_tokens: 460000, completion_tokens: 900, credit: 496 } })
+    // 短对话保护：prompt 很小但 credit 未超下限 2 → 不算可疑
+    m2.record({ ...base, ts: Date.now(), channel: 'beta', usage: { prompt_tokens: 50, completion_tokens: 10, credit: 1.5 } })
+    const v2 = m2.view()
+    check('可疑值不进通道合计', v2.byChannel.alpha.credit === 0.4 && v2.byChannel.alpha.requests === 1,
+      JSON.stringify(v2.byChannel.alpha))
+    check('可疑值单独记账', v2.byChannel.alpha.suspectCredit === 496 && v2.byChannel.alpha.suspectRequests === 1,
+      JSON.stringify(v2.byChannel.alpha))
+    check('短对话不误判', v2.byChannel.beta.suspectRequests === 0 && v2.byChannel.beta.credit === 1.7,
+      JSON.stringify(v2.byChannel.beta))
+    check('总量仍含可疑值（不静默改写历史）', v2.totalCredit === 498.1, String(v2.totalCredit))
+    check('未传 channel → unknown（不按 model id 猜）', v2.byChannel.unknown === undefined,
+      JSON.stringify(Object.keys(v2.byChannel)))
+    m2.record({ ...base, ts: Date.now(), usage: { prompt_tokens: 1000, completion_tokens: 10, credit: 0.1 } })
+    check('缺省通道归 unknown', m2.view().byChannel.unknown?.requests === 1)
+    m2.dispose()
   }
 
   console.log('\n[R6] developer role passes through UNCHANGED (rewrite is adapter-owned)')

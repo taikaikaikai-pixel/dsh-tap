@@ -33,6 +33,7 @@ jobs:
     - run: node scripts/verify-trae-provider.mjs
     - run: node scripts/verify-qoder-provider.mjs
     - run: node scripts/verify-host-config.mjs
+    - run: node scripts/verify-picker-badge.mjs
     - run: node scripts/verify-agents-md.mjs
     - name: desktop 适配可执行验收·结构闸门（goal 验收的机器可判恒真部分）
       # --structural：CI 只锁 A 组离线结构性不变量（index.js 无 desktop 特化 / 差异收口 / goal 锚点）——

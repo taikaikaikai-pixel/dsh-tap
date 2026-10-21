@@ -62,7 +62,7 @@
         "schema"
       ],
       "writable": true,
-      "documentPath": "C:\\Users\\21613\\.dsh\\profiles\\desktop\\cordis.patch.yml",
+      "documentPath": "C:\\Users\\<user>\\.dsh\\profiles\\desktop\\cordis.patch.yml",
       "entryFound": true,
       "entryNs": "llm-pi-ai",
       "entryRevision": 0,
@@ -105,7 +105,7 @@
       ],
       "attachError": null,
       "lastError": null,
-      "legacySettingsPath": "C:\\Users\\21613\\.dsh\\settings.yaml",
+      "legacySettingsPath": "C:\\Users\\<user>\\.dsh\\settings.yaml",
       "legacyExists": false
     }
   },
@@ -158,7 +158,7 @@
         "needsRelogin": false,
         "account": {
           "nickname": "aliyun1985984145",
-          "uid": "019efdac-1bf3-792a-a63d-1b94c1ea9fb0"
+          "uid": "acct-B"
         },
         "accessTokenExpiresAt": 1792693520000,
         "refreshExpiresAt": 1821205520000,
@@ -206,7 +206,7 @@
   },
   "processTopology": {
     "desktopShell": "PID 11660 DeepSeek Harness.exe (Electron 44.0.0)",
-    "desktopHost": "PID 30212 DeepSeek Harness.exe --expose-internals ...app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js <asar dsh> C:/Users/21613/.dsh/profiles/desktop <primary-runtime> <pnpm.mjs> <runtime/bin> :19387",
+    "desktopHost": "PID 30212 DeepSeek Harness.exe --expose-internals ...app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js <asar dsh> C:/Users/<user>/.dsh/profiles/desktop <primary-runtime> <pnpm.mjs> <runtime/bin> :19387",
     "webInstance": "PID 26028 node.exe .../dsh-launcher/node_modules/@deepseek-ai/dsh/lib/bin.js web --no-open --port 3090 —— 先占 3901+3903",
     "netstat": "127.0.0.1:19387 LISTENING 30212; 127.0.0.1:3901 LISTENING 26028; 127.0.0.1:3903 LISTENING 26028; 3902 未监听"
   },

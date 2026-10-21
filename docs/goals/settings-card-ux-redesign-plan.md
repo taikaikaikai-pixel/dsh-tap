@@ -22,24 +22,24 @@
 - 后端契约零变化：`GET /dsh-tap/settings` 与全部 `POST {patch}` / `{action}` 的名称、参数、响应结构不动。
 - 测试纪律：浏览器回归的 mock 通道**零真实写入**（跑前跑后对 `~/.dsh/codebuddy-plugin.json` 取哈希对账）；选择器一律按 `.cbc-*` 类精确匹配（模糊匹配曾误删 Key）。
 - **mock 隔离纪律**：`page.evaluateOnNewDocument` 装的 fetch 补丁**跨 reload 持久**——所有 mock 组一律用 `newPage(installer)` 开独立页面，主页面 `page` 自始至终不装 mock（否则后续组的 `getView(page)` 会被上一个 mock 拦掉，读到假视图）。
-- `dsh-ui-test/` 在**仓库外**（`C:/Users/21613/dev/dsh-ui-test`）——它的改动**不进 git**，每个任务的 `git add` 只含仓库内文件。
+- `dsh-ui-test/` 在**仓库外**（`C:/Users/<user>/dev/dsh-ui-test`）——它的改动**不进 git**，每个任务的 `git add` 只含仓库内文件。
 - 文档中出现的 `lib/client.js` 行号均为提交 `4d41f8d` 时的位置；实施时**以 grep 锚点定位为准**（行号会随任务推进漂移）。
 
 ## 测试环境速查（所有任务共用）
 
-已实测（2026-09-23）：Windows 侧 `dsh` 不在 PATH，可执行入口在 launcher 的 node_modules；`~/.dsh/profiles/web/package.json` 用 `link:C:/Users/21613/dev/dsh-tap` 指向本仓库 ⇒ **改 `lib/client.js` 后刷新页面即生效，无需重装**。
+已实测（2026-09-23）：Windows 侧 `dsh` 不在 PATH，可执行入口在 launcher 的 node_modules；`~/.dsh/profiles/web/package.json` 用 `link:C:/Users/<user>/dev/dsh-tap` 指向本仓库 ⇒ **改 `lib/client.js` 后刷新页面即生效，无需重装**。
 
 ```bash
 # ① 起测试服务（后台；启动行打印一次 token）
-cd /c/Users/21613/dev/dsh-launcher && ./node_modules/.bin/dsh web \
-  > /c/Users/21613/dev/dsh-ui-test/dsh-web.log 2>&1 &
+cd /c/Users/<user>/dev/dsh-launcher && ./node_modules/.bin/dsh web \
+  > /c/Users/<user>/dev/dsh-ui-test/dsh-web.log 2>&1 &
 sleep 8
-grep -o 'token=[A-Za-z0-9_.-]*' /c/Users/21613/dev/dsh-ui-test/dsh-web.log | head -1
+grep -o 'token=[A-Za-z0-9_.-]*' /c/Users/<user>/dev/dsh-ui-test/dsh-web.log | head -1
 #   ↑ 取到的值拼成 http://127.0.0.1:3080/?token=<TOKEN>
 #   若 grep 不中，直接看 dsh-web.log 的启动行（token 只打印一次）
 
 # ② 跑回归
-cd /c/Users/21613/dev/dsh-ui-test && node card-accordion.js "http://127.0.0.1:3080/?token=<TOKEN>"
+cd /c/Users/<user>/dev/dsh-ui-test && node card-accordion.js "http://127.0.0.1:3080/?token=<TOKEN>"
 
 # ③ 收尾：杀掉 3080（Windows 无 pkill；按 PID 杀，别用 taskkill //IM node.exe）
 netstat -ano | grep ':3080' | head -3      # 最后一列是 PID
@@ -55,7 +55,7 @@ md5sum ~/.dsh/codebuddy-plugin.json   # 跑前 / 跑后各一次，必须一致
 离线回归（Task 9 收尾跑全量；纯前端改动预期零影响，作为保险）：
 
 ```bash
-cd /c/Users/21613/dev/dsh-tap
+cd /c/Users/<user>/dev/dsh-tap
 npm run verify:bridge && npm run verify:core && npm run verify:providers \
   && npm run verify:trae-provider && npm run verify:qoder && npm run verify:host-config \
   && node scripts/verify-models.mjs --list
@@ -67,7 +67,7 @@ npm run verify:bridge && npm run verify:core && npm run verify:providers \
 
 **Files:**
 - Modify: `lib/client.js` — CSS 块（grep 锚点 `".cbc-help summary:hover"` 之后追加）、`TAB_DEFS`（`:363`）、`CodeBuddyCard`（`:381`–`:611`）、`tabBadge`（`:682`–`:712`，整个函数删除）、各 `PANEL_RENDERERS.x = Y`（8 处）
-- Create: `C:/Users/21613/dev/dsh-ui-test/card-accordion.js`（仓库外，不进 git）
+- Create: `C:/Users/<user>/dev/dsh-ui-test/card-accordion.js`（仓库外，不进 git）
 
 **Interfaces:**
 - Consumes: `buildChips(data)`（`:619`，返回 `{login,models,bridge,search,image,trae,qoder}`，每项 `{tone,text,tab,tabTitle}`）、`Dot({tone})`、`PanelBoundary`、8 个分区组件（`LoginSection`/`ModelsSection`/`UsageSection`/`ToolsSection`/`ProvidersSection`/`TraeSection`/`QoderSection`/`BridgeAdvancedSection`）、`overriddenFor(data)`、`fetchWithTimeout`、`settleGateways`
@@ -84,7 +84,7 @@ npm run verify:bridge && npm run verify:core && npm run verify:providers \
 
 - [x] **Step 1: 写失败的回归脚本（新套件，从零建）**
 
-创建 `C:/Users/21613/dev/dsh-ui-test/card-accordion.js`，完整内容：
+创建 `C:/Users/<user>/dev/dsh-ui-test/card-accordion.js`，完整内容：
 
 ```js
 // dsh-tap 设置卡「通道手风琴」回归套件。
@@ -254,9 +254,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 - [x] **Step 2: 跑一次确认红**
 
 ```bash
-cd /c/Users/21613/dev/dsh-launcher && ./node_modules/.bin/dsh web > /c/Users/21613/dev/dsh-ui-test/dsh-web.log 2>&1 &
-sleep 8 && grep -o 'token=[A-Za-z0-9_.-]*' /c/Users/21613/dev/dsh-ui-test/dsh-web.log | head -1
-cd /c/Users/21613/dev/dsh-ui-test && node card-accordion.js "http://127.0.0.1:3080/?token=<TOKEN>"
+cd /c/Users/<user>/dev/dsh-launcher && ./node_modules/.bin/dsh web > /c/Users/<user>/dev/dsh-ui-test/dsh-web.log 2>&1 &
+sleep 8 && grep -o 'token=[A-Za-z0-9_.-]*' /c/Users/<user>/dev/dsh-ui-test/dsh-web.log | head -1
+cd /c/Users/<user>/dev/dsh-ui-test && node card-accordion.js "http://127.0.0.1:3080/?token=<TOKEN>"
 ```
 
 Expected: `[A1]`–`[A6]` 全 FAIL（`.cbc-acc*` 尚不存在，`st.ids` 为 `[]`），`[0]` 两条 ok，退出码 1。
@@ -488,7 +488,7 @@ Expected: `[A1]`–`[A6]` 全 FAIL（`.cbc-acc*` 尚不存在，`st.ids` 为 `[]
 - [x] **Step 7: 跑回归确认绿**
 
 ```bash
-cd /c/Users/21613/dev/dsh-ui-test && node card-accordion.js "http://127.0.0.1:3080/?token=<TOKEN>"
+cd /c/Users/<user>/dev/dsh-ui-test && node card-accordion.js "http://127.0.0.1:3080/?token=<TOKEN>"
 ```
 
 Expected: `[A1]`–`[A7]` 全 ok（14 通过 / 0 失败），退出码 0。刷新页面即生效（profile 已 link 本仓库）；若断言全红先确认没有浏览器缓存（脚本已带 `--disable-http-cache`）。
@@ -496,7 +496,7 @@ Expected: `[A1]`–`[A7]` 全 ok（14 通过 / 0 失败），退出码 0。刷�
 - [x] **Step 8: 提交**
 
 ```bash
-cd /c/Users/21613/dev/dsh-tap
+cd /c/Users/<user>/dev/dsh-tap
 git add lib/client.js
 git commit -m "feat(client): 设置卡改通道手风琴骨架（4 区块 + 区块头状态行 + 懒挂载）"
 ```
@@ -509,7 +509,7 @@ git commit -m "feat(client): 设置卡改通道手风琴骨架（4 区块 + 区�
 
 **Files:**
 - Modify: `lib/client.js` — `buildChips`（grep 锚点 `function buildChips(data) {`）、`CodeBuddyCard` 里的 `headChips`（锚点 `var headChips = null;`）与 `attn`/`strip`（锚点 `var attn = [chips.login`）、`gatewayPending`（锚点 `var gatewayPending = function (d) {`）
-- Modify: `C:/Users/21613/dev/dsh-ui-test/card-accordion.js`（追加断言）
+- Modify: `C:/Users/<user>/dev/dsh-ui-test/card-accordion.js`（追加断言）
 
 **Interfaces:**
 - Consumes: Task 1 的 `blockStatus`/`BlockHead`/`.cbc-acc-*` DOM 契约、`settleGateways`/`GATEWAY_SETTLE_DELAYS`
@@ -715,7 +715,7 @@ Expected: 与跑前一致（`[B3]`/`[B4]` 全走 mock，不应有任何真实写
 - [x] **Step 6: 提交**
 
 ```bash
-cd /c/Users/21613/dev/dsh-tap && git add lib/client.js
+cd /c/Users/<user>/dev/dsh-tap && git add lib/client.js
 git commit -m "feat(client): 状态收敛到区块头——删注意条/折叠三芯片/标签徽标与品牌前缀"
 ```
 
@@ -725,7 +725,7 @@ git commit -m "feat(client): 状态收敛到区块头——删注意条/折叠�
 
 **Files:**
 - Modify: `lib/client.js` — `CodeBuddyCard` 的 `blocks` 构造（Task 1 Step 6e）、`TraeSection` 的「启用通道」行（`:1628`–`:1635`）、`QoderSection` 的「启用通道」行（`:1897`–`:1904`）
-- Modify: `C:/Users/21613/dev/dsh-ui-test/card-accordion.js`
+- Modify: `C:/Users/<user>/dev/dsh-ui-test/card-accordion.js`
 
 **Interfaces:**
 - Consumes: `BlockHead` 的 `control` 槽、`saveIn(blockId)`、`data.value.traeEnabled`/`qoderEnabled`、`overriddenFor(data)`
@@ -843,7 +843,7 @@ Expected: 全部 ok（26 + 6 = 32 通过 / 0 失败）。
 
 ```bash
 md5sum ~/.dsh/codebuddy-plugin.json   # 必须与跑前一致
-cd /c/Users/21613/dev/dsh-tap && git add lib/client.js
+cd /c/Users/<user>/dev/dsh-tap && git add lib/client.js
 git commit -m "feat(client): Trae/Qoder 启用开关上移到区块头（收起态可直读可直控）"
 ```
 
@@ -853,7 +853,7 @@ git commit -m "feat(client): Trae/Qoder 启用开关上移到区块头（收起�
 
 **Files:**
 - Modify: `lib/client.js` — `BridgeAdvancedSection`（`:1933`–`:1986`，拆成「网关」+「高级」两组）、`TraeSection` 的「连接域名」折叠组（`:1673`–`:1683`）、`QoderSection` 的「连接域名」折叠组（`:1916`–`:1927`）、`LoginSection`/`ModelsSection`/`ToolsSection` 的组标题
-- Modify: `C:/Users/21613/dev/dsh-ui-test/card-accordion.js`
+- Modify: `C:/Users/<user>/dev/dsh-ui-test/card-accordion.js`
 
 **Interfaces:**
 - Consumes: 各分区组件现有 props（不变）
@@ -980,7 +980,7 @@ Expected: 全部 ok（32 + 7 = 39 通过 / 0 失败）。
 - [x] **Step 7: 提交**
 
 ```bash
-cd /c/Users/21613/dev/dsh-tap && git add lib/client.js
+cd /c/Users/<user>/dev/dsh-tap && git add lib/client.js
 git commit -m "feat(client): 通道内分组（凭据/模型/工具/网关/高级），工程项收进 details.cbc-adv"
 ```
 
@@ -990,7 +990,7 @@ git commit -m "feat(client): 通道内分组（凭据/模型/工具/网关/高�
 
 **Files:**
 - Modify: `lib/client.js` — `ModelsSection` 的「目录同步」行（`:1281`–`:1291`，两个按钮 → 一个）、`TraeSection` 的「模型目录」行（`:1646`–`:1650`）+ 模型组加筛选、`QoderSection` 的「模型目录」行（`:1905`–`:1909`）+ 模型组加筛选
-- Modify: `C:/Users/21613/dev/dsh-ui-test/card-accordion.js`
+- Modify: `C:/Users/<user>/dev/dsh-ui-test/card-accordion.js`
 
 **Interfaces:**
 - Consumes: `post({action:'model-sync'})` / `post({action:'model-list'})` / `post({action:'trae-model-sync'})` / `post({action:'trae-model-list'})` / `post({action:'qoder-model-sync'})` / `post({action:'qoder-model-list'})`（全部现有 action，不改）
@@ -1161,7 +1161,7 @@ Expected: 全部 ok（Task 4 收尾 56 通过 + 本任务 [E1]×2 + [E2]×4 + St
 - [x] **Step 6: 提交**
 
 ```bash
-cd /c/Users/21613/dev/dsh-tap && git add lib/client.js
+cd /c/Users/<user>/dev/dsh-tap && git add lib/client.js
 git commit -m "feat(client): 三家模型组同构——「同步目录」单按钮 + 统一筛选框"
 ```
 
@@ -1171,7 +1171,7 @@ git commit -m "feat(client): 三家模型组同构——「同步目录」单按
 
 **Files:**
 - Modify: `lib/client.js` — `CodeBuddyCard`（挂载取样 + `generalText` 传入 `blockStatus`）、`UsageSection`（`active` 语义已是"区块展开"，Task 1 已接；此处补首次取样与卡片级共享）、`ProvidersSection`（`credential-scan` 保持在分区挂载时）
-- Modify: `C:/Users/21613/dev/dsh-ui-test/card-accordion.js`
+- Modify: `C:/Users/<user>/dev/dsh-ui-test/card-accordion.js`
 
 **Interfaces:**
 - Consumes: `post({action:'usage'})` → `{ok,usage,bridge,quota}`；`post({action:'provider-list'})` → `{ok,providers,presets}`；`blockStatus(data, generalText)`
@@ -1355,7 +1355,7 @@ Expected: 全部 ok（Task 5 收尾 **70** 通过 + `[F1]`×3 + `[F2]`×1 + `[F3
 
 ```bash
 md5sum ~/.dsh/codebuddy-plugin.json   # 必须与跑前一致
-cd /c/Users/21613/dev/dsh-tap && git add lib/client.js
+cd /c/Users/<user>/dev/dsh-tap && git add lib/client.js
 git commit -m "feat(client): 通用区块头挂载取样（额度/服务商数）+ 轮询严格随展开启停"
 ```
 
@@ -1364,8 +1364,8 @@ git commit -m "feat(client): 通用区块头挂载取样（额度/服务商数�
 ### Task 7: 存活断言移植 + 老套件退役
 
 **Files:**
-- Modify: `C:/Users/21613/dev/dsh-ui-test/card-accordion.js`（移植 `card-regression.js` 中仍然成立的断言）
-- Delete: `C:/Users/21613/dev/dsh-ui-test/card-regression.js`
+- Modify: `C:/Users/<user>/dev/dsh-ui-test/card-accordion.js`（移植 `card-regression.js` 中仍然成立的断言）
+- Delete: `C:/Users/<user>/dev/dsh-ui-test/card-regression.js`
 - Modify: `lib/client.js`（仅当移植断言暴露真缺陷时才改；无缺陷则本任务零代码改动）
 
 **Interfaces:**
@@ -1457,7 +1457,7 @@ Expected: 全部 ok，退出码 0；记录总断言数（写进 Task 9 的 CHANG
 - [x] **Step 3: 删除老套件**
 
 ```bash
-cd /c/Users/21613/dev/dsh-ui-test && rm card-regression.js && ls *.js
+cd /c/Users/<user>/dev/dsh-ui-test && rm card-regression.js && ls *.js
 ```
 
 Expected: 列出 `card-accordion.js`、`debug-dom.js`、`debug-inputs.js`、`qoder-e2e.js`、`qoder-prefs-check.js`、`qoder-slot-check.js`、`qoder-tab-phase2.js`、`shots-baseline.js`。
@@ -1465,7 +1465,7 @@ Expected: 列出 `card-accordion.js`、`debug-dom.js`、`debug-inputs.js`、`qod
 - [x] **Step 4: 提交（仅当本任务改了 `lib/client.js`）**
 
 ```bash
-cd /c/Users/21613/dev/dsh-tap && git status --short
+cd /c/Users/<user>/dev/dsh-tap && git status --short
 # 有改动才提交：
 git add lib/client.js && git commit -m "fix(client): 回归移植暴露的缺陷修复"
 ```
@@ -1477,7 +1477,7 @@ git add lib/client.js && git commit -m "fix(client): 回归移植暴露的缺陷
 ### Task 8: 其余浏览器脚本适配 + 截图基线重拍
 
 **Files:**
-- Modify: `C:/Users/21613/dev/dsh-ui-test/qoder-slot-check.js`（10 断言）、`qoder-e2e.js`（8）、`qoder-prefs-check.js`（32）、`qoder-tab-phase2.js`（8）、`shots-baseline.js`
+- Modify: `C:/Users/<user>/dev/dsh-ui-test/qoder-slot-check.js`（10 断言）、`qoder-e2e.js`（8）、`qoder-prefs-check.js`（32）、`qoder-tab-phase2.js`（8）、`shots-baseline.js`
 - Modify: `lib/client.js`（仅当适配暴露真缺陷）
 
 **Interfaces:**
@@ -1508,7 +1508,7 @@ git add lib/client.js && git commit -m "fix(client): 回归移植暴露的缺陷
 - [x] **Step 2: 逐脚本跑绿**
 
 ```bash
-cd /c/Users/21613/dev/dsh-ui-test
+cd /c/Users/<user>/dev/dsh-ui-test
 node qoder-slot-check.js "http://127.0.0.1:3080/?token=<TOKEN>"
 node qoder-prefs-check.js "http://127.0.0.1:3080/?token=<TOKEN>"
 node qoder-tab-phase2.js "http://127.0.0.1:3080/?token=<TOKEN>"
@@ -1520,7 +1520,7 @@ Expected: 四个脚本各自 `0 失败`，退出码 0。`qoder-e2e.js` 会真实
 - [x] **Step 3: 重拍明暗基线**
 
 ```bash
-cd /c/Users/21613/dev/dsh-ui-test && node shots-baseline.js "http://127.0.0.1:3080/?token=<TOKEN>" acc
+cd /c/Users/<user>/dev/dsh-ui-test && node shots-baseline.js "http://127.0.0.1:3080/?token=<TOKEN>" acc
 ls shots/ | grep '^acc' | head -20
 ```
 
@@ -1533,7 +1533,7 @@ ls shots/ | grep '^acc' | head -20
 - [x] **Step 5: 提交（仅当改了 `lib/client.js`）**
 
 ```bash
-cd /c/Users/21613/dev/dsh-tap && git status --short && git add lib/client.js \
+cd /c/Users/<user>/dev/dsh-tap && git status --short && git add lib/client.js \
   && git commit -m "fix(client): 脚本适配暴露的缺陷修复"
 ```
 
@@ -1579,7 +1579,7 @@ cd /c/Users/21613/dev/dsh-tap && git status --short && git add lib/client.js \
 details.cbc-adv（高级组）/ details.cbc-help（使用说明）。
 套件：card-accordion.js（设置卡唯一套件，N 断言）、qoder-slot-check.js、qoder-prefs-check.js、
 qoder-tab-phase2.js、qoder-e2e.js、shots-baseline.js、debug-dom.js/debug-inputs.js。
-跑法：dsh 入口 /c/Users/21613/dev/dsh-launcher/node_modules/.bin/dsh web（token 见启动行）；
+跑法：dsh 入口 /c/Users/<user>/dev/dsh-launcher/node_modules/.bin/dsh web（token 见启动行）；
 profile ~/.dsh/profiles/web 已 link 本仓库 ⇒ 改 lib/client.js 刷新页面即生效；跑后按 PID 杀 3080。
 ```
 
@@ -1598,7 +1598,7 @@ profile ~/.dsh/profiles/web 已 link 本仓库 ⇒ 改 lib/client.js 刷新页�
 - [x] **Step 5: 版本号与设计文档状态**
 
 ```bash
-cd /c/Users/21613/dev/dsh-tap
+cd /c/Users/<user>/dev/dsh-tap
 node -e "const f='package.json',j=require('./'+f);j.version='0.10.0';require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
 grep -n '"version"' package.json
 ```
@@ -1608,7 +1608,7 @@ Expected: `"version": "0.10.0"`。再把 `docs/goals/settings-card-ux-redesign.m
 - [x] **Step 6: 全量离线回归**
 
 ```bash
-cd /c/Users/21613/dev/dsh-tap
+cd /c/Users/<user>/dev/dsh-tap
 npm run verify:bridge && npm run verify:core && npm run verify:providers \
   && npm run verify:trae-provider && npm run verify:qoder && npm run verify:host-config \
   && node scripts/verify-models.mjs --list
@@ -1619,7 +1619,7 @@ Expected: 七个命令全部退出码 0（纯前端改动，预期零影响；�
 - [ ] **Step 7: 在线探测 —— 未执行（控制方裁定跳过，非遗漏）**
 
 ```bash
-cd /c/Users/21613/dev/dsh-tap && npm run verify
+cd /c/Users/<user>/dev/dsh-tap && npm run verify
 ```
 
 Expected: 18/18（需 `CODEBUDDY_API_KEY` 或已登录 OAuth）。若环境无凭据导致失败，**如实记录跳过原因**到 CHANGELOG 验证段，不得声称通过。
@@ -1639,7 +1639,7 @@ netstat -ano | grep ':3080' | head -1     # 确认已释放（无输出）
 - [x] **Step 9: 提交**
 
 ```bash
-cd /c/Users/21613/dev/dsh-tap
+cd /c/Users/<user>/dev/dsh-tap
 git add package.json CHANGELOG.md AGENTS.md wiki/07-web-client.md docs/goals/settings-card-ux-redesign.md
 git status --short
 git commit -m "feat(client)!: 设置卡改通道手风琴（v0.10.0）——4 区块取代 8 标签，状态收敛到区块头"

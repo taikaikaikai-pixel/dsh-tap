@@ -1382,6 +1382,8 @@ try {
       }
       check('[18] 镜像块 compat（pi-ai 出站写 reasoning_effort 的前提，#66 哑火点）',
         JSON.stringify(block?.compat) === JSON.stringify({ thinkingFormat: 'openai', supportsReasoningEffort: true }), JSON.stringify(block?.compat))
+      check('[18] 镜像块 retryPolicy maxRetries 0（无排队态 ⇒ 任何失败都不重试）',
+        JSON.stringify(block?.retryPolicy) === JSON.stringify({ mode: 'normal', maxRetries: 0 }), JSON.stringify(block?.retryPolicy))
       const glmMirror = block?.models?.find((m) => m.id === 'glm-5.3')
       const kimiMirror = block?.models?.find((m) => m.id === 'kimi-k3')
       check('[18] 镜像条目档位表 = 宿主枚举键 → 声明拼写', JSON.stringify(glmMirror?.reasoningEfforts) === JSON.stringify({ low: 'light', high: 'high' }), JSON.stringify(glmMirror?.reasoningEfforts))

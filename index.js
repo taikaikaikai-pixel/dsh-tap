@@ -66,6 +66,7 @@ import { createQoderProvider } from './providers/qoder/index.js'
 import { applyQoderContextVariant } from './providers/qoder/catalog.js'
 import { scanLocalCredentials, readImportCredential } from './local-scan.js'
 import { createHostConfigLayer } from './host-config.js'
+import { normalizeCredits, mergeCredits, CREDIT_CHANNELS } from './credits.js'
 import arkProvider from './providers/ark/index.js'
 import bailianProvider from './providers/bailian/index.js'
 import deepseekProvider from './providers/deepseek/index.js'
@@ -364,6 +365,91 @@ function assertSafeModelId(id) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 手填积分倍率：官方目录**没有**标注倍率的模型（Trae/Qoder 全量、CodeBuddy
+// 缺 `credits` 字段的条目）允许用户逐模型手动标一个，只用于设置卡展示。
+// 存文件层 `manualCredits: { codebuddy: {id: token}, trae: {...}, qoder: {...} }`，
+// 按 channel 隔离同名 id。**不进宿主配置层、不参与镜像、不参与任何计费推算**
+// ——token 口径见 credits.js。
+// ---------------------------------------------------------------------------
+
+/**
+ * 官方目录倍率（最近一次成功拉到的 /v3/config）：`{ [id]: token }`。
+ * 只用于展示（设置卡 + 输入框模型选择器），**不进宿主镜像**——踩坑 #12 的
+ * schema 白名单会把不认识的键静默丢掉，故倍率走独立通道（creditsView）。
+ * 实例状态：模块作用域每插件实例一份（踩坑 #20 纪律同 rotator/meter）。
+ */
+let officialCredits = {}
+
+/** 目录条目 → `{ [id]: token }`（未声明/不可解析的条目直接跳过，不编造）。 */
+function creditsFromCatalog(models) {
+  const out = {}
+  for (const m of models ?? []) {
+    if (typeof m?.credits === 'string' && m.credits) out[m.id] = m.credits
+  }
+  return out
+}
+
+/** 浏览器半用的合并表：官方优先、手填补空缺（口径见 credits.js mergeCredits）。 */
+function creditsView() {
+  return mergeCredits(
+    {
+      codebuddy: officialCredits,
+      // Qoder 目录 2026-10 起自带逐模型 `price_factor`（官方倍率），同步后即有值；
+      // 未同步/旧目录则为空表，回落手填。
+      qoder: qoderProvider.catalogView()?.credits ?? {},
+    },
+    readManualCredits(),
+  )
+}
+
+/**
+ * 手填倍率读侧：只认三通道 + 合法 token，垃圾值静默丢弃
+ * （同 readQoderModelPrefs 的读侧归一化纪律：手改文件不得让卡片炸）。
+ */
+function readManualCredits() {
+  const out = { codebuddy: {}, trae: {}, qoder: {} }
+  const raw = readFileLayer().manualCredits
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const channel of CREDIT_CHANNELS) {
+    const map = raw[channel]
+    if (!map || typeof map !== 'object' || Array.isArray(map)) continue
+    for (const [id, value] of Object.entries(map)) {
+      try {
+        const token = normalizeCredits(value)
+        if (token !== null) out[channel][id] = token
+      } catch { /* 非法 token：丢弃该条，不连坐整表 */ }
+    }
+  }
+  return out
+}
+
+/**
+ * manualCreditsSet 写路径（UI 契约：patch.manualCreditsSet = { channel, id, value }）。
+ * value 空/null = 删除该模型的记录；非法形态由 normalizeCredits 抛错转 400。
+ * **刻意不校验 id 是否在当前目录里**：这是纯展示元数据，目录尚未同步时也应当
+ * 允许先标（与 *ModelPrefs 那些必须绑定目录声明档位的 setter 区分开）。
+ */
+async function setManualCredits({ channel, id, value } = {}) {
+  if (!CREDIT_CHANNELS.includes(channel)) {
+    throw new Error('manualCreditsSet 的 channel 必须是 codebuddy / trae / qoder')
+  }
+  if (typeof id !== 'string' || !id.trim()) throw new Error('manualCreditsSet 需要 id')
+  assertSafeModelId(id)
+  const token = normalizeCredits(value)
+  const all = readManualCredits()
+  const rec = { ...all[channel] }
+  if (token === null) delete rec[id]
+  else rec[id] = token
+  const next = { ...all, [channel]: rec }
+  const layer = readFileLayer()
+  // 纯净态纪律：一条都不剩就删掉整键，别留空壳。
+  if (Object.values(next).some((m) => Object.keys(m).length > 0)) layer.manualCredits = next
+  else delete layer.manualCredits
+  writeFileLayer(layer)
+  return next
+}
+
 /** Effective models = static base + enabled catalog extras − disabled ids. */
 /**
  * G4 动态目录：启动时（及设置卡手动刷新）从 /v3/config 同步的模型清单。
@@ -522,6 +608,31 @@ const hostConfig = createHostConfigLayer({
   log: (m) => process.stderr.write(`${m}\n`),
 })
 
+// ---------------------------------------------------------------------------
+// 重试策略（2026-10-21，宿主 dsh-llm-retry 的 provider retryPolicy）
+//
+// 目标：排队态（Qoder 10605 → 429 + Retry-After 30）按 30s 间隔一直重试，
+// 直到排队结束；其它失败（限流 6004、额度、5xx、网络、渠道校验 11128）不再
+// "无脑 5 连重试"，直接结束并把错误文本交给宿主 turn-error 行。
+//
+// 机制（读宿主源码确认）：retryPolicy 按 provider 配置；normal 模式只重试
+// retryableCodes 内的失败码，providerRetryAfterMs 由 pi-ai 丢弃后走本地
+// 退避（initialDelayMs 起步、指数增长，jitter 0）。因此要让"每次都是 30s"，
+// initialDelayMs 必须等于 maxDelayMs（30000）；只重试 RATE_LIMIT（429）。
+//   - qoder：排队 10605 是唯一需要重试的 429；[EXCEED_QUOTA] 在消息里带
+//     "usage limit exceeded" 让宿主分类成 QUOTA（非 RATE_LIMIT）→ 不重试。
+//   - codebuddy / trae：没有排队态，maxRetries:0 ⇒ 任何失败都不重试。
+//   - 其它 dsh-tap 管理的 key 型 provider 不在这里改（保持宿主默认）。
+// maxRetries 2880 × 30s ≈ 24h，即"排队结束为止"的实际上限。
+// ---------------------------------------------------------------------------
+const NO_CHANNEL_RETRY_POLICY = Object.freeze({ mode: 'normal', maxRetries: 0 })
+const QUEUE_RETRY_POLICY = Object.freeze({
+  mode: 'normal',
+  maxRetries: 2880,
+  retryableCodes: Object.freeze(['RATE_LIMIT']),
+  backoff: Object.freeze({ initialDelayMs: 30000, maxDelayMs: 30000, jitterRatio: 0 }),
+})
+
 /**
  * Mirror the effective model list into the host config layer under
  * llm-pi-ai.providers.codebuddy.models (the user-layer override over the
@@ -540,14 +651,18 @@ async function syncModelsToDshSettings() {
       && Object.keys(state.overrides ?? {}).length === 0
       && dynamicCatalog == null
     const path = ['providers', 'codebuddy', 'models']
-    if (pristine) return await hostConfig.applyOps([{ op: 'unset', path }])
+    // retryPolicy 与 models 同批写：桌面宿主 profile 的用户层 codebuddy 块是
+    // hand-placed 完整块（踩坑 #54），bundle patch 的 retryPolicy 进不去；
+    // 写用户层才是两条 profile 都可靠的落点。maxRetries:0 ⇒ 不重试。
+    const retryOp = { op: 'set', path: ['providers', 'codebuddy', 'retryPolicy'], value: NO_CHANNEL_RETRY_POLICY }
+    if (pristine) return await hostConfig.applyOps([retryOp, { op: 'unset', path }])
     const next = computeEffectiveModels()
     // Defensive (0.8.7): an empty effective list must never be mirrored —
     // llm-pi-ai (dsh 0.1.1-rc.2+) rejects it at apply time. setModelEnabled
     // guards the last model already; this fallback drops the override (the
     // patch static list then serves) instead of poisoning the namespace.
-    if (next.length === 0) return await hostConfig.applyOps([{ op: 'unset', path }])
-    return await hostConfig.applyOps([{ op: 'set', path, value: next }])
+    if (next.length === 0) return await hostConfig.applyOps([retryOp, { op: 'unset', path }])
+    return await hostConfig.applyOps([retryOp, { op: 'set', path, value: next }])
   } catch (err) {
     process.stderr.write(`[dsh-tap] model mirror failed: ${err?.message ?? err}\n`)
     return { ok: false, error: String(err?.message ?? err) }
@@ -641,6 +756,8 @@ function syncModelsFromGateway(resolveNow) {
       const profiles = catalog.models.map(catalogToProfile)
       if (!profiles.length) throw new Error('网关目录为空（保持现有清单）')
       dynamicCatalog = { profiles, fetchedAt: catalog.fetchedAt, count: profiles.length }
+      // 官方倍率只喂展示通道（设置卡 + 输入框选择器），不进 profiles/镜像。
+      officialCredits = creditsFromCatalog(catalog.models)
       await syncModelsToDshSettings()
       return { ok: true, fetchedAt: dynamicCatalog.fetchedAt, count: dynamicCatalog.count, source: 'gateway' }
     } catch (err) {
@@ -996,7 +1113,7 @@ const traeProvider = createTraeProvider({
 const readQoderAuth = () => readJson(QODER_AUTH_PATH)
 const writeQoderAuth = (v) => writeJson(QODER_AUTH_PATH, v)
 
-const qoderRuntime = { running: false, port: null, lastError: null }
+const qoderRuntime = { running: false, port: null, lastError: null, queue: null }
 
 // 迟绑定：网关/目录需要"本代"的 settings 解析函数；apply() 每代重设。
 let qoderSettingsFn = () => ({ qoderEnabled: false })
@@ -1097,6 +1214,10 @@ async function syncQoderModelsToDshSettings() {
       // （codebuddy 侧踩过：猜错会发 thinking 而不是 reasoning_effort）。
       // 档位表由 catalog 投影进 models[].reasoningEfforts（见 qoderReasoningEfforts）。
       compat: { thinkingFormat: 'openai', supportsReasoningEffort: true },
+      // 排队态（10605）30s 一重试，直到排队结束；其它失败不重试（见
+      // QUEUE_RETRY_POLICY 注释）。配额耗尽在 gateway 消息里带
+      // "usage limit exceeded"，宿主分类为 QUOTA（不在 retryableCodes）。
+      retryPolicy: QUEUE_RETRY_POLICY,
       models: YAML.parse(YAML.stringify(models)),
     }
     return await hostConfig.applyOps([{ op: 'set', path, value: block }])
@@ -1268,6 +1389,8 @@ async function syncTraeModelsToDshSettings() {
       //（catalogToProfiles 从目录 reasoning_effort_config 投影）。
       // thinkingFormat 钉 openai 防 pi-ai 从 127.0.0.1 猜方言。
       compat: { thinkingFormat: 'openai', supportsReasoningEffort: true },
+      // Trae 没有排队态：任何失败直接结束（不重试），由宿主 turn-error 显示文本。
+      retryPolicy: NO_CHANNEL_RETRY_POLICY,
       models: YAML.parse(YAML.stringify(models)),
     }
     return await hostConfig.applyOps([{ op: 'set', path, value: block }])
@@ -1311,7 +1434,7 @@ async function setTraeModelEnabled({ id, enabled }) {
 // correct; scripts/verify-bridge.mjs §10 pins the semantics).
 // ---------------------------------------------------------------------------
 
-const bridgeRuntime = { running: false, port: null, lastError: null }
+const bridgeRuntime = { running: false, port: null, lastError: null, rateLimit: null }
 
 // ---------------------------------------------------------------------------
 // Settings route consumed by the Web UI card.
@@ -1495,11 +1618,18 @@ function settingsView(resolveNow) {
     // The raw file layer carries plaintext apiKeys[].key — never ship it to
     // the browser (the card only checks top-level field presence).
     user: maskedUserLayer(user),
+    // 手填积分倍率（读侧已归一化）：官方无倍率的模型由用户自己标，仅展示用。
+    manualCredits: readManualCredits(),
+    // 展示用合并表（官方优先、手填兜底）：设置卡与输入框模型选择器共读这一份。
+    credits: creditsView(),
     oauth: provider.oauth.oauthStatus(),
     bridge: {
       running: bridgeRuntime.running,
       port: bridgeRuntime.port,
       lastError: bridgeRuntime.lastError,
+      // 最近一次上游限流态（429/6004）：带模型、恢复时刻。供设置卡显示真实状态，
+      // 而不是让用户对着一串裸 JSON 猜。零值 = 未限流。
+      rateLimit: bridgeRuntime.rateLimit ?? null,
     },
     trae: {
       oauth: traeProvider.credentialView(),
@@ -1542,6 +1672,9 @@ function settingsView(resolveNow) {
         running: qoderRuntime.running,
         port: qoderRuntime.port,
         lastError: qoderRuntime.lastError,
+        // 最近一次上游排队态（10605）：带模型/队列类型/重试间隔。
+        // 与 codebuddy 的 rateLimit 同构——都是"上游此刻不可用"的真实状态。
+        queue: qoderRuntime.queue ?? null,
       },
       models: {
         disabled: Object.keys(readQoderModelState().disabled),
@@ -1592,6 +1725,7 @@ function settingsView(resolveNow) {
  *   POST {action:'gateway-retry', channel}                  → P2-3 区块头「重试监听」：
  *                                                             重跑该通道 sync*（enabled 限定，见路由处注释）
  *   GET  响应另带 host = 宿主实况对账（镜像漂移检测，只读）
+ *   GET  ?probe=runtime → {rateLimit, queue} 纯内存运行态（输入框选择器装饰用，零上游调用）
  */
 function registerSettingsRoute(ctx, entryConfig, resolveNow, applyLive, retryGateway) {
   ctx.inject(['webServer'], (wsctx) => {
@@ -1613,6 +1747,16 @@ function registerSettingsRoute(ctx, entryConfig, resolveNow, applyLive, retryGat
           const probe = new URL(request.url, 'http://127.0.0.1').searchParams.get('probe')
           if (probe === 'host-config') {
             sendJSON(response, 200, { ok: true, probe: hostConfig.probe() })
+            return
+          }
+          // ?probe=runtime = 只回"上游此刻不可用"的两个运行态（纯内存，零上游调用）。
+          // 输入框模型选择器的限流/排队装饰要在点开的瞬间刷得动，全量 GET 太重。
+          if (probe === 'runtime') {
+            sendJSON(response, 200, {
+              ok: true,
+              rateLimit: bridgeRuntime.rateLimit ?? null,
+              queue: qoderRuntime.queue ?? null,
+            })
             return
           }
           // host = 宿主实况对账（只读；P1）。只挂主 GET——POST 响应的局部视图
@@ -1646,6 +1790,9 @@ function registerSettingsRoute(ctx, entryConfig, resolveNow, applyLive, retryGat
             if (body?.action === 'model-list') {
               provider.catalog.fetchModelCatalog(resolveNow)
                 .then((catalog) => {
+                  // 卡片每次拉列表都刷新一次官方倍率（与启动同步同一份内存真源）：
+                  // 输入框选择器的徽标靠它，不然同步失败后只有手填值可见。
+                  officialCredits = creditsFromCatalog(catalog.models)
                   // G5：ceilings = 基清单∪extra 的实际上限（校验上限与 title）；
                   // profiles = ceilings 应用覆盖后的有效值（输入框显示值），
                   // 覆盖所有已知 id（含禁用行——禁用不清覆盖值）。
@@ -1889,8 +2036,13 @@ function registerSettingsRoute(ctx, entryConfig, resolveNow, applyLive, retryGat
               return
             }
             if (body?.action === 'usage') {
-              provider.catalog.quotaSnapshot(resolveNow)
-                .then((quota) => sendJSON(response, 200, {
+              // 并行取两侧额度：CodeBuddy（billing/meter）与 Qoder（quota/usage 官方计数器）。
+              // 两者都自带 60s memoize、永不 throw —— 失败只让对应那一行显示「—」。
+              Promise.all([
+                provider.catalog.quotaSnapshot(resolveNow),
+                qoderProvider.quota.snapshot().catch(() => null),
+              ])
+                .then(([quota, qoderQuota]) => sendJSON(response, 200, {
                   ok: true,
                   usage: meter.view(),
                   bridge: {
@@ -1900,6 +2052,7 @@ function registerSettingsRoute(ctx, entryConfig, resolveNow, applyLive, retryGat
                     lastError: bridgeRuntime.lastError,
                   },
                   quota,
+                  qoderQuota,
                 }))
                 .catch((err) => sendJSON(response, 502, { ok: false, error: err.message }))
               return
@@ -2044,6 +2197,25 @@ function registerSettingsRoute(ctx, entryConfig, resolveNow, applyLive, retryGat
               applyLive()
               return
             }
+            if (patch.manualCreditsSet !== undefined) {
+              // 手填积分倍率：纯展示字段（不进宿主配置层、不参与任何镜像），
+              // 故刻意不调 applyLive——那会白跑一遍五个 gateway sync。
+              const withKeys = { ...nextUser }
+              await setManualCredits(patch.manualCreditsSet)
+              const after = readFileLayer()
+              delete withKeys.manualCredits
+              Object.assign(after, { apiKeys: withKeys.apiKeys, activeApiKey: withKeys.activeApiKey })
+              writeFileLayer(after)
+              sendJSON(response, 200, {
+                ok: true,
+                value: settingsView(resolveNow).value,
+                user: maskedUserLayer(after),
+                manualCredits: readManualCredits(),
+                // 合并表回带：输入框选择器的徽标据此当场更新（不必刷新页面）。
+                credits: creditsView(),
+              })
+              return
+            }
             for (const [key, value] of Object.entries(patch)) {
               if (key === 'apiKeysAdd' || key === 'apiKeysRemove') continue
               // Whitelist by SETTINGS_FIELDS, not Config({}) keys: fields
@@ -2149,6 +2321,7 @@ export function apply(ctx, config = {}) {
   const bridge = createBridge({
     settings: resolveNow,
     provider,
+    channel: 'codebuddy', // 用量按通道归属（core/ 不认识上游，名字只能在组合根给）
     withCredentials: (attempt) => withKeyRotation(resolveNow, attempt),
     meter,
     forensics: {

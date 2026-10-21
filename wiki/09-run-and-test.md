@@ -44,12 +44,13 @@ TraeWork CN / Qoder CN：各自区块的**区块头右侧勾选框**就是启用
 | `node scripts/verify-trae-provider.mjs` | Trae 通道：mock OAuth 全流程（**用我们注册的公钥验 DeviceProof 签名**）/ 目录映射 / 翻译网关 | **89 项断言**（2026-09-23 实测） |
 | `node scripts/verify-qoder-provider.mjs` | Qoder CN 通道：mock 设备流全流程（PKCE/404 轮询/drt- 刷新/门禁/代际守卫）+ 翻译网关信封 + 目录投影 + tool 配对/可见性与归因上报锁定案 | **154 项断言**（2026-09-23 实测） |
 | `node scripts/verify-host-config.mjs` | 宿主配置层：0.1.7+ forms seam 选路/写前比对/`SETTINGS_CONFLICT` 重试/不可写降级 + ≤0.1.6 settings.yaml 回退 | **36 项断言**（2026-09-23 实测） |
+| `node scripts/verify-picker-badge.mjs` | 主界面模型选择器徽标（浏览器半装饰层）：假 `window.__ModuleLoader__` + 假 react/假 DOM/假 fetch 驱动 `apply()`，锁「加载零额外请求 / 上游文案不进 CSS / 陈旧态全清 / 点选择器按需刷新带节流 / trigger 换锚点（`[1b]`） / 排队重试条选数据与 dock 注册」 | **26 项断言**（2026-10-21 实测） |
 | `node scripts/verify-desktop-acceptance.mjs` | desktop 适配可执行验收：A 组结构性不变量（§4a index.js 无 desktop 特化 / §4b 宿主差异收口 / §6 goal 锚点；`--structural` 为 CI 硬闸门）+ B 组桌面环境断言（有 `~/.dsh/profiles/desktop` 才跑）；C 组活实例断言恒 SKIP，由端到端探针承担（证据 docs/probes/desktop-e2e-2026-10-03.json） | **9 ok / 0 FAIL / 3 SKIP**（2026-10-03 实测） |
 | `node scripts/verify-agents-md.mjs` | AGENTS.md 预算闸门：行数/字节/引用路径存在 + 踩坑编号连续性对账 | — |
 | `node scripts/verify-models.mjs` | 模型解析离线自检 / 在线探测可用性 / 目录漂移对比 | — |
 | `node scripts/verify-trae-model-catalog.mjs` | 目录提取器回归 | — |
 
-`npm run verify` = 在线模型探测（18 次真实请求，消耗额度）；离线快捷方式齐了 `verify:bridge` / `verify:core` / `verify:providers` / `verify:trae` / `verify:trae-provider` / `verify:qoder` / `verify:host-config`。
+`npm run verify` = 在线模型探测（18 次真实请求，消耗额度）；离线快捷方式齐了 `verify:bridge` / `verify:core` / `verify:providers` / `verify:trae` / `verify:trae-provider` / `verify:qoder` / `verify:host-config` / `verify:picker-badge`。
 
 **断言纪律**：验证队列/代理行为必须断言"响应完成"（EOF），不是首字节；跨层测试先想清楚轮转游标在第几个请求上。
 
@@ -64,6 +65,7 @@ TraeWork CN / Qoder CN：各自区块的**区块头右侧勾选框**就是启用
 | `probe-quota.mjs` | 额度信号探测（accounts/dosage-notify/资源包） |
 | `probe-media.mjs` | 生图/视频/3D 端点探测 |
 | `probe-routing.mjs` / `probe-moderation.mjs` | 路由与审核面 |
+| `probe-codebuddy-channel.mjs [--out <证据.json>]` | 渠道校验 system 指纹判据：A 原样 11128 / B 改写 200 / C 放 user 200 / D 无句号 11128（2026-10-21，证据默认落 docs/probes/codebuddy-channel-<date>.json） |
 | `probe-cache.mjs` / `probe-cache-ttl.mjs` / `capture-cache.mjs` | 网关缓存对照（--model/--arms/--repeat/--calls） |
 | `capture-traffic.mjs` | 受控主聊天流量（多轮/重发/子代理，经 3080 RPC） |
 | `measure-latency.mjs --mock\|--real` | 识图/搜索端到端延迟分布（JSONL 落盘） |

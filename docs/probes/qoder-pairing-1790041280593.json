@@ -1,6 +1,6 @@
 {
   "ts": "2026-09-22T01:41:12.299Z",
-  "piAi": "C:/Users/21613/dev/dsh-launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js",
+  "piAi": "C:/Users/<user>/dev/dsh-launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js",
   "model": {
     "id": "dmodel",
     "name": "probe",

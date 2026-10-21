@@ -1,0 +1,9 @@
+{
+  "at": "2026-10-21T01:32:24Z",
+  "note": "端到端：用改后代码起临时桥（createBridge + createCodeBuddyProvider，真实上游），回放 2026-10-21 09:11 失败会话的**真实 messages**（system 7.5KB + 5 条上下文消息 + 40 个工具）；同一 payload 原样直连为 400/11128。",
+  "gateway": "https://copilot.tencent.com",
+  "model": "hy3",
+  "request": { "stream": true, "max_tokens": 16, "messages": "1 system + 5 user(context)", "tools": 40 },
+  "result": { "status": 200, "contentType": "text/event-stream", "sse": true, "bytes": 4073 },
+  "sanitizer": "providers/codebuddy/channel-guard.js"
+}

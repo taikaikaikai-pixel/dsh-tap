@@ -1,7 +1,7 @@
 {
   "at": "2026-10-05T05:15:00+08:00",
   "evidence": "trae-agent-e2e-host",
-  "host": "DeepSeek Harness desktop 0.2.0-rc.2 (PID 31940, :19387, profile=desktop link:C:/Users/21613/dev/dsh-tap @feat/trae-agent-v3 5894c46)",
+  "host": "DeepSeek Harness desktop 0.2.0-rc.2 (PID 31940, :19387, profile=desktop link:C:/Users/<user>/dev/dsh-tap @feat/trae-agent-v3 5894c46)",
   "transport": "traeChatTransport=agent（设置卡 POST patch 热切换； schema 接受新档=宿主已加载新代码的证明）",
   "model": "TraeWork CN 分组 / GLM-5.3（宿主模型选择器显式点选；agent 面实际服务模型=glm-5.2，钉死改派见 M1 A6 臂）",
   "session": {

@@ -55,6 +55,10 @@
 `#66` 宿主reasoningEfforts键固定枚举·越界键静默整块拒收·写后读回/lastError
 `#67` 环境探测路径勿写死单平台形态·发现空结果须配原因出口
 `#68` 同端点不同function面各有出站方言·历史tool_calls键按面实测·proto错念proto字段名
+`#69` 瞬时状态挂一次性拉取通道·陈旧徽标即谎言·上游文案勿进CSS
+`#70` 渠道校验可拦system精确句·改UA/加头无用·只扫system且整句判定·出站须改写
+`#71` 宿主重试只看failure.code·Retry-After被pi-ai丢弃·固定30s须initial=max·429排队/额度同码靠消息分QUOTA
+`#72` 装饰挂进截断盒必被裁·trigger徽标换锚点到button·旧锚点content:none成对关·:has降级成对
 
 ## 常用命令（probe/联调/取证脚本的用法注释见 wiki/09-run-and-test.md）
 
@@ -68,6 +72,7 @@ node scripts/verify-providers.mjs
 node scripts/verify-trae-provider.mjs
 node scripts/verify-qoder-provider.mjs
 node scripts/verify-host-config.mjs
+node scripts/verify-picker-badge.mjs
 node scripts/verify-desktop-acceptance.mjs
 node scripts/verify-agents-md.mjs
 npm run verify

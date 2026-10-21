@@ -1,0 +1,43 @@
+{
+  "at": "2026-10-21T01:29:21.748Z",
+  "gateway": "https://copilot.tencent.com",
+  "model": "glm-5.3-flash",
+  "authMode": "oauth",
+  "note": "A/D 复现渠道指纹 11128；B 证明改写放行；C 证明只扫 system/developer。prompt 内容不入证据。",
+  "sanitizer": "providers/codebuddy/channel-guard.js",
+  "verdict": "PASS",
+  "arms": [
+    {
+      "arm": "A-system-fingerprint",
+      "expect": "11128",
+      "matched": true,
+      "status": 400,
+      "code": 11128,
+      "ms": 339
+    },
+    {
+      "arm": "B-system-sanitized",
+      "expect": "200",
+      "matched": true,
+      "status": 200,
+      "code": null,
+      "ms": 1980
+    },
+    {
+      "arm": "C-fingerprint-in-user",
+      "expect": "200",
+      "matched": true,
+      "status": 200,
+      "code": null,
+      "ms": 2095
+    },
+    {
+      "arm": "D-system-no-period",
+      "expect": "11128",
+      "matched": true,
+      "status": 400,
+      "code": 11128,
+      "ms": 216
+    }
+  ]
+}

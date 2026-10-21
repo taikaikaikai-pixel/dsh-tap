@@ -57,10 +57,11 @@ flowchart TB
 export function createUsageMeter({ path }) // => { record, view, dispose }
 ```
 
-- **`record({ ts, kind, model, usage })`**：记录一次计费请求。usage 契约 = OpenAI SSE usage 对象 + 可选 `credit` 字段：`{ prompt_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, completion_tokens, credit }`（缺失字段记 0；无 usage 的请求不记录）。kind ∈ `chat | title | compaction | image | search | fetch`。写失败吞掉（计量绝不破坏数据路径）。
-- **`view()`**：设置卡载荷——`since / totalCredit / totalRequests / today{day,credit,requests} / recent（最近 20 条倒序）/ turns（最近 10 轮倒序）/ turnGapMs`。
+- **`record({ ts, kind, model, usage, channel })`**：记录一次计费请求。usage 契约 = OpenAI SSE usage 对象 + 可选 `credit` 字段：`{ prompt_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, completion_tokens, credit }`（缺失字段记 0；无 usage 的请求不记录）。kind ∈ `chat | title | compaction | image | search | fetch`。**channel 由调用方注入**（core 不认识任何上游：桥经 `createBridge({channel})` 由组合根给，两个 provider gateway 各自写死自己的通道名），缺省归 `unknown`——**不按 model id 反推**（同一 id 可能跨通道复用）。写失败吞掉（计量绝不破坏数据路径）。
+- **可疑值标注（0.21.0）**：单轮 `credit > max(2, prompt_tokens × 1e-5)` 时 entry 打 `suspect: true`。依据：正常量级实测 1e-6~3e-6 credit/token，而配额耗尽/上游异常时出现过单轮 credit 比正常量级高约 900 倍的一轮（≈1e-3 credit/token，而 prompt 仅增 6%）。**只标注、不改写历史**：可疑值不进逐通道合计，单独计入 `suspectCredit/suspectRequests` 并在 UI 提示；全局 `totalCredit` 保持原样（不静默篡改用户已看过的数字）。
+- **`view()`**：设置卡载荷——`since / totalCredit / totalRequests / today{day,credit,requests} / byChannel{ [ch]: {credit,requests,today,suspectCredit,suspectRequests} } / recent（最近 20 条倒序）/ turns（最近 10 轮倒序）/ turnGapMs`。`byChannel` **只累计本版之后的记录**（老记录无 channel 字段，不反推、不假装知道）。
 - **`dispose()`**：清定时器 + 最终 flush。
-- 常量：`USAGE_RECENT_CAP = 100`、`USAGE_DAYS_CAP = 31`、`USAGE_FLUSH_MS = 5000`（**去抖写盘**——工具循环连发只落一次盘）、`TURN_GAP_MS = 45_000`（近似轮次判定：间隔 ≤45s 的请求并为一个 turn；桥看不到宿主轮次边界，属披露过的近似）。
+- 常量：`USAGE_RECENT_CAP = 100`、`USAGE_DAYS_CAP = 31`、`USAGE_FLUSH_MS = 5000`（**去抖写盘**——工具循环连发只落一次盘）、`TURN_GAP_MS = 45_000`（近似轮次判定：间隔 ≤45s 的请求并为一个 turn；桥看不到宿主轮次边界，属披露过的近似）、`SUSPECT_CREDIT_PER_TOKEN = 1e-5` + `SUSPECT_MIN_CREDIT = 2`（见上）。
 - 持久化目标：`~/.dsh/codebuddy-plugin-usage.json`。
 
 ## core/bridge.js — 流式桥（智能代理 + 唯一凭据入口）
@@ -104,6 +105,7 @@ sequenceDiagram
 | `provider` | object | 上游适配器钩子（见下表） |
 | `withCredentials` | `(attempt) => Promise<{cred,res,err}>` | 凭据执行器（组合根的轮转/OAuth 编排）；调用方 Authorization **永不转发** |
 | `meter` | `{ record }` | usage-meter 实例 |
+| `channel` | string | 用量归属的通道标识（组合根注入；core 不写死任何上游名，否则撞 `verify-core-generic` 的禁词闸门） |
 | `forensics` | `{ logPath(), dumpDir() }` | 取证落点（env 名由组合根持有，core 只收路径 getter） |
 | `runtime` | `{ running, port, lastError }` | 共享运行态对象（组合根持有，数代 apply 报告同一现实） |
 

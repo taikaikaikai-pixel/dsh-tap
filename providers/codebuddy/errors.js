@@ -20,8 +20,9 @@ export const ERROR_CODES = {
   /** chat 后端派发层兜底。docs/rules/routing.md */
   11103: 'backend dispatch failure',
   /** 入口通道校验层拒绝（"Illegal API invocation from an unapproved channel"）：
-   *  字面量 role:"developer" 单列拒绝的当前拒绝面（2026-08-18 由 200/content_filter
-   *  变迁为 500/11128）。docs/rules/content-moderation.md */
+   *  两张脸——① 字面量 role:"developer" 单列拒绝（2026-08-18 由 200/content_filter
+   *  变迁为 500/11128）；② system 消息精确句指纹（DSH 首句，2026-10-21 为
+   *  400/11128，出站改写见 channel-guard.js）。docs/rules/content-moderation.md */
   11128: 'unapproved channel',
   /** 缺少必填参数（OAuth state 创建省略 platform 时观测）。docs/rules/oauth-handshake.md */
   10001: 'missing required parameter',
