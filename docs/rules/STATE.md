@@ -20,6 +20,26 @@
 3. 新增离线验证脚本时同步加进 `.github/workflows/node.js.yml`（CI 只跑离线套件；带真实凭据的 probe-* 与不带 `--list` 的 verify-models 永不进 CI）。
 4. **发版前跑一次 `node scripts/probe-effort-gaps.mjs`**（宿主实例活着时，免凭据）：对账「插件声明的思考档位」×「路由条目实况」，确认没有"声明没走到宿主选择器"的缺口（踩坑 #64 的回归眼；缺口 = exit 1）。路由/档位声明改动后尤其要跑。
 
+**发版推送（2026-10-23 定案：用 GitHub CLI，不走 GCM / ghproxy）**：
+
+- 本机 `origin` 是 `https://ghproxy.net/https://github.com/...`，该代理对 **push 返回 500**（只读镜像）；`~/.gitconfig` 另有 `url.https://ghproxy.net/https://github.com/.insteadOf https://github.com/`，直连 github.com 的地址也会被改写。GCM（system config `credential.helper=manager`）无可用凭据，调用会挂起。
+- `gh` keyring 里有 **`taikaikaikai-pixel`**（repo+workflow scope，仓库 owner）与 `dogrkk001`。**环境变量 `GH_TOKEN` 存在时会强制选中 dogrkk001（对该仓库 403）**——发版推送前必须先清掉它。
+- 步骤（PowerShell；token 只在内存中流转，不打印、不落盘）：
+
+```powershell
+$env:GH_TOKEN=$null
+$tok = gh auth token                  # 清掉 GH_TOKEN 后 active = taikaikaikai-pixel
+$env:PUSH_TOKEN = $tok
+$env:GIT_CONFIG_GLOBAL = <空配置文件>  # 绕过 ~/.gitconfig 的 insteadOf；system 的 GCM 由 credential.helper= 清掉
+git -c credential.helper= `
+    -c 'credential.helper=!f() { echo "username=x-access-token"; echo "password=$PUSH_TOKEN"; }; f' `
+    -c http.proxy=http://127.0.0.1:7890 `
+    push https://github.com/taikaikaikai-pixel/dsh-tap.git main vX.Y.Z
+```
+
+- 校验：`gh api repos/taikaikaikai-pixel/dsh-tap/commits/main --jq .sha` 必须等于本地 `git rev-parse HEAD`；`gh api repos/taikaikaikai-pixel/dsh-tap/git/ref/tags/vX.Y.Z` 的 `object.type` 必须是 `tag`（annotated）。
+- 首用实录（0.21.0）：main `8cdd31e..feb6849` + `v0.21.0` 推送成功，远端 SHA 与本地一致。
+
 ## 生态调研：CodeBuddy/Trae/Qoder 同类实现对比（2026-10-05 完成，docs/research-eco-comparison.md）
 
 > 状态：**调研报告 v1 落盘（本会话）**。GitHub 同类实现撒网 ~55 个、README 级深读 24 个（子 agent 并行两路 + 主线程直查两路；两路 agent 因并发限额失败改主线程补跑）。核心结论：①**认证路线韧性**——workbuddy2api-hub 实证 CodeBuddy 桌面端 2026-09-24 起凭据改 $wbEncrypted 加密存储、"读桌面凭据派"整体死亡，本仓库全通道自持 OAuth 路线得到反向验证；②COSY 签名出现第二实现自述（agent2api/Rust，未核）且其 CN 端点 gateway.qoder.com.cn 与本仓库结论互证；③与生态规范的真实欠账 = 账号池、网关可选共享密钥、SSE 心跳注释、maxTokens 知识表回落链；④**P0 = CodeBuddy 桥接入 sanitizeToolPairing**——hub 自述为 CodeBuddy 上游修 11148 工具史错误，激活了 2026-09-22 待办与踩坑 #63 的既有缺口（先实测复现再接，外部码表不直接采信，#22）；**该 P0 已于 2026-10-18 落地并实测**：`providers/codebuddy/index.js` 的 `transformChatPayload` 调 `sanitizeToolPairing`（`providers/tool-pairing.js:50`）、`providers/codebuddy/errors.js` 收 `11148 = tool calls and tool results do not match`；deepseek-v4-pro 上「孤儿 tool」与「声明了 tool_call 却没结果」实测 HTTP 400 / code=11148（原文 `tool calls and tool results do not match, please start a new conversation and retry`），同一坏体经真实修复件后 200，而 **glm-5.3-flash 对全部坏体静默 200（拒绝面按模型家族分裂）**，`content:null`/缺键在本上游未复现 #41；证据 `docs/probes/codebuddy-pairing-2026-10-18.json`（16 臂）、探针 `scripts/probe-codebuddy-pairing.mjs`、`scripts/verify-bridge.mjs` §18（套件 116 断言全绿）；**边界**：探针仅覆盖 2 个模型（其余 21 个未测），外部自述的 6004/402 仍未考证；⑤明确不做：签到/成长任务自动化、身份重置类、独立多协议部署（理由在 doc §4「不做」清单；注：Anthropic Messages / OpenAI Responses 两面 2026-10-18 以「长在既有回环网关上、不新起服务器」的收窄口径落地，经主控确认；**同日修订挂载范围——两面已接上 CodeBuddy 桥 `:3901`，与 Trae `:3902` / Qoder `:3903` 三通道齐备**，桥侧接缝 `protocolSurfaces` / `chatPath` 是 provider 无关的通用件）。
