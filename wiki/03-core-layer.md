@@ -1,6 +1,19 @@
 # 03 — core/ 凭据边缘层
 
-> 目录：[core/](../core)。**Provider 无关层**——四份文件不得出现任何具体上游名字（CodeBuddy/Trae/Ark…）、网关错误码或厂商头名，`scripts/verify-core-generic.mjs` 的静态扫描锁定该契约。上游特化全部经 provider 钩子注入（见 [bridge](#corebridgejs) 一节）。
+> 目录：[core/](../core)。**Provider 无关层**——五份文件不得出现任何具体上游名字（CodeBuddy/Trae/Ark…）、网关错误码或厂商头名，`scripts/verify-core-generic.mjs` 的静态扫描锁定该契约。上游特化全部经 provider 钩子注入（见 [bridge](#corebridgejs) 一节）。
+
+## core/net-guards.js — 回环面判定（唯一真源）
+
+本插件有六处本地面要回答同一个问题——「这个 Host/Origin/hostname 是不是回环」：各上游的本地流式桥、两条订阅通道的翻译网关（[providers/loopback-gateway.js](../providers/loopback-gateway.js)）、`/dsh-tap/settings` 设置路由、各 OAuth 授权页门禁、baseURL 明文校验。此前六处各写一份（三份四元素白名单、三份三元素子集），改一处漏一处即留缺口且无测试报警（踩坑 #63）——故收成本模块一份。
+
+| 导出 | 签名 | 说明 |
+|------|------|------|
+| `LOOPBACK_HOSTNAMES` | `Set<string>` | `127.0.0.1 / localhost / ::1 / [::1]`（裸 Host 值可能给 `::1`；`new URL()` 解析出的 IPv6 hostname 保留方括号） |
+| `hostnameIsLoopback` | `(hostname) => boolean` | 裸 hostname 判定（调用方已自行解析，如 `new URL(x).hostname`） |
+| `hostIsLoopback` | `(hostHeader) => boolean` | Host 头判定：可带端口，URL 解析出 hostname 再比对；空值/畸形一律拒绝 |
+| `originMatchesHost` | `(req) => boolean` | Origin 门：**无 Origin 放行**，有则 host:port 必须与 Host 完全一致（踩坑 #61：壳转发剥 Origin） |
+
+`core/bridge.js` 重新导出 `hostIsLoopback` / `originMatchesHost`（保持既有 import 路径），内部亦直接用这两个函数。
 
 ## core/json-store.js — 文件持久化与凭据解析
 

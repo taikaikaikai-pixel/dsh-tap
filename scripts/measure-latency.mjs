@@ -36,6 +36,7 @@ import { appendFileSync, mkdtempSync, readFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { makeMockCtx, disposeAll } from './lib/mock-ctx.mjs'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -190,11 +191,8 @@ async function main() {
   if (MODE === 'mock') {
     const { server, port: gwPort } = await startMockGateway()
     const bridgePort = await freePort()
-    const ctx = {
-      inject: (_deps, cb) => cb({ webServer: { register() {} } }),
-      web: { registerSearchProvider: () => () => {}, registerFetchProvider: () => () => {} },
-      on: () => {},
-    }
+    const effects = []
+    const ctx = makeMockCtx({ effects })
     apply(ctx, { baseURL: `http://127.0.0.1:${gwPort}`, bridgePort })
     await sleep(250)
     const bridgeBase = `http://127.0.0.1:${bridgePort}`
@@ -220,6 +218,7 @@ async function main() {
       )
     }
     server.close()
+    await disposeAll(effects) // apply() 的 teardown：关掉本进程起的桥
   } else {
     // real: vision through the running dsh bridge, search direct to gateway
     const settingsFile = join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'codebuddy-plugin.json')

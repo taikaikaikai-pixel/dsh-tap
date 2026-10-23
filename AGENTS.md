@@ -12,7 +12,7 @@
 |---|---|---|---|
 | 静态配置 | `cordis.patch.yml` | provider 路由指向本地桥 + 模型清单 + web 钉选 + `insert` 入口 | wiki/01-architecture.md |
 | 组合根 | `index.js` + `host-config.js` | Config/schema、模型管理与宿主配置层镜像（host-config 按宿主版本选路）、凭据编排、设置路由、apply 生命周期 | wiki/02-composition-root.md |
-| 凭据边缘层 | `core/` | **provider 无关**：json-store / rotation / usage-meter / bridge；禁止任何 CodeBuddy 特化（verify-core-generic 锁） | wiki/03-core-layer.md |
+| 凭据边缘层 | `core/` | **provider 无关**：json-store / rotation / usage-meter / net-guards（回环门唯一真源）/ bridge；禁止任何 CodeBuddy 特化（verify-core-generic 锁） | wiki/03-core-layer.md |
 | 上游适配器 | `providers/codebuddy/` | CodeBuddy 全部网关事实：headers/errors/oauth/catalog/agenttool/images | docs/rules/ + wiki/04-provider-codebuddy.md |
 | 上游适配器 | `providers/trae/` | TraeWork CN：自持设备密钥 OAuth / state.vscdb 目录 / 翻译网关 :3902 | docs/reverse/ + wiki/05-provider-trae.md |
 | 上游适配器 | `providers/qoder/` | Qoder CN：PKCE 设备流 / COSY WASM 签名 / 加密信封翻译网关 :3903 | docs/goals/qoder-cn-provider-design.md + wiki/10-provider-qoder.md |
@@ -59,6 +59,7 @@
 `#70` pkill会自匹配调用壳·括号写法[A]bc
 `#71` Ghidra save-at-end·巨型目标先import落库再分段·超时须双判据
 `#72` 挖掘needle形态≠文档URL形态·原始字节多形态扫描先行
+`#73` 协议面收SSE字节须流式TextDecoder·String(uint8)展开数字串致静默空流
 
 ## 常用命令（probe/联调/取证脚本的用法注释见 wiki/09-run-and-test.md）
 
@@ -82,6 +83,10 @@ CODEBUDDY_BRIDGE_LOG=/tmp/bridge.jsonl dsh web
 
 全套知识（套件清单与断言基线 / 区块驱动口径 / 实例与 token / 零真实写入纪律）在项目 skill `.agents/skills/dsh-ui-regression/`——跑 UI 回归前先加载它。
 
+## 逆向分析
+
+巨型二进制/上游桌面端（Trae 双 DLL、Qoder app.asar/wasm 等）的流水线纪律在项目 skill `.agents/skills/dsh-re-pipeline/`——动这类目标前先加载它；通用调查方法见用户级 skill `reverse-engineer-anything`。
+
 ## 文档地图（改哪类代码，先读哪份）
 
 - 改 CodeBuddy 出站行为（headers/UA/错误码/目录/额度/缓存/审核）→ docs/rules/ 对应专题：routing、ua-validation、quota-signals、prompt-cache、content-moderation、dev-role-boundary、oauth-handshake；错误码表在 providers/codebuddy/errors.js
@@ -97,7 +102,7 @@ CODEBUDDY_BRIDGE_LOG=/tmp/bridge.jsonl dsh web
 
 ## 维护纪律
 
-- 本文是薄索引，不铺长段落：新实测事实 → docs/rules/gateway-facts.md（或对应专题）；新坑 → docs/pitfalls.md 取新编号 + 本文踩坑速查加一个 `#N` 标签；命令/probe 用法 → wiki/09-run-and-test.md；浏览器回归知识 → `.agents/skills/dsh-ui-regression/`。
+- 本文是薄索引，不铺长段落：新实测事实 → docs/rules/gateway-facts.md（或对应专题）；新坑 → docs/pitfalls.md 取新编号 + 本文踩坑速查加一个 `#N` 标签；命令/probe 用法 → wiki/09-run-and-test.md；浏览器回归知识 → `.agents/skills/dsh-ui-regression/`；逆向分析流水线纪律 → `.agents/skills/dsh-re-pipeline/`。
 - 体积与口径由断言锁维护：本地 `node scripts/verify-agents-md.mjs`（行数/字节/引用路径/踩坑编号连续性），CI 双闸门（`agents-md lint` + `alint`，见 .github/workflows/node.js.yml）。**不写会增长的硬编码口径**（如"踩坑 #1–#48"）。
 - 版本历史只写 CHANGELOG.md，不在本文铺章节。
 - Git 纪律：长期分支只有 `main`；每次 `chore(release)` 当场打 annotated tag `vX.Y.Z` 并随分支推送；**永不 rebase 已推送历史**（CHANGELOG 引用提交 SHA）。细则见 docs/rules/STATE.md「分支拓扑」。

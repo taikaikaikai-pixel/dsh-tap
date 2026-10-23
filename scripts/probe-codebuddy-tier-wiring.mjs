@@ -29,6 +29,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 
 import { tmpdir, homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { makeMockCtx, disposeAll } from './lib/mock-ctx.mjs'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const UPSTREAM = 'https://copilot.tencent.com'
@@ -119,11 +120,8 @@ async function main() {
 
   const { apply } = await import(new URL('../index.js', import.meta.url).href)
   const routes = {}
-  const ctx = {
-    inject: (_deps, cb) => cb({ webServer: { register: (r) => { routes[r.path] = r.handler } } }),
-    web: { registerSearchProvider: () => () => {}, registerFetchProvider: () => () => {} },
-    on: () => {},
-  }
+  const effects = []
+  const ctx = makeMockCtx({ routes, effects })
   apply(ctx, {
     baseURL: `http://127.0.0.1:${proxyPort}`,
     bridgePort,
@@ -235,6 +233,7 @@ async function main() {
   console.log(failures === 0 ? '\nall wiring checks passed' : `\n${failures} check(s) FAILED`)
   console.log(`证据落盘：${OUT}`)
   proxy.close()
+  await disposeAll(effects) // apply() 的 teardown：关掉本进程起的桥
   process.exit(failures === 0 ? 0 : 1)
 }
 

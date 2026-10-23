@@ -30,13 +30,13 @@
  * 生命周期纪律（踩坑 #17）：listen 失败降级 runtime.lastError，绝不抛出。
  */
 
-import { createServer } from 'node:http'
 import { appendFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 
 import { SessionLimiter, extractSessionId } from '../../core/bridge.js'
 import { sanitizeToolPairing, describeRepair } from '../tool-pairing.js'
+import { createLoopbackGateway } from '../loopback-gateway.js'
 import { QODER_COSY_VERSION } from './cosy.js'
-import { randomUUID } from 'node:crypto'
 
 /** 上游接受的 OpenAI 字段白名单（dsh/pi-ai 可能附带私有扩展，不透传）。 */
 const CHAT_FIELDS = [
@@ -48,34 +48,6 @@ const CHAT_FIELDS = [
 // 出站 messages 的 tool 配对不变量修复：实现与根因见 providers/tool-pairing.js
 // （踩坑 #39）。本模块重新导出，保持既有 import 路径与回归断言可用。
 export { sanitizeToolPairing }
-
-/** Host 门（同 trae gateway）：回环端口是唯一防线，Host 必须回环。 */
-function isLoopbackHost(hostHeader) {
-  if (typeof hostHeader !== 'string' || !hostHeader) return false
-  let hostname
-  try {
-    hostname = new URL(`http://${hostHeader}`).hostname
-  } catch {
-    return false
-  }
-  return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1' || hostname === '[::1]'
-}
-
-/**
- * Origin 门（与 Host 门互补，index.js localGuardFailure 同口径）：浏览器
- * 跨站请求（含 navigator.sendBeacon）恒带 Origin——host:port 必须与 Host
- * 完全一致才放行，否则即借浏览器烧额度的 CSRF。无 Origin 放行：本机
- * fetch/curl 与剥 Origin 的壳转发均不带该头，Host 门仍把守回环。
- */
-function isLoopbackOrigin(req) {
-  const origin = req.headers.origin
-  if (origin === undefined) return true
-  try {
-    return new URL(origin).host === req.headers.host
-  } catch {
-    return false
-  }
-}
 
 /**
  * Qoder SSE 信封解析器：吃原始 data 文本行，产出翻译事件
@@ -491,73 +463,15 @@ export function createQoderGateway(deps) {
     }
   }
 
-  function listen(port) {
-    const server = createServer((req, res) => {
-      // Host 门 + Origin 门：Host 必须回环（防 DNS rebinding / LAN 直连），
-      // 带 Origin 时其 host:port 必须与 Host 一致（防跨站借浏览器烧额度）。
-      if (!isLoopbackHost(req.headers.host) || !isLoopbackOrigin(req)) {
-        req.resume()
-        res.writeHead(403, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: { message: 'forbidden: loopback host + same-origin required' } }))
-        return
-      }
-      // Buffer 收集 + 一次解码（踩坑 #28）；超 32MB 答 413（同 core/bridge.js），
-      // 不静默 reset——调用方能拿到真实状态码。
-      const chunks = []
-      let received = 0
-      let oversize = false
-      req.on('data', (c) => {
-        if (oversize) return
-        chunks.push(c)
-        received += c.length
-        if (received > 32 * 1024 * 1024) {
-          oversize = true
-          chunks.length = 0
-          res.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' })
-          res.end(JSON.stringify({ error: { message: 'request body too large (limit 32MiB)' } }))
-        }
-      })
-      req.on('end', () => {
-        if (oversize) return
-        const rawBody = Buffer.concat(chunks).toString('utf8')
-        const path = req.url?.split('?')[0] ?? ''
-        try {
-          if (req.method === 'POST' && (path === '/v1/chat/completions' || path === '/chat/completions')) {
-            handleChat(req, res, rawBody).catch(() => { if (!res.headersSent) { res.writeHead(500); res.end() } })
-            return
-          }
-          if (req.method === 'GET' && (path === '/v1/models' || path === '/models')) {
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({
-              object: 'list',
-              data: (deps.getCatalogProfiles() ?? []).map((p) => ({ id: p.id, object: 'model', created: Math.floor(Date.now() / 1000) })),
-            }))
-            return
-          }
-          res.writeHead(404, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ error: { message: `no route: ${req.method} ${path}` } }))
-        } catch (err) {
-          if (!res.headersSent) res.writeHead(500)
-          res.end(String(err?.message ?? err))
-        }
-      })
-    })
-    server.on('error', (err) => {
-      deps.runtime.running = false
-      deps.runtime.lastError = err?.code ?? String(err?.message ?? err)
-      process.stderr.write(`${logPrefix} gateway :${port} unavailable: ${deps.runtime.lastError}（Qoder 分区其余功能不受影响）\n`)
-    })
-    server.on('listening', () => {
-      deps.runtime.port = server.address()?.port ?? port
-      deps.runtime.running = true
-      deps.runtime.lastError = null
-    })
-    server.listen(port, '127.0.0.1')
-    return () => new Promise((resolve) => {
-      server.close(() => resolve())
-      server.closeAllConnections?.()
-    })
-  }
+  // 服务器本体（Host/Origin 门、收体、路由、listen 失败不崩宿主）在共用骨架里：
+  // 与 Trae 通道逐字节同形，差异只有下面这三个注入项。安全门只此一份实现。
+  const { listen } = createLoopbackGateway({
+    runtime: deps.runtime,
+    logPrefix,
+    unavailableNote: '（Qoder 分区其余功能不受影响）',
+    listModelIds: () => (deps.getCatalogProfiles() ?? []).map((p) => p.id),
+    handleChat,
+  })
 
   return { listen, handleChat }
 }

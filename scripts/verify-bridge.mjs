@@ -51,6 +51,30 @@
  *      (generation guard — a post-logout authorization never signs back
  *      in; uninterrupted poll still completes); a failed refresh and an
  *      expired refreshExpiresAt both surface needsRelogin in oauthStatus
+ *  18. outbound tool pairing + visibility normalization
+ *      (providers/tool-pairing.js invariants now also on the CodeBuddy
+ *      bridge, 踩坑 #63 / #39 / #41): orphan tool messages get an
+ *      assistant stub, content:null / missing-key messages become '',
+ *      a well-formed history is byte-identical (no-op), and the
+ *      developer→system rewrite + reasoning_effort injection still fire
+ *      in the same request
+ *  19. protocol surfaces mounted on the bridge (CodeBuddy is the DEFAULT
+ *      channel — the local-client protocols must not be Trae/Qoder-only):
+ *      POST /v1/messages + /v1/responses are answered by the protocol
+ *      surfaces through the bridge's own internal chat face (translated
+ *      payload on the bridge chat path, session affinity carried over),
+ *      streaming event sequences for both faces, non-streaming protocol
+ *      JSON aggregation, the bridge Host/Origin gates and the 413 body
+ *      ceiling covering the new faces, and byte-identical passthrough on
+ *      the existing /v2/chat/completions route (surfaces declined)
+ *  20. harness-identity neutralization in system prompts (2026-10-21
+ *      gateway content-fingerprint gate, same code 11128 as the developer
+ *      role gate but a distinct surface — HTTP 400 + displayMsg/displayTips/
+ *      actions): the bridge rewrites the DSH kernel's fixed identity opener
+ *      `You are an AI agent powered by DeepSeek Harness.` → `...assistant...`
+ *      in system messages on the way out (semantically equivalent, community-
+ *      tested 400→200); non-matching system content is byte-identical, and
+ *      the existing developer→system rewrite still fires in the same request
  *
  * Usage: node scripts/verify-bridge.mjs   (no network, no credentials)
  */
@@ -62,6 +86,10 @@ import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createBridge } from '../core/bridge.js'
+import { createProtocolSurfaces } from '../providers/protocols/index.js'
+import { invokeInternalChat } from '../providers/protocols/chat-capture.js'
+import { makeMockCtx, disposeAll } from './lib/mock-ctx.mjs'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const UPSTREAM_LATENCY_MS = 250
@@ -177,6 +205,34 @@ const upstream = createServer((req, res) => {
           res.write('data: {"id":"mock","choices":[{"index":0,"delta":{"content":"partial "}}]}\n\n')
           return // 一块之后沉默
         }
+        if (parsed?.model === 'zh-split') {
+          // [19] 跨分片多字节（踩坑 #28 同族）：SSE 帧含中文，且第一块**切在多字节
+          // 字符内部**——桥的 SSE 中继写 Uint8Array，捕获式 res 若逐分片解码就会
+          // 把它损坏成 U+FFFD。两块之间留 30ms，保证桥侧 reader 分两次拿到。
+          res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+          const first = `data: ${JSON.stringify({ id: 'mock', choices: [{ index: 0, delta: { content: '中文' } }] })}\n\n`
+          const bytes = Buffer.from(first, 'utf8')
+          const cut = bytes.indexOf(Buffer.from('中', 'utf8')) + 1 // 落在 3 字节字符内部
+          res.write(bytes.subarray(0, cut))
+          setTimeout(() => {
+            res.write(bytes.subarray(cut))
+            res.end([
+              `data: ${JSON.stringify({ id: 'mock', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 } })}`,
+              '',
+              'data: [DONE]',
+              '',
+              '',
+            ].join('\n'))
+          }, 30)
+          return
+        }
+        if (parsed?.model === 'upstream-400') {
+          // [19] 错误面：内部 chat 面非 200（上游 JSON 错误体）→ 协议面必须
+          // 保留真实状态码 + 原因 + 内部 code（踩坑 #7），不能变成 200 空流。
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ code: 11102, msg: 'model [x] service info not found' }))
+          return
+        }
         res.writeHead(200, { 'Content-Type': 'text/event-stream' })
         res.end([
           'data: {"id":"mock","choices":[{"index":0,"delta":{"content":"hello "}}]}',
@@ -219,6 +275,52 @@ async function freePort() {
   return port
 }
 
+/**
+ * 原生 socket 请求：[19] 的安全门断言要伪造 Host/Origin，而 undici 的 fetch
+ * 不允许设置这两个头（Fetch 规范的 forbidden header names）。响应必须被消费
+ * （踩坑 #29：不消费的 socket 永不派发 close，断言自己挂死）。
+ */
+function rawHttp({ port, method = 'POST', path, headers = {}, body = '' }) {
+  return new Promise((resolve, reject) => {
+    const head = [
+      `${method} ${path} HTTP/1.1`,
+      ...Object.entries(headers).map(([k, v]) => `${k}: ${v}`),
+      `Content-Length: ${Buffer.byteLength(body)}`,
+      'Connection: close',
+      '',
+      '',
+    ].join('\r\n')
+    const sock = connect(port, '127.0.0.1', () => sock.write(head + body))
+    let raw = ''
+    sock.on('data', (d) => { raw += d.toString('utf8') })
+    sock.on('error', reject)
+    sock.on('close', () => {
+      const status = Number(/^HTTP\/1\.1 (\d+)/.exec(raw)?.[1] ?? 0)
+      const sep = raw.indexOf('\r\n\r\n')
+      resolve({ status, text: sep >= 0 ? raw.slice(sep + 4) : '' })
+    })
+  })
+}
+
+/** SSE 文本 → [{event, data}]（两个协议面都用具名事件）。 */
+function parseSseEvents(text) {
+  const frames = []
+  for (const block of String(text).split('\n\n')) {
+    if (!block.trim()) continue
+    let event = null
+    let data = null
+    for (const line of block.split('\n')) {
+      if (line.startsWith('event:')) event = line.slice(6).trim()
+      else if (line.startsWith('data:')) {
+        const raw = line.slice(5).trim()
+        try { data = JSON.parse(raw) } catch { data = raw }
+      }
+    }
+    if (event) frames.push({ event, data })
+  }
+  return frames
+}
+
 async function main() {
   const upstreamPort = await freePort()
   await new Promise((r) => upstream.listen(upstreamPort, '127.0.0.1', r))
@@ -228,11 +330,8 @@ async function main() {
   // Route registrations are captured so the settings route can be driven
   // in-process (the usage view is asserted through it, like the card does).
   const routes = {}
-  const ctx = {
-    inject: (_deps, cb) => cb({ webServer: { register: (r) => { routes[r.path] = r.handler } } }),
-    web: { registerSearchProvider: () => () => {}, registerFetchProvider: () => () => {} },
-    on: () => {},
-  }
+  const effects = []
+  const ctx = makeMockCtx({ routes, effects })
   apply(ctx, {
     baseURL: `http://127.0.0.1:${upstreamPort}`,
     bridgePort,
@@ -589,11 +688,7 @@ async function main() {
     // process (bridgeRuntime is per-process module state; production runs one
     // plugin instance per process, so last-apply-wins is correct here).
     const routes2 = {}
-    const ctx2 = {
-      inject: (_deps, cb) => cb({ webServer: { register: (r) => { routes2[r.path] = r.handler } } }),
-      web: { registerSearchProvider: () => () => {}, registerFetchProvider: () => () => {} },
-      on: () => {},
-    }
+    const ctx2 = makeMockCtx({ routes: routes2, effects })
     apply(ctx2, { baseURL: `http://127.0.0.1:${upstreamPort}`, bridgePort: occupiedPort })
     await sleep(300)
     // Reaching this line at all is half the regression: the process survived.
@@ -841,21 +936,47 @@ async function main() {
       r3 !== 'TIMEOUT')
     setLimit(2)
 
-    // 15c. 超 32MB → 413（fetch/undici 对“边发边收早回”的容忍度不一，走裸 socket）
-    const bigLen = 33 * 1024 * 1024
-    const head413 = await new Promise((resolve, reject) => {
-      const sock = connect(bridgePort, '127.0.0.1', () => {
-        sock.write(`POST /v2/chat/completions HTTP/1.1\r\nHost: 127.0.0.1:${bridgePort}\r\nContent-Type: application/json\r\nContent-Length: ${bigLen}\r\nConnection: close\r\n\r\n`)
-        sock.write(Buffer.alloc(bigLen, 120)) // 'x' × 33MB
+    // 15c. 超上限 → 413（旧行为 req.destroy()：调用方只见连接被重置，拿不到任何
+    //      状态码）。**不再真推 33MiB**：`createBridge` 的 bodyLimitBytes 可注入
+    //      （默认仍 32MiB、文案逐字节不变），此处起一个 1KiB 上限的专用桥——
+    //      毫秒级、且避开「边推边收」收尾窗口里偶发的对端 RST（实测该窗口下
+    //      裸 ECONNRESET 会偶发逃逸成未处理异常，Windows 上约 1/10~1/20 概率）。
+    {
+      const limitPort = await freePort()
+      const limitRuntime = { running: false, port: null, lastError: null }
+      const limitBridge = createBridge({
+        settings: () => ({ baseURL: `http://127.0.0.1:${upstreamPort}`, maxConcurrentPerSession: 2 }),
+        provider: {
+          bridgeHeaders: () => ({}),
+          transformChatPayload: () => {},
+          extractUsage: (c) => c.usage ?? null,
+          extractStreamError: (c) => (c.error ? c : null),
+          bridgeResponseId: 'dsh-codebuddy-stream-bridge',
+          logHeaderNames: [],
+          sentinelAuth: 'Bearer dsh-codebuddy-bridge',
+          texts: { credentialUnavailable: 'credential unavailable' },
+        },
+        withCredentials: (attempt) => attempt({ authorization: 'Bearer ck_bridge_test_key', headers: {} }),
+        meter: { record: () => {} },
+        forensics: { logPath: () => undefined, dumpDir: () => undefined },
+        runtime: limitRuntime,
+        bodyLimitBytes: 1024,
       })
-      let out = ''
-      sock.on('data', (d) => { out += d.toString('utf8') })
-      // 413 在收满 32MB 即回；剩余字节撞在关闭中的 socket 上不算失败。
-      sock.on('error', (err) => { out ? resolve(out) : reject(err) })
-      sock.on('close', () => resolve(out))
-    })
-    check('body past 32MB gets a real 413 JSON (was: silent req.destroy)',
-      /HTTP\/1\.1 413/.test(head413) && /too large/.test(head413), head413.slice(0, 140))
+      const stopLimit = limitBridge.listen(limitPort)
+      await sleep(200)
+      const over = await fetch(`http://127.0.0.1:${limitPort}/v2/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pad: 'x'.repeat(4096) }),
+      })
+      const overJson = await over.json().catch(() => null)
+      check('body past the limit gets a real 413 JSON (was: silent req.destroy)',
+        over.status === 413 && /too large/.test(overJson?.error?.message ?? ''), `HTTP ${over.status}`)
+      check('413 response carries Connection: close',
+        (over.headers.get('connection') ?? '').toLowerCase() === 'close',
+        String(over.headers.get('connection')))
+      await stopLimit()
+    }
 
     // 15d. 聚合 usage 回传
     const resU = await chat({ model: 'm1', stream: false, messages: [] })
@@ -1031,6 +1152,459 @@ async function main() {
     writeLayer({})
   }
 
+  // ------------------- 18. 出站 tool 配对 + 可见性体检（CodeBuddy 桥接入锁）
+  //   providers/tool-pairing.js 的不变量（踩坑 #39/#41）此前只接在 Qoder/Trae
+  //   两个翻译网关上，CodeBuddy 桥漏接（#63 成对审计；research-eco-comparison
+  //   §4 P0-1）。本节锁四件事：a) 孤儿 tool → 补 assistant 桩；b) content:null /
+  //   缺键 → 可见性归一为 ''；c) 良构历史逐字节不变（防"修出问题"）；d) 同一
+  //   请求里 developer→system 与档位注入照旧（既有行为不回归）。
+  console.log('\n[18] outbound tool pairing + visibility normalization')
+  {
+    const layerPath = join(process.env.DSH_HOME, 'codebuddy-plugin.json')
+    const writeLayer = (obj) => writeFileSync(layerPath, JSON.stringify(obj) + '\n')
+
+    // a) 孤儿 tool（宿主丢掉了 stopReason=error/aborted 的 assistant，只留下它的
+    //    toolResult）→ 必须补一条仅含该 tool_call 的 assistant 桩，结果原样保留。
+    let before = arrivals.length
+    let res = await chat({ model: 'm1', stream: true, messages: [
+      { role: 'user', content: 'ping' },
+      { role: 'tool', tool_call_id: 'call_orphan_1', name: 'get_current_time', content: '12:00' },
+    ] })
+    await res.text()
+    let fwd = JSON.parse(arrivals[before]?.raw ?? 'null')
+    check('orphan tool message gets a synthesized assistant stub (id + tool name kept)',
+      fwd?.messages?.[1]?.role === 'assistant'
+        && fwd.messages[1].tool_calls?.[0]?.id === 'call_orphan_1'
+        && fwd.messages[1].tool_calls?.[0]?.function?.name === 'get_current_time'
+        && fwd.messages[1].content === ''
+        && fwd.messages[2]?.role === 'tool' && fwd.messages[2].tool_call_id === 'call_orphan_1'
+        && fwd.messages[2].content === '12:00',
+      JSON.stringify(fwd?.messages))
+    check('stub uses the OpenAI dialect the pairing checker reads (role/content/tool_calls)',
+      JSON.stringify(Object.keys(fwd?.messages?.[1] ?? {})) === JSON.stringify(['role', 'content', 'tool_calls']),
+      JSON.stringify(Object.keys(fwd?.messages?.[1] ?? {})))
+
+    // b) content:null / 缺键 → ''（#41 主因：严格上游把 null 载体当"不存在"）
+    before = arrivals.length
+    res = await chat({ model: 'm1', stream: true, messages: [
+      { role: 'user', content: 'ping' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'call_c1', type: 'function', function: { name: 'get_current_time', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'call_c1', content: null },
+    ] })
+    await res.text()
+    fwd = JSON.parse(arrivals[before]?.raw ?? 'null')
+    check('content:null assistant + tool become "" (visibility normalization)',
+      fwd?.messages?.[1]?.content === '' && fwd?.messages?.[2]?.content === '',
+      JSON.stringify(fwd?.messages))
+
+    before = arrivals.length
+    res = await chat({ model: 'm1', stream: true, messages: [
+      { role: 'user', content: 'ping' },
+      { role: 'assistant', tool_calls: [{ id: 'call_m1', type: 'function', function: { name: 'get_current_time', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'call_m1' },
+    ] })
+    await res.text()
+    fwd = JSON.parse(arrivals[before]?.raw ?? 'null')
+    check('missing content key becomes an explicit "" key on both carriers',
+      fwd?.messages?.[1]?.content === '' && 'content' in (fwd?.messages?.[1] ?? {})
+        && fwd?.messages?.[2]?.content === '' && 'content' in (fwd?.messages?.[2] ?? {}),
+      JSON.stringify(fwd?.messages))
+
+    // c) 良构历史 no-op：出站字节必须与入站**逐字节**相同（多改一个字节就是回归）
+    const wellFormed = [
+      { role: 'system', content: 'You are a test agent.' },
+      { role: 'user', content: '现在几点？' },
+      { role: 'assistant', content: '', tool_calls: [{ id: 'call_ok', type: 'function', function: { name: 'get_current_time', arguments: '{"tz":"UTC"}' } }] },
+      { role: 'tool', tool_call_id: 'call_ok', content: '12:00' },
+      { role: 'assistant', content: '现在是 12:00。' },
+      { role: 'user', content: '谢谢' },
+    ]
+    const wellFormedBody = { model: 'm1', stream: true, messages: wellFormed }
+    before = arrivals.length
+    res = await chat(wellFormedBody)
+    await res.text()
+    check('well-formed history is byte-identical upstream (no-op, nothing "repaired")',
+      arrivals[before]?.raw === JSON.stringify(wellFormedBody),
+      `${arrivals[before]?.raw?.length} vs ${JSON.stringify(wellFormedBody).length} bytes`)
+
+    // d) 既有行为不回归：同一请求里 developer→system 与档位注入照旧生效
+    writeLayer({ effortByModel: { 'deepseek-v4-pro': 'high' } })
+    before = arrivals.length
+    res = await chat({ model: 'deepseek-v4-pro', stream: true, messages: [
+      { role: 'developer', content: 'You are a test agent.' },
+      { role: 'user', content: 'ping' },
+      { role: 'tool', tool_call_id: 'call_d1', content: 'r' },
+    ] })
+    await res.text()
+    fwd = JSON.parse(arrivals[before]?.raw ?? 'null')
+    check('developer→system rewrite still applies alongside the pairing repair',
+      fwd?.messages?.[0]?.role === 'system' && fwd.messages.every((m) => m.role !== 'developer'),
+      JSON.stringify(fwd?.messages?.map((m) => m.role)))
+    check('reasoning_effort injection still applies alongside the pairing repair',
+      fwd?.reasoning_effort === 'high', JSON.stringify(fwd?.reasoning_effort))
+    check('orphan tool repaired in the same request as the other rewrites',
+      fwd?.messages?.some((m) => m.role === 'assistant' && m.tool_calls?.[0]?.id === 'call_d1'),
+      JSON.stringify(fwd?.messages))
+
+    writeLayer({}) // 自净：本节之后不再有断言，也不给别的节留状态
+  }
+
+  // ------------------- 19. 桥挂载点：两个本机客户端协议面（默认主通道）
+  //   CodeBuddy 是**默认主通道**：`/v1/messages`（Anthropic Messages）与
+  //   `/v1/responses`（OpenAI Responses）此前只挂在 Trae/Qoder 的翻译网关上，
+  //   只有 CodeBuddy 凭据的用户完全拿不到。本节锁桥侧挂载点：
+  //   a) 两面经**桥**被协议面处理——内部 chat 面走桥自己的 chat 路径
+  //      （cordis.patch.yml 的 /v2 + /chat/completions），且出站体是翻译后的
+  //      OpenAI chat payload，不是被 proxyUpstream 原样转发的协议体；
+  //   b) 两面各一条正常流式响应的事件序列；
+  //   c) 非流式（stream:false）得到协议化聚合 JSON（内部面仍恒流式）；
+  //   d) 桥的 Host 门与 Origin 门对新面同样生效（403）；
+  //   e) 413 收体上限对新面同样生效；
+  //   f) 既有 /v2/chat/completions 通用转发零回归（良构请求逐字节不变）。
+  console.log('\n[19] protocol surfaces mounted on the bridge (Anthropic Messages / OpenAI Responses)')
+  {
+    const layerPath = join(process.env.DSH_HOME, 'codebuddy-plugin.json')
+    const writeLayer = (obj) => writeFileSync(layerPath, JSON.stringify(obj) + '\n')
+    // 会话亲和：协议面的入站头必须原样到达内部 chat 面（桥按 session_id 亲和）。
+    writeLayer({ maxConcurrentPerSession: 2, sessionHeadersEnabled: true, sessionHeaderFormat: 'openai' })
+
+    // 合成 chat 路径的**证据链**（不猜）：cordis.patch.yml:84 把 codebuddy 路由
+    // 指到 http://127.0.0.1:3901/v2 ⇒ 入站 chat 路径 = <该路径>/chat/completions；
+    // core/bridge.js 的 isChat 判据是 endsWith('/chat/completions')、转发用
+    // `${s.baseURL}${req.url}`（s.baseURL 是上游根，不含 /v2）。这条对账把
+    // index.js 的 CODEBUDDY_CHAT_PATH 常量与 patch 钉在一起。
+    const patchText = readFileSync(join(ROOT, 'cordis.patch.yml'), 'utf8')
+    const routeBase = patchText.match(/baseURL:\s*http:\/\/127\.0\.0\.1:3901(\/[^\s]+)/)?.[1] ?? null
+    check('cordis.patch.yml pins the codebuddy route base at /v2', routeBase === '/v2', String(routeBase))
+    const chatPath = `${routeBase}/chat/completions`
+
+    // ---------------------------------------------------- a) + b) Anthropic
+    let before = arrivals.length
+    const aRes = await fetch(`${bridge}/v1/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-session-id': 'sess-proto' },
+      body: JSON.stringify({
+        model: 'glm-5.3', system: 'be brief', max_tokens: 64,
+        messages: [{ role: 'user', content: 'hi' }], stream: true,
+      }),
+    })
+    const aText = await aRes.text()
+    check('anthropic via bridge: 200 + text/event-stream',
+      aRes.status === 200 && (aRes.headers.get('content-type') ?? '').includes('text/event-stream'),
+      `HTTP ${aRes.status} ${aRes.headers.get('content-type')}`)
+    check('anthropic via bridge: protocol event stream (not the proxied upstream SSE)',
+      aText.includes('event: message_start') && !aText.includes('"id":"mock"'), aText.slice(0, 80))
+    const aUp = arrivals[before]
+    check('anthropic via bridge: drove the bridge internal chat face on the bridge chat path',
+      aUp?.path === chatPath, `${aUp?.path} vs ${chatPath}`)
+    const aUpBody = JSON.parse(aUp?.raw ?? 'null')
+    check('anthropic via bridge: upstream body is the translated OpenAI chat payload',
+      aUpBody?.model === 'glm-5.3' && aUpBody?.stream === true
+        && aUpBody?.messages?.[0]?.role === 'system' && aUpBody.messages[0].content === 'be brief'
+        && aUpBody?.messages?.[1]?.content === 'hi',
+      JSON.stringify(aUpBody?.messages))
+    check('anthropic via bridge: session affinity header reached the internal chat face',
+      aUp?.sessionId === 'sess-proto' && aUp?.clientRequestId === 'sess-proto',
+      JSON.stringify({ s: aUp?.sessionId, c: aUp?.clientRequestId }))
+    const aFrames = parseSseEvents(aText)
+    check('anthropic via bridge: streamed event sequence',
+      JSON.stringify(aFrames.map((f) => f.event)) === JSON.stringify([
+        'message_start', 'content_block_start', 'content_block_delta', 'content_block_delta',
+        'content_block_stop', 'message_delta', 'message_stop',
+      ]), JSON.stringify(aFrames.map((f) => f.event)))
+    check('anthropic via bridge: text deltas carry the upstream content',
+      aFrames.filter((f) => f.event === 'content_block_delta').map((f) => f.data.delta.text).join('') === 'hello world',
+      JSON.stringify(aFrames.filter((f) => f.event === 'content_block_delta').map((f) => f.data.delta)))
+
+    // ---------------------------------------------------- a) + b) Responses
+    before = arrivals.length
+    const rRes = await fetch(`${bridge}/v1/responses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'glm-5.3', input: 'hi', stream: true }),
+    })
+    const rText = await rRes.text()
+    check('responses via bridge: 200 + text/event-stream',
+      rRes.status === 200 && (rRes.headers.get('content-type') ?? '').includes('text/event-stream'),
+      `HTTP ${rRes.status} ${rRes.headers.get('content-type')}`)
+    check('responses via bridge: protocol event stream (not the proxied upstream SSE)',
+      rText.includes('event: response.created') && !rText.includes('"id":"mock"'), rText.slice(0, 80))
+    const rUp = arrivals[before]
+    check('responses via bridge: drove the bridge internal chat face on the bridge chat path',
+      rUp?.path === chatPath, `${rUp?.path} vs ${chatPath}`)
+    check('responses via bridge: upstream body is the translated OpenAI chat payload',
+      JSON.parse(rUp?.raw ?? 'null')?.messages?.[0]?.content === 'hi'
+        && JSON.parse(rUp?.raw ?? 'null')?.stream === true,
+      JSON.stringify(JSON.parse(rUp?.raw ?? 'null')?.messages))
+    const rFrames = parseSseEvents(rText)
+    check('responses via bridge: streamed event sequence',
+      JSON.stringify(rFrames.map((f) => f.event)) === JSON.stringify([
+        'response.created', 'response.in_progress', 'response.output_item.added',
+        'response.content_part.added', 'response.output_text.delta', 'response.output_text.delta',
+        'response.output_text.done', 'response.content_part.done', 'response.output_item.done',
+        'response.completed',
+      ]), JSON.stringify(rFrames.map((f) => f.event)))
+    check('responses via bridge: sequence_number 单调连续',
+      JSON.stringify(rFrames.map((f) => f.data.sequence_number)) === JSON.stringify([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+      JSON.stringify(rFrames.map((f) => f.data.sequence_number)))
+    check('responses via bridge: output_text.done carries the aggregated text',
+      rFrames.find((f) => f.event === 'response.output_text.done')?.data.text === 'hello world',
+      JSON.stringify(rFrames.find((f) => f.event === 'response.output_text.done')?.data))
+
+    // ------------------- 跨分片多字节（踩坑 #28 同族，锁捕获式 res 的流式解码）
+    before = arrivals.length
+    const zhRes = await fetch(`${bridge}/v1/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'zh-split', max_tokens: 8, messages: [{ role: 'user', content: 'hi' }], stream: true }),
+    })
+    const zhText = await zhRes.text()
+    const zhFrames = parseSseEvents(zhText)
+    check('multibyte text split mid-character across upstream chunks arrives intact',
+      zhFrames.filter((f) => f.event === 'content_block_delta').map((f) => f.data.delta.text).join('') === '中文'
+        && !zhText.includes('\uFFFD'),
+      JSON.stringify(zhText.slice(0, 160)))
+
+    // ---------------------------------------------------- c) 非流式聚合
+    before = arrivals.length
+    const aPlainRes = await fetch(`${bridge}/v1/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'glm-5.3', max_tokens: 64, messages: [{ role: 'user', content: 'hi' }], stream: false }),
+    })
+    const aPlain = await aPlainRes.json().catch(() => null)
+    check('anthropic non-stream via bridge: protocol JSON aggregation',
+      aPlainRes.status === 200 && aPlain?.type === 'message' && aPlain?.role === 'assistant'
+        && aPlain?.content?.[0]?.text === 'hello world' && aPlain?.stop_reason === 'end_turn'
+        && aPlain?.usage?.input_tokens === 3 && aPlain?.usage?.output_tokens === 2,
+      JSON.stringify(aPlain))
+    check('anthropic non-stream: internal face still forced to stream (upstream is stream-only)',
+      JSON.parse(arrivals[before]?.raw ?? 'null')?.stream === true)
+
+    before = arrivals.length
+    const rPlainRes = await fetch(`${bridge}/v1/responses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'glm-5.3', input: 'hi', stream: false }),
+    })
+    const rPlain = await rPlainRes.json().catch(() => null)
+    check('responses non-stream via bridge: protocol JSON aggregation',
+      rPlainRes.status === 200 && rPlain?.object === 'response' && rPlain?.status === 'completed'
+        && rPlain?.output_text === 'hello world'
+        && JSON.stringify(rPlain?.usage) === JSON.stringify({ input_tokens: 3, output_tokens: 2, total_tokens: 5 }),
+      JSON.stringify(rPlain))
+
+    // ---------------- 错误面成对审计（踩坑 #63）：两个新面各自映射上游错误
+    before = arrivals.length
+    const aErrRes = await fetch(`${bridge}/v1/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'upstream-400', max_tokens: 8, messages: [{ role: 'user', content: 'hi' }], stream: true }),
+    })
+    const aErr = await aErrRes.json().catch(() => null)
+    check('anthropic via bridge: upstream 400 → protocol error envelope (status + reason + code)',
+      aErrRes.status === 400 && aErr?.type === 'error' && aErr?.error?.type === 'invalid_request_error'
+        && /service info not found/.test(aErr.error.message) && /11102/.test(aErr.error.message),
+      JSON.stringify(aErr))
+    const rErrRes = await fetch(`${bridge}/v1/responses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'upstream-400', input: 'hi', stream: true }),
+    })
+    const rErr = await rErrRes.json().catch(() => null)
+    // 数字码方言保真（2026-10-19 已修）：CodeBuddy 上游的码是**数字**（11102…），
+    // 而协议信封的 code 是字符串字段。原先 surface.js 的 internalCode 只认字符串
+    // ⇒ Responses 信封落成 `code: null`，机器可读的码丢掉（原因仍在 message）。
+    // 现由 `normalizeCode()` 归一：字符串原样、有限非零数字转字符串、`0`（上游
+    // 成功哨兵）不当作码。此处锁新行为；判别力见 verify-protocols §9 的
+    // `status-400-numeric` 场景（关掉数字分支恰两条「码保留」断言变红）。
+    check('responses via bridge: upstream 400 → protocol error envelope (status + reason + numeric code normalized)',
+      rErrRes.status === 400 && rErr?.error?.type === 'invalid_request_error'
+        && /service info not found/.test(rErr.error.message) && rErr?.error?.code === '11102',
+      JSON.stringify(rErr))
+    check('failed protocol requests still reached the bridge internal chat face (not short-circuited)',
+      arrivals.slice(before).filter((a) => a.path === chatPath).length === 2,
+      JSON.stringify(arrivals.slice(before).map((a) => a.path)))
+
+    // ---------------------------------------------------- d) Host/Origin 双门
+    const gateBefore = arrivals.length
+    const evilHost = await rawHttp({
+      port: bridgePort, path: '/v1/messages',
+      headers: { Host: 'evil.example.com', 'Content-Type': 'application/json' }, body: '{}',
+    })
+    check('anthropic face: non-loopback Host → 403 (bridge Host gate)',
+      evilHost.status === 403 && /loopback-only/.test(evilHost.text),
+      `HTTP ${evilHost.status} ${evilHost.text.slice(0, 60)}`)
+    const evilOrigin = await rawHttp({
+      port: bridgePort, path: '/v1/responses',
+      headers: { Host: `127.0.0.1:${bridgePort}`, Origin: 'http://evil.example.com', 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+    check('responses face: cross-site Origin → 403 (bridge Origin gate)',
+      evilOrigin.status === 403 && /cross-origin/.test(evilOrigin.text),
+      `HTTP ${evilOrigin.status} ${evilOrigin.text.slice(0, 60)}`)
+    check('gated protocol requests never reached upstream', arrivals.length === gateBefore,
+      `arrivals ${gateBefore} → ${arrivals.length}`)
+    const goodOrigin = await rawHttp({
+      port: bridgePort, path: '/v1/messages',
+      headers: { Host: `127.0.0.1:${bridgePort}`, Origin: `http://127.0.0.1:${bridgePort}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'glm-5.3', max_tokens: 8, messages: [{ role: 'user', content: 'hi' }], stream: true }),
+    })
+    check('same-origin Origin passes both gates on the new face (positive control)',
+      goodOrigin.status === 200 && /event: message_start/.test(goodOrigin.text), `HTTP ${goodOrigin.status}`)
+
+    // ---------------------------------------------------- e) 413 对新面生效
+    // 与 [15c] 同法：注入 1KiB 上限的专用桥（默认仍 32MiB、文案逐字节不变），
+    // 但这次挂上**同一份共享装配**——证明新面在桥挂载点上同样受收体上限约束。
+    {
+      const limitPort = await freePort()
+      const limitRuntime = { running: false, port: null, lastError: null }
+      let limitBridge = null
+      const limitSurfaces = createProtocolSurfaces({
+        invokeChat: (req, res, chatPayload, sink) => invokeInternalChat({
+          handleChat: (r, captureRes, rawBody) => limitBridge.handleChat(r, captureRes, rawBody),
+          req, res, chatPayload, sink,
+        }),
+      })
+      limitBridge = createBridge({
+        settings: () => ({ baseURL: `http://127.0.0.1:${upstreamPort}`, maxConcurrentPerSession: 2 }),
+        provider: {
+          bridgeHeaders: () => ({}),
+          transformChatPayload: () => {},
+          extractUsage: (c) => c.usage ?? null,
+          extractStreamError: (c) => (c.error ? c : null),
+          bridgeResponseId: 'dsh-codebuddy-stream-bridge',
+          logHeaderNames: [],
+          sentinelAuth: 'Bearer dsh-codebuddy-bridge',
+          texts: { credentialUnavailable: 'credential unavailable' },
+        },
+        withCredentials: (attempt) => attempt({ authorization: 'Bearer ck_bridge_test_key', headers: {} }),
+        meter: { record: () => {} },
+        forensics: { logPath: () => undefined, dumpDir: () => undefined },
+        runtime: limitRuntime,
+        bodyLimitBytes: 1024,
+        protocolSurfaces: limitSurfaces,
+        chatPath,
+      })
+      const stopLimit = limitBridge.listen(limitPort)
+      await sleep(200)
+      // 体量超限、但请求体本身是**合法**的协议请求：413 只可能来自收体上限。
+      for (const [label, path, body] of [
+        ['anthropic', '/v1/messages', { model: 'm', max_tokens: 8, messages: [{ role: 'user', content: 'x'.repeat(4096) }] }],
+        ['responses', '/v1/responses', { model: 'm', input: 'x'.repeat(4096) }],
+      ]) {
+        const over = await fetch(`http://127.0.0.1:${limitPort}${path}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        })
+        const overJson = await over.json().catch(() => null)
+        check(`${label} face past the body limit gets a real 413 JSON`,
+          over.status === 413 && /too large/.test(overJson?.error?.message ?? ''), `HTTP ${over.status}`)
+      }
+      await stopLimit()
+    }
+
+    // ------------------------------- f) 既有通用转发零回归（逐字节不变）
+    const wellFormed = { model: 'm1', stream: true, messages: [{ role: 'user', content: '现在几点？' }] }
+    before = arrivals.length
+    const plainText = await (await chat(wellFormed)).text()
+    check('existing /v2/chat/completions body is byte-identical upstream (surfaces declined)',
+      arrivals[before]?.raw === JSON.stringify(wellFormed),
+      `${arrivals[before]?.raw?.length} vs ${JSON.stringify(wellFormed).length} bytes`)
+    check('existing /v2/chat/completions still relays the upstream SSE verbatim',
+      plainText.includes('"id":"mock"') && plainText.includes('[DONE]'), plainText.slice(0, 60))
+
+    writeLayer({}) // 自净：本节之后不再有断言，也不给别的节留状态
+  }
+
+  // --------------------------------------------- 20. harness-identity neutralization
+  //   2026-10-21 起，网关在通道校验层新增一道 system 消息**内容指纹**校验：
+  //   命中 DSH 内核固定身份首句完整短语 `You are an AI agent powered by
+  //   DeepSeek Harness.` 即 HTTP 400 / 11128（同码但形态不同于 §9 的 developer
+  //   角色门——多出 displayMsg/displayTips/actions，displayTips 文案"可能不是
+  //   官方客户端发出的"是误导，x-user-id 正常回显，凭据有效）。触发词是完整
+  //   短语，单词 DeepSeek/Harness 单独不触发。桥在出站前对命中的 system 内容
+  //   做等价中和（agent→assistant，语义不变，社区实测 400→200）。来源：
+  //   docs/rules/content-moderation.md §R-M4；社区实测 Issue #560 / #87。
+  console.log('\n[20] harness-identity phrase in system prompts is neutralized upstream')
+  {
+    const PHRASE = 'You are an AI agent powered by DeepSeek Harness.'
+    const NEUTRAL = 'You are an AI assistant powered by DeepSeek Harness.'
+
+    // a) 命中完整短语 → 出站中和为 assistant
+    let before = arrivals.length
+    let res = await chat({
+      model: 'm1',
+      stream: true,
+      messages: [
+        { role: 'system', content: PHRASE },
+        { role: 'user', content: 'ping' },
+      ],
+    }, { authorization: 'Bearer dsh-codebuddy-bridge' })
+    await res.text()
+    let fwd = JSON.parse(arrivals[before]?.raw ?? 'null')
+    check('identity phrase in system[0] is neutralized agent→assistant',
+      fwd?.messages?.[0]?.role === 'system'
+        && fwd?.messages?.[0]?.content === NEUTRAL,
+      JSON.stringify(fwd?.messages?.[0]))
+    check('no literal identity phrase survives in any system message',
+      (fwd?.messages ?? []).filter((m) => m.role === 'system')
+        .every((m) => typeof m.content !== 'string' || !m.content.includes(PHRASE)),
+      JSON.stringify(fwd?.messages?.map((m) => m.role + ':' + (m.content ?? '').slice(0, 30))))
+
+    // b) 短语嵌在更长 system 文本里 → 只替换命中处，其余逐字节不变
+    const surrounding = 'Follow the repo conventions. ' + PHRASE + ' Be concise.'
+    before = arrivals.length
+    res = await chat({
+      model: 'm1',
+      stream: true,
+      messages: [
+        { role: 'system', content: surrounding },
+        { role: 'user', content: 'ping' },
+      ],
+    })
+    await res.text()
+    fwd = JSON.parse(arrivals[before]?.raw ?? 'null')
+    check('phrase embedded in longer system text: only the phrase is swapped, rest intact',
+      fwd?.messages?.[0]?.content === 'Follow the repo conventions. ' + NEUTRAL + ' Be concise.',
+      JSON.stringify(fwd?.messages?.[0]?.content))
+
+    // c) 不含短语的 system 内容 → 逐字节不变（no-op，不误伤）
+    const innocent = 'You are a helpful assistant. DeepSeek Harness rocks.'
+    before = arrivals.length
+    res = await chat({
+      model: 'm1',
+      stream: true,
+      messages: [
+        { role: 'system', content: innocent },
+        { role: 'user', content: 'ping' },
+      ],
+    })
+    await res.text()
+    fwd = JSON.parse(arrivals[before]?.raw ?? 'null')
+    check('system content without the exact phrase is byte-identical (no false positive)',
+      fwd?.messages?.[0]?.content === innocent,
+      JSON.stringify(fwd?.messages?.[0]?.content))
+
+    // d) 既有 developer→system 重写与身份中和在同一请求里都生效
+    before = arrivals.length
+    res = await chat({
+      model: 'm1',
+      stream: true,
+      messages: [
+        { role: 'developer', content: PHRASE },
+        { role: 'user', content: 'ping' },
+      ],
+    })
+    await res.text()
+    fwd = JSON.parse(arrivals[before]?.raw ?? 'null')
+    check('developer→system rewrite + identity neutralization both apply in one request',
+      fwd?.messages?.[0]?.role === 'system'
+        && fwd.messages.every((m) => m.role !== 'developer')
+        && fwd?.messages?.[0]?.content === NEUTRAL,
+      JSON.stringify(fwd?.messages?.map((m) => m.role + ':' + (m.content ?? '').slice(0, 30))))
+  }
+
+  await disposeAll(effects) // apply() 的 teardown：关掉本进程起的桥，别把端口留到进程退出
   console.log(failures === 0 ? '\nall bridge checks passed' : `\n${failures} check(s) FAILED`)
   process.exit(failures === 0 ? 0 : 1)
 }

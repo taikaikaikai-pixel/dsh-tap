@@ -1,0 +1,86 @@
+{
+  "probe": "protocols-bridge-mount",
+  "date": "2026-10-18",
+  "goal": "把 Anthropic Messages (/v1/messages) 与 OpenAI Responses (/v1/responses) 两个协议面从 Trae :3902 / Qoder :3903 扩到 CodeBuddy 桥 :3901（三通道齐备）——记录通用接缝、断言口径与过程中修掉的两个缺陷的实测证据",
+  "evidence_kind": "offline-suite-run",
+  "upstream": null,
+  "upstream_note": "本轮**没有**真实上游实例参与：三条命令全是离线套件（verify-bridge 用 mock 网关 + 临时端口桥，verify-protocols 用 createLoopbackGateway + 桩 handleChat）。真实客户端端到端联调（Claude Code / OpenAI SDK 指向 127.0.0.1:3901|3902|3903）**仍未做**，不做兼容性声明。",
+  "commands": [
+    {
+      "cmd": "node scripts/verify-bridge.mjs",
+      "result": "exit 0 —— 146 ok / 0 FAIL（终态）；分解：§19 前 116 ok（与旧口径 116 一致）+ §19 30 ok = 套件 146 条。首跑曾 145 ok / 1 FAIL（§19 那条陈旧断言，见 resolved_red），断言同步后复跑全绿"
+    },
+    {
+      "cmd": "node scripts/verify-protocols.mjs",
+      "result": "verify-protocols: 153 passed, 0 failed（exit 0）——事实 3 的 149 → 153"
+    },
+    {
+      "cmd": "node scripts/verify-agents-md.mjs",
+      "result": "agents-md budget check all green（exit 0）；AGENTS.md 108 行 / 10546 字节；踩坑编号连续对账 AGENTS.md=73 pitfalls.md=73 1..73"
+    }
+  ],
+  "bridge_mount": {
+    "seam": "core/bridge.js 可选依赖 protocolSurfaces { handle(req,res,rawBody) -> boolean|Promise<boolean> } + chatPath（默认 /chat/completions）；req.on('end') 里于 proxyUpstream 之前分流（core/bridge.js:701-703），被拒即原路转发；未注入时行为与接缝存在前逐字节一致",
+    "exposed": "core/bridge.js 返回值新增 handleChat（内部 chat 面入口，core/bridge.js:636）",
+    "assembly": "providers/protocols/index.js（新增）createProtocolSurfaces({invokeChat, note}) -> {paths, handle}；paths 是路由判据唯一真源；providers/loopback-gateway.js 与 CodeBuddy 桥共用同一份装配",
+    "composition_root": "index.js 用晚绑定闭包解循环依赖（先建协议面、后把 bridge 赋给它，index.js:2090-2124）；chatPath = CODEBUDDY_CHAT_PATH = '/v2/chat/completions'（index.js:268）",
+    "chat_path_evidence": "cordis.patch.yml 的路由 baseURL: http://127.0.0.1:3901/v2 + core/bridge.js 的 isChat = req.url.endsWith('/chat/completions') 与 fetch(`${s.baseURL}${req.url}`)",
+    "no_new_server": true,
+    "core_still_provider_agnostic": "scripts/verify-core-generic.mjs 全绿"
+  },
+  "assertions_section_19": {
+    "checks": 30,
+    "ok": 30,
+    "fail": 0,
+    "coverage": [
+      "a) 两面经桥被协议面处理，而非被 proxyUpstream 原样转发",
+      "b) 两面的流式事件序列",
+      "c) 非流式聚合 JSON",
+      "d) 桥的 Host/Origin 双门对两面同样 403",
+      "e) 413 同样生效",
+      "f) 既有 /v2/chat/completions 通用转发零回归（逐字节 + SSE 原样）"
+    ],
+    "patch_readback": "§19 从 cordis.patch.yml 现读 codebuddy 路由 baseURL 前缀做对账（防常量漂移）",
+    "skips": 0
+  },
+  "resolved_red": {
+    "check": "responses via bridge: upstream 400 -> protocol error envelope (status + reason + numeric code normalized)",
+    "file": "scripts/verify-bridge.mjs:1412-1415",
+    "stale_assertion": "rErr?.error?.code === null",
+    "actual_after_fix": "{\"error\":{\"message\":\"internal chat surface HTTP 400: {\\\"code\\\":11102,\\\"msg\\\":\\\"model [x] service info not found\\\"}\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":\"11102\"}}",
+    "cause": "事实 3 的 normalizeCode() 已把 CodeBuddy 数字码归一成字符串 \"11102\"，而该断言（及其上方注释）写于数字码归一之前，仍锁旧行为 null；Anthropic 面同条断言只读 message，故通过",
+    "classification": "脚本断言陈旧，非产品回归；reproducible 2/2 runs",
+    "resolution": "主控把断言同步为 rErr?.error?.code === '11102' 并改写注释（说明数字码方言与 normalizeCode 语义）；复跑 verify-bridge = 146 ok / 0 FAIL / exit 0",
+    "status": "resolved"
+  },
+  "defects_fixed_this_round": {
+    "pitfall_73": {
+      "number": 73,
+      "title": "协议面收 SSE 字节须流式 TextDecoder；String(uint8) 展开数字串致静默空流",
+      "location": "providers/protocols/chat-capture.js 的 CaptureResponse.write",
+      "symptom": "协议面下发空流且零报错（静默失效）——SSE 行扫描一帧都认不出",
+      "root_cause": "原用 String(chunk) 收 SSE 字节，而 core/bridge.js 的 SSE 中继写的是 undici reader 原样给的普通 Uint8Array（不是 Buffer）=> String 走 Array.prototype.toString 得到 \"100,97,116,97…\" 数字串",
+      "fix": "流式 TextDecoder 一次解码（decode(chunk,{stream:true})，end() 时 decode() 冲刷跨分片尾巴）",
+      "red_bidirectional": {
+        "old_string_version": "7 条红",
+        "per_chunk_buffer_tostring_version": "恰 1 条（跨分片多字节）红"
+      },
+      "exposure": "只在「协议面驱动桥的 SSE 中继」时暴露——两面挂在 :3902/:3903 时全绿，挂到 :3901 才现形（踩坑 #63 成对审计又一实例）"
+    },
+    "numeric_code_normalization": {
+      "location": "providers/protocols/surface.js 的 normalizeCode()",
+      "symptom": "CodeBuddy 数字码（11102/11148…）在协议信封里落成 code: null，机器可读的码丢掉（原因仍在 message）",
+      "fix": "接受字符串或有限非零数字并归一成字符串；0 是上游成功哨兵（providers/codebuddy/index.js 的 extractStreamError 以 code !== 0 判错），错误路径上不当作码",
+      "assertions": "scripts/verify-protocols.mjs 桩场景 status-400-numeric + 4 条（2 状态透传 + 2 码保留），套件 149 -> 153",
+      "red": "临时关掉数字分支，恰 2 条「码保留」断言变红（got null, want \"11102\"），2 条状态断言照常通过"
+    }
+  },
+  "docs_updated": [
+    "CHANGELOG.md（Unreleased：修订「:3901 未接」为已接 + 新增本轮条目）",
+    "docs/goals/dsh-tap-goal-list.md（交付 B 边界改已接 + 接缝/断言 + 发现并修复节 + 验收清单）",
+    "docs/research-eco-comparison.md（兼容面行改三通道齐备 + §4 不做清单修订注补 :3901 已接）",
+    "docs/rules/STATE.md（生态调研节协议面挂载范围改三通道齐备）",
+    "wiki/09-run-and-test.md（verify-bridge 116 -> 146、verify-protocols 149 -> 153，并登记桥挂载由 §19 承担）",
+    "docs/pitfalls.md + AGENTS.md（新踩坑 #73 入册 + 速查标签）"
+  ]
+}

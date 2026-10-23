@@ -55,6 +55,9 @@ import { readJson, writeJson, writeTextAtomic, resolveEnvKey } from './core/json
 import { KeyRotator } from './core/rotation.js'
 import { createUsageMeter } from './core/usage-meter.js'
 import { createBridge } from './core/bridge.js'
+import { createProtocolSurfaces } from './providers/protocols/index.js'
+import { invokeInternalChat } from './providers/protocols/chat-capture.js'
+import { hostnameIsLoopback } from './core/net-guards.js'
 import { createCodeBuddyProvider } from './providers/codebuddy/index.js'
 import { CREDENTIAL_UNAVAILABLE_MESSAGE } from './providers/codebuddy/errors.js'
 import { UNROUTABLE_MODELS } from './providers/codebuddy/catalog.js'
@@ -201,11 +204,11 @@ export const SETTINGS_FIELDS = [
 
 /**
  * Hostnames that count as "this machine" for the local-only HTTP surfaces
- * (bridge Host gate, settings-route guard, plaintext-http baseURLs).
- * `::1` (bare) is accepted for raw Host values; a URL-parsed IPv6 hostname
- * keeps its brackets (`[::1]`).
+ * (bridge Host gate, settings-route guard, plaintext-http baseURLs) live in
+ * core/net-guards.js — one canonical set for every local surface in the
+ * plugin. `::1` (bare) is accepted for raw Host values; a URL-parsed IPv6
+ * hostname keeps its brackets (`[::1]`).
  */
-const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
 
 /** Parse a Host header (may carry a port) into a bare hostname, or null. */
 function hostHeaderHostname(host) {
@@ -214,11 +217,6 @@ function hostHeaderHostname(host) {
   } catch {
     return null
   }
-}
-
-/** True when the URL hostname is loopback (plaintext http allowance). */
-function isLoopbackHostname(hostname) {
-  return LOOPBACK_HOSTNAMES.has(hostname)
 }
 
 /** Validate a baseURL candidate before it can reach a provider. */
@@ -235,7 +233,7 @@ function validateBaseURL(value) {
   }
   // 安全审计 [29]：明文 http 仅限回环——本插件的本地桥都绑 127.0.0.1；
   // 指向远程明文端点会把 Bearer 凭据裸奔上网络。https 恒可。
-  if (!isLoopbackHostname(parsed.hostname)) {
+  if (!hostnameIsLoopback(parsed.hostname)) {
     throw new Error(
       `baseURL 明文 http 仅允许回环地址（127.0.0.1/localhost/::1），收到 ${parsed.hostname}——远程上游必须使用 https`,
     )
@@ -258,6 +256,16 @@ const writeAuth = (v) => writeJson(AUTH_PATH, v)
 const BRIDGE_PORT_DEFAULTS = { bridge: 3901, trae: 3902, qoder: 3903 }
 const HOST_BRIDGE_PORT_OFFSET = 10
 const DEFAULT_PROFILE_DIR_NAME = 'web'
+
+// 桥的**入站 chat 路径**（挂载点协议面驱动桥内部 chat 面时合成请求用）。
+// 读证而非猜：cordis.patch.yml:84 把 codebuddy 路由指到
+// `baseURL: http://127.0.0.1:3901/v2`，pi-ai 出站即 `POST /v2/chat/completions`；
+// core/bridge.js 的判据是 `req.url.endsWith('/chat/completions')`（isChat），
+// 转发用 `fetch(`${s.baseURL}${req.url}`)`（s.baseURL = 上游根
+// https://copilot.tencent.com，不含 /v2）——所以合成请求的 url 必须是
+// **带 /v2 前缀的完整入站路径**，否则上游打到 /chat/completions 必 404。
+// 与 patch 的一致性由 scripts/verify-bridge.mjs [19] 对账锁定。
+const CODEBUDDY_CHAT_PATH = '/v2/chat/completions'
 
 /**
  * 宿主信号源（两级，皆现读、永不缓存）：
@@ -1356,7 +1364,7 @@ function sameOrigin(req, allowedOrigins = []) {
 function localGuardFailure(req, allowedOrigins = []) {
   const host = req.headers.host
   const hostname = typeof host === 'string' ? hostHeaderHostname(host) : null
-  if (!hostname || !isLoopbackHostname(hostname)) {
+  if (!hostname || !hostnameIsLoopback(hostname)) {
     return `本接口仅限本机访问：Host 必须是回环地址（127.0.0.1/localhost/::1），收到 ${host ?? '(缺失)'}`
   }
   const origin = req.headers.origin
@@ -1562,6 +1570,22 @@ function settingsView(resolveNow) {
     },
   }
 }
+
+/**
+ * 逐模型写入的「触发键 → 自写段 → 回带视图 → 写入函数」表。
+ *
+ * 六段共用一条层叠纪律（踩坑 #44 写入即重载 / #45 写完≠生效完）：写函数只碰
+ * 自己的段，同批 apiKeys 改动由调用处合回后整层落盘。顺序 = 原 if 链顺序
+ * （同批带多个键时首个命中者胜）。
+ */
+const MODEL_WRITES = [
+  ['modelSetEnabled', 'modelState', 'models', setModelEnabled],
+  ['modelSetLimits', 'modelState', 'models', setModelLimits],
+  ['traeModelSetEnabled', 'traeModelState', 'trae', setTraeModelEnabled],
+  ['traeModelSetPrefs', 'traeModelPrefs', 'trae', setTraeModelPrefs],
+  ['qoderModelSetEnabled', 'qoderModelState', 'qoder', setQoderModelEnabled],
+  ['qoderModelSetPrefs', 'qoderModelPrefs', 'qoder', setQoderModelPrefs],
+]
 
 /**
  * Route contract:
@@ -1940,106 +1964,23 @@ function registerSettingsRoute(ctx, entryConfig, resolveNow, applyLive, retryGat
               nextUser.apiKeys = list.filter((k) => k?.name !== patch.apiKeysRemove)
               if (nextUser.activeApiKey === patch.apiKeysRemove) delete nextUser.activeApiKey
             }
-            if (patch.modelSetEnabled !== undefined) {
-              // Runs against modelState inside setModelEnabled; re-read the
-              // layer afterwards so apiKeys edits above are not clobbered.
+            // 六个逐模型写入（启用/上限/档位）共用同一条层叠纪律（踩坑 #44/#45）：
+            // set* 只自写自己那段（modelState / traeModelPrefs / …），事后重读文件
+            // 层并把本请求同批的 apiKeys 改动合回，再回带本区块视图。六段此前逐字
+            // 复制，故收成 MODEL_WRITES 表——新增通道只加一行，不会漏掉其中一段纪律。
+            for (const [patchKey, stateKey, section, write] of MODEL_WRITES) {
+              if (patch[patchKey] === undefined) continue
               const withKeys = { ...nextUser }
-              await setModelEnabled(patch.modelSetEnabled)
+              await write(patch[patchKey])
               const after = readFileLayer()
-              delete withKeys.modelState
+              delete withKeys[stateKey]
               Object.assign(after, { apiKeys: withKeys.apiKeys, activeApiKey: withKeys.activeApiKey })
               writeFileLayer(after)
               sendJSON(response, 200, {
                 ok: true,
                 value: settingsView(resolveNow).value,
                 user: maskedUserLayer(after),
-                models: settingsView(resolveNow).models,
-              })
-              applyLive()
-              return
-            }
-            if (patch.modelSetLimits !== undefined) {
-              // G5：同 modelSetEnabled 的层叠纪律——setModelLimits 内部自写
-              // modelState，事后重读层并把本请求里的 apiKeys 改动合回。
-              const withKeys = { ...nextUser }
-              await setModelLimits(patch.modelSetLimits)
-              const after = readFileLayer()
-              delete withKeys.modelState
-              Object.assign(after, { apiKeys: withKeys.apiKeys, activeApiKey: withKeys.activeApiKey })
-              writeFileLayer(after)
-              sendJSON(response, 200, {
-                ok: true,
-                value: settingsView(resolveNow).value,
-                user: maskedUserLayer(after),
-                models: settingsView(resolveNow).models,
-              })
-              applyLive()
-              return
-            }
-            if (patch.traeModelSetEnabled !== undefined) {
-              const withKeys = { ...nextUser }
-              await setTraeModelEnabled(patch.traeModelSetEnabled)
-              const after = readFileLayer()
-              delete withKeys.traeModelState
-              Object.assign(after, { apiKeys: withKeys.apiKeys, activeApiKey: withKeys.activeApiKey })
-              writeFileLayer(after)
-              sendJSON(response, 200, {
-                ok: true,
-                value: settingsView(resolveNow).value,
-                user: maskedUserLayer(after),
-                trae: settingsView(resolveNow).trae,
-              })
-              applyLive()
-              return
-            }
-            if (patch.traeModelSetPrefs !== undefined) {
-              // 同 traeModelSetEnabled 的层叠纪律：setTraeModelPrefs 内部自写
-              // traeModelPrefs，事后重读层并把本请求里的 apiKeys 改动合回。
-              const withKeys = { ...nextUser }
-              await setTraeModelPrefs(patch.traeModelSetPrefs)
-              const after = readFileLayer()
-              delete withKeys.traeModelPrefs
-              Object.assign(after, { apiKeys: withKeys.apiKeys, activeApiKey: withKeys.activeApiKey })
-              writeFileLayer(after)
-              sendJSON(response, 200, {
-                ok: true,
-                value: settingsView(resolveNow).value,
-                user: maskedUserLayer(after),
-                trae: settingsView(resolveNow).trae,
-              })
-              applyLive()
-              return
-            }
-            if (patch.qoderModelSetEnabled !== undefined) {
-              const withKeys = { ...nextUser }
-              await setQoderModelEnabled(patch.qoderModelSetEnabled)
-              const after = readFileLayer()
-              delete withKeys.qoderModelState
-              Object.assign(after, { apiKeys: withKeys.apiKeys, activeApiKey: withKeys.activeApiKey })
-              writeFileLayer(after)
-              sendJSON(response, 200, {
-                ok: true,
-                value: settingsView(resolveNow).value,
-                user: maskedUserLayer(after),
-                qoder: settingsView(resolveNow).qoder,
-              })
-              applyLive()
-              return
-            }
-            if (patch.qoderModelSetPrefs !== undefined) {
-              // 同 qoderModelSetEnabled 的层叠纪律：setQoderModelPrefs 内部自写
-              // qoderModelPrefs，事后重读层并把本请求里的 apiKeys 改动合回。
-              const withKeys = { ...nextUser }
-              await setQoderModelPrefs(patch.qoderModelSetPrefs)
-              const after = readFileLayer()
-              delete withKeys.qoderModelPrefs
-              Object.assign(after, { apiKeys: withKeys.apiKeys, activeApiKey: withKeys.activeApiKey })
-              writeFileLayer(after)
-              sendJSON(response, 200, {
-                ok: true,
-                value: settingsView(resolveNow).value,
-                user: maskedUserLayer(after),
-                qoder: settingsView(resolveNow).qoder,
+                [section]: settingsView(resolveNow)[section],
               })
               applyLive()
               return
@@ -2137,6 +2078,27 @@ export function apply(ctx, config = {}) {
   // 文件层，seam 只承担"宿主配置层"这一段。
   hostConfig.attach(ctx)
 
+  // 协议面（Anthropic Messages / OpenAI Responses）：CodeBuddy 是**默认主通道**，
+  // 这两个本机客户端协议面此前只挂在 Trae/Qoder 的翻译网关上——只有 CodeBuddy
+  // 凭据的用户完全拿不到。装配与 providers/loopback-gateway.js 共用
+  // providers/protocols/index.js 的**同一份**（不复制粘贴第二份）。
+  //
+  // 循环依赖（桥要协议面做前置分流、协议面要桥的内部 chat 面）用「晚绑定闭包」
+  // 收口：先建协议面（invokeChat 在调用时才取 bridge），再把协议面交给桥。
+  // 协议面经 chat-capture 驱动桥的 handleChat——凭据/并发闸/首字节护栏/tool
+  // 配对体检/计量/取证全部原样复用（core/bridge.js 的 `handleChat`）。
+  let bridge = null
+  const protocolSurfaces = createProtocolSurfaces({
+    invokeChat: (req, res, chatPayload, sink) => invokeInternalChat({
+      handleChat: (r, captureRes, rawBody) => bridge.handleChat(r, captureRes, rawBody),
+      req,
+      res,
+      chatPayload,
+      sink,
+    }),
+    note: (message) => { process.stderr.write(`[dsh-tap] protocols: ${message}\n`) },
+  })
+
   // Bridge lifecycle: running state keyed by the port it listens on.
   // bridgeRuntime mirrors reality for the settings view (listen is async —
   // `running` flips on the server's 'listening' event, failures land in
@@ -2146,7 +2108,7 @@ export function apply(ctx, config = {}) {
   // resolveNow (the entry config differs per apply); bridgeRuntime stays
   // module-shared. The forensic env var NAMES stay here in the composition
   // root — core/bridge.js only receives the path getters.
-  const bridge = createBridge({
+  bridge = createBridge({
     settings: resolveNow,
     provider,
     withCredentials: (attempt) => withKeyRotation(resolveNow, attempt),
@@ -2156,6 +2118,9 @@ export function apply(ctx, config = {}) {
       dumpDir: () => process.env.CODEBUDDY_BRIDGE_DUMP,
     },
     runtime: bridgeRuntime,
+    // 通用接缝：core 只问「你处理了吗」，不知道协议名/路径（core 纪律）。
+    protocolSurfaces,
+    chatPath: CODEBUDDY_CHAT_PATH,
   })
   let stopBridge = null
   let runningPort = null
@@ -2293,14 +2258,20 @@ export function apply(ctx, config = {}) {
       ? `[dsh-tap] model catalog synced from gateway (${r.count} models)\n`
       : `[dsh-tap] model catalog sync failed (${r.error}) — ${r.kept ? 'keeping last synced list' : 'static fallback'}\n`)
   })
-  ctx.on('dispose', () => {
-    if (stopBridge) stopBridge()
-    if (stopTraeBridge) stopTraeBridge()
-    if (stopQoderBridge) stopQoderBridge()
+  // Cleanup MUST ride ctx.effect: cordis 4 has no 'dispose' context event (its
+  // Events surface is only internal/*), so a ctx.on('dispose') listener is
+  // silently removed without ever firing. The three bridge HTTP servers would
+  // then stay bound after the host finishes disposal, the ref'd TCP server
+  // handles would keep the process alive forever (no natural exit), and the
+  // host shell's 10s graceful window would expire -> SIGTERM -> update
+  // refused with "Host did not complete graceful task teardown".
+  ctx.effect(() => () => {
+    const closing = [stopBridge?.(), stopTraeBridge?.(), stopQoderBridge?.()]
     if (disposeSearch) disposeSearch()
     if (disposeFetch) disposeFetch()
     if (disposeImageTool) disposeImageTool()
     hostConfig.dispose()
     meter.dispose()
+    return Promise.allSettled(closing)
   })
 }

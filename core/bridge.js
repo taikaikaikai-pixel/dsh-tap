@@ -31,6 +31,22 @@
  *   texts.credentialUnavailable  error text for the no-credential response
  *   logPrefix              stderr prefix for bridge lifecycle warnings
  *
+ * Two more seams stay generic on purpose (no protocol/upstream name may appear
+ * in this file — the generality contract of scripts/verify-core-generic.mjs):
+ *
+ *   protocolSurfaces  { handle(req, res, rawBody) → boolean|Promise<boolean> }
+ *     An injected dispatcher consulted BEFORE proxyUpstream. It answers only
+ *     "did I handle this?"; a claimed request is answered entirely by it, a
+ *     declined one takes the unchanged proxy path byte for byte. core/ never
+ *     learns which paths exist or what the surfaces speak.
+ *
+ *   chatPath  inbound path of THIS bridge's own chat face (default
+ *     '/chat/completions'). The exposed handleChat() below drives the same
+ *     proxy pipeline on behalf of an in-process caller that arrives on its own
+ *     path (e.g. a local client protocol surface), so the synthetic request
+ *     must carry the path the host route actually uses — the proxy forwards
+ *     `${baseURL}${url}` verbatim. Injected by the composition root.
+ *
  * Credentials are always resolved host-side through the injected
  * `withCredentials(attempt)` runner (the composition root's rotation);
  * the caller's Authorization is never forwarded.
@@ -45,6 +61,8 @@ import { createHash } from 'node:crypto'
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { hostIsLoopback, originMatchesHost } from './net-guards.js'
+
 // ---------------------------------------------------------------------------
 // Loopback Host gate ([8]+[26] hardening): the bridge carries the user's live
 // credential, so it must only answer callers that reached it the intended way
@@ -53,41 +71,14 @@ import { join } from 'node:path'
 // body byte is read or proxied.
 // ---------------------------------------------------------------------------
 
-/** Hostnames a same-machine caller may present in Host (::1 bare for raw
- * Host values; URL-parsed IPv6 keeps its brackets). */
-const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
+// Hostnames a same-machine caller may present in Host (::1 bare for raw Host
+// values; URL-parsed IPv6 keeps its brackets): the canonical set and both gates
+// live in core/net-guards.js — one copy for every local surface in the plugin.
+// Imported here for the gate below, re-exported for existing importers.
+export { hostIsLoopback, originMatchesHost }
 
 /** Inbound request-body ceiling; past it the caller gets a real 413. */
 const MAX_BODY_BYTES = 32 * 1024 * 1024
-
-/** True when the Host header (may carry a port) names the loopback. */
-export function hostIsLoopback(host) {
-  if (typeof host !== 'string' || !host) return false
-  try {
-    return LOOPBACK_HOSTNAMES.has(new URL(`http://${host}`).hostname)
-  } catch {
-    return false
-  }
-}
-
-/**
- * Origin gate: a browser cross-site request (including a no-preflight
- * `navigator.sendBeacon` with a text/plain body) always carries Origin — its
- * host:port must equal the Host header or the request is a drive-by CSRF that
- * would burn the user's upstream quota. A missing Origin passes: same-machine
- * fetch/curl and shell-forwarded in-app requests carry no Origin; the Host
- * gate above still confines those to loopback. Non-browser clients can forge
- * any Origin anyway, so this gate adds no constraint for them.
- */
-export function originMatchesHost(req) {
-  const origin = req.headers.origin
-  if (origin === undefined) return true
-  try {
-    return new URL(origin).host === req.headers.host
-  } catch {
-    return false
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Session attribution
@@ -285,8 +276,21 @@ function summarizeChatPayload(rawBody, payload) {
  * @param {{ running: boolean, port: number|null, lastError: string|null }} runtime
  *   shared runtime-state object mutated by listen() (owned by the
  *   composition root so several apply() generations report one reality).
+ * @param {number} [bodyLimitBytes] inbound request-body ceiling (default
+ *   MAX_BODY_BYTES = 32MiB). Injectable so a regression can lock the oversize
+ *   branch on a millisecond-scale body instead of pushing 32MiB through the
+ *   teardown window (which can RST the peer).
+ * @param {{ handle: (req, res, rawBody) => boolean|Promise<boolean> }} [protocolSurfaces]
+ *   optional pre-proxy dispatcher (see the seam notes above). Absent = the
+ *   server behaves exactly as before this seam existed.
+ * @param {string} [chatPath] inbound path of this bridge's chat face, used by
+ *   the exposed handleChat() when an in-process caller arrives on another path
+ *   (default '/chat/completions').
  */
-export function createBridge({ settings, provider, withCredentials, meter, forensics, runtime }) {
+export function createBridge({
+  settings, provider, withCredentials, meter, forensics, runtime,
+  bodyLimitBytes = MAX_BODY_BYTES, protocolSurfaces = null, chatPath = '/chat/completions',
+}) {
   const limiter = new SessionLimiter()
   let logSeq = 0
   let dumpSeq = 0
@@ -616,6 +620,25 @@ export function createBridge({ settings, provider, withCredentials, meter, foren
   }
 
   /**
+   * Internal chat face: drive this bridge's own chat path on behalf of an
+   * in-process caller (the protocol surfaces reach it through
+   * providers/protocols/chat-capture.js with a capture res). Reuses the whole
+   * pipeline — credential resolution, per-session gate, first-byte guardrail,
+   * payload rewrite, metering, forensics.
+   *
+   * The inbound URL is normalized to this bridge's chat path: an internal
+   * caller arrives on ITS own protocol path (e.g. /v1/messages), and the proxy
+   * forwards `${baseURL}${url}` verbatim, so passing that URL through would
+   * fetch a non-existent upstream endpoint. Only the caller's method/headers
+   * are carried over (headers matter: session attribution is extracted from
+   * them).
+   */
+  function handleChat(req, res, rawBody) {
+    const url = typeof req?.url === 'string' && req.url.endsWith('/chat/completions') ? req.url : chatPath
+    return proxyUpstream({ url, method: req?.method ?? 'POST', headers: req?.headers ?? {} }, res, rawBody)
+  }
+
+  /**
    * Listen on 127.0.0.1 only. A listen failure must NEVER crash the host:
    * an unhandled 'error' event on the server used to take the whole process
    * down — failures land in runtime.lastError instead (EADDRINUSE typically
@@ -657,24 +680,32 @@ export function createBridge({ settings, provider, withCredentials, meter, foren
         if (oversize) return // already answered 413; drain and drop the rest
         chunks.push(c)
         received += c.length
-        if (received > MAX_BODY_BYTES) {
+        if (received > bodyLimitBytes) {
           oversize = true
           chunks.length = 0
           // Answer, don't destroy: a bare req.destroy() left the caller with
           // a reset connection and no status. Connection: close because the
           // unframed remainder of the upload must not poison keep-alive.
           res.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' })
-          res.end(JSON.stringify({ error: { message: `request body too large (limit ${MAX_BODY_BYTES} bytes)` } }))
+          res.end(JSON.stringify({ error: { message: `request body too large (limit ${bodyLimitBytes} bytes)` } }))
         }
       })
       req.on('end', () => {
         if (oversize) return
         const rawBody = Buffer.concat(chunks).toString('utf8')
-        proxyUpstream(req, res, rawBody).catch((err) => {
-          if (res.destroyed || res.writableEnded) return // caller already gone
-          if (!res.headersSent) res.writeHead(500)
-          res.end(`stream bridge error: ${err.message}`)
-        })
+        // Protocol-surface seam: an injected dispatcher may claim the request
+        // (local client protocols that translate into this bridge's chat
+        // face). A declined request takes the proxy path unchanged; the
+        // dispatcher is asked through a resolved promise so a synchronous
+        // throw lands in the same 500-with-reason handler as a rejection.
+        Promise.resolve()
+          .then(() => (protocolSurfaces ? protocolSurfaces.handle(req, res, rawBody) : false))
+          .then((handled) => (handled ? undefined : proxyUpstream(req, res, rawBody)))
+          .catch((err) => {
+            if (res.destroyed || res.writableEnded) return // caller already gone
+            if (!res.headersSent) res.writeHead(500)
+            res.end(`stream bridge error: ${err.message}`)
+          })
       })
     })
     server.on('error', (err) => {
@@ -682,6 +713,13 @@ export function createBridge({ settings, provider, withCredentials, meter, foren
       runtime.lastError = err?.code ?? String(err?.message ?? err)
       process.stderr.write(`${provider.logPrefix} bridge :${port} unavailable: ${runtime.lastError}（插件其余功能不受影响；若占用者是另一个 dsh 实例，其桥仍会代管本实例流量）\n`)
     })
+    // 连接级 error 兜底（踩坑 #17 同族：监听失败不崩宿主，此处是连接失败）：413
+    // 应答后响应侧立刻收尾（Connection: close），调用方可能仍在推上传体——对端
+    // RST 时连接 socket 抛**裸** ECONNRESET（无 req/res 归属），http 服务器在连接
+    // 收尾时又摘掉自己的 error 监听 → 事件无接收者 → 未处理异常炸掉宿主进程。
+    // 本监听挂在 connection 上且永不摘除：连接级故障只该终结这条连接。
+    // （同形防护见 providers/loopback-gateway.js。）
+    server.on('connection', (socket) => { socket.on('error', () => {}) })
     server.on('listening', () => {
       runtime.running = true
       runtime.lastError = null
@@ -694,5 +732,5 @@ export function createBridge({ settings, provider, withCredentials, meter, foren
       })
   }
 
-  return { listen }
+  return { listen, handleChat }
 }

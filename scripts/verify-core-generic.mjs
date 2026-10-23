@@ -69,7 +69,7 @@ console.log('\n[S] core/ static purity')
 {
   const coreDir = join(ROOT, 'core')
   const files = readdirSync(coreDir).filter((f) => f.endsWith('.js'))
-  check('core/ has the expected four modules', files.length === 4, files.join(','))
+  check('core/ has the expected five modules', files.length === 5, files.join(','))
   // Upstream/vendor specifics that must never appear in core/.
   const forbidden = /\bcodebuddy\b|copilot\.tencent|tencent|12403|14401|14407|11101|11102|11103|11128|11217|12153|10001|x-ide-|x-product-version|x-private-data|dsh-codebuddy-bridge/i
   for (const f of files) {

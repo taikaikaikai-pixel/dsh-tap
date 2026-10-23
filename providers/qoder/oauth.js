@@ -33,6 +33,8 @@
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
+import { hostnameIsLoopback } from '../../core/net-guards.js'
+
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000
 const LOGIN_POLL_INTERVAL_MS = 1000
 const REFRESH_LEAD_MS = 60_000
@@ -42,7 +44,6 @@ export const QODER_CLIENT_ID = 'e883ade2-e6e3-4d6d-adf7-f92ceff5fdcb'
 
 /** 授权页允许的站点族：Qoder CN 官方域 + 回环（离线 mock 上游用）。 */
 const LOGIN_SITE_SUFFIXES = ['qoder.cn', 'qoder.com.cn']
-const isLoopbackHost = (h) => h === '127.0.0.1' || h === 'localhost' || h === '[::1]'
 
 const VERIFIER_CHARSET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~'
 
@@ -93,10 +94,10 @@ export function normalizeExpiry(value, now = Date.now()) {
 function assertSafeAuthUrl(authUrl) {
   let parsed
   try { parsed = new URL(String(authUrl)) } catch { throw new Error('authUrl 不是合法 URL') }
-  if (parsed.protocol !== 'https:' && !isLoopbackHost(parsed.hostname)) {
+  if (parsed.protocol !== 'https:' && !hostnameIsLoopback(parsed.hostname)) {
     throw new Error(`authUrl 必须使用 https（收到 ${parsed.protocol}//）`)
   }
-  const hostOk = isLoopbackHost(parsed.hostname)
+  const hostOk = hostnameIsLoopback(parsed.hostname)
     || LOGIN_SITE_SUFFIXES.some((s) => parsed.hostname === s || parsed.hostname.endsWith(`.${s}`))
   if (!hostOk) {
     throw new Error(`authUrl 域名 ${parsed.hostname} 不在 Qoder 官方登录站点族（${LOGIN_SITE_SUFFIXES.join(' / ')}）`)
@@ -107,7 +108,7 @@ function assertSafeAuthUrl(authUrl) {
 function assertLoginBase(loginHost) {
   let parsed
   try { parsed = new URL(String(loginHost)) } catch { throw new Error('qoderLoginHost 不是合法 URL') }
-  if (parsed.protocol !== 'https:' && !isLoopbackHost(parsed.hostname)) {
+  if (parsed.protocol !== 'https:' && !hostnameIsLoopback(parsed.hostname)) {
     throw new Error(`qoderLoginHost 必须使用 https（收到 ${parsed.protocol}//）`)
   }
   return parsed

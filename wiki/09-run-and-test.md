@@ -37,19 +37,20 @@ TraeWork CN / Qoder CN：各自区块的**区块头右侧勾选框**就是启用
 
 | 命令 | 覆盖 | 规模 |
 |------|------|------|
-| `node scripts/verify-bridge.mjs` | 桥：非流式聚合 / SSE 透传 / 会话头注入与保留 / 会话 FIFO 并发 / 非会话不限流 / agenttool 透传 / 取证日志 / 计量 / developer→system / EADDRINUSE 不崩 | 30 项断言 |
+| `node scripts/verify-bridge.mjs` | 桥：非流式聚合 / SSE 透传 / 会话头注入与保留 / 会话 FIFO 并发 / 非会话不限流 / agenttool 透传 / 取证日志 / 计量 / developer→system / tool 配对体检（§18）/**两协议面挂桥（§19：Anthropic Messages + OpenAI Responses 经桥被协议面处理而非原样转发、两面流式事件序列、非流式聚合、桥 Host/Origin 双门与 413、既有 `/v2/chat/completions` 转发零回归）** / EADDRINUSE 不崩 | **146 项断言**（2026-10-18 实测 **146 ok / 0 FAIL** / exit 0；该节首跑曾 1 条陈旧断言锁 `code===null` 与数字码归一动用冲突，已同步为 `'11102'`） |
 | `node scripts/verify-core-generic.mjs` | core/ 通用性证伪：静态纯净扫描 + 第二 OpenAI 兼容上游全链路（含 developer 角色不被 core 改写的另一半证明） | — |
 | `node scripts/verify-rotation.mjs` | 多 Key 轮询（mock 网关按 Key 行为表；`?case=provider/bridge` 双实例隔离） | 25 项断言 |
 | `node scripts/verify-providers.mjs` | 多服务商骨架：/models 404 兜底 + 认证方言 | — |
-| `node scripts/verify-trae-provider.mjs` | Trae 通道：mock OAuth 全流程（**用我们注册的公钥验 DeviceProof 签名**）/ 目录映射 / 翻译网关 | **89 项断言**（2026-09-23 实测） |
-| `node scripts/verify-qoder-provider.mjs` | Qoder CN 通道：mock 设备流全流程（PKCE/404 轮询/drt- 刷新/门禁/代际守卫）+ 翻译网关信封 + 目录投影 + tool 配对/可见性与归因上报锁定案 | **154 项断言**（2026-09-23 实测） |
+| `node scripts/verify-trae-provider.mjs` | Trae 通道：mock OAuth 全流程（**用我们注册的公钥验 DeviceProof 签名**）/ 目录映射 / 翻译网关 / Host+Origin 双门与 413 | **147 项断言**（2026-10-18 实测） |
+| `node scripts/verify-qoder-provider.mjs` | Qoder CN 通道：mock 设备流全流程（PKCE/404 轮询/drt- 刷新/门禁/代际守卫）+ 翻译网关信封 + 目录投影 + tool 配对/可见性与归因上报锁定案 | **174 项断言**（2026-10-18 实测） |
+| `node scripts/verify-protocols.mjs` | 新增协议面：Anthropic Messages（`POST /v1/messages`）+ OpenAI Responses（`POST /v1/responses`）——请求→上游映射 / SSE 事件序列与顺序 / 非流式聚合 / 工具往返 / 上游错误协议化（含数字码归一桩 `status-400-numeric`）/ Host+Origin 双门 / `413`。**在回环网关骨架（`createLoopbackGateway`）上装配，不覆盖 CodeBuddy 桥挂载——桥挂载由 `verify-bridge` §19 承担** | **153 项断言**（2026-10-18 实测） |
 | `node scripts/verify-host-config.mjs` | 宿主配置层：0.1.7+ forms seam 选路/写前比对/`SETTINGS_CONFLICT` 重试/不可写降级 + ≤0.1.6 settings.yaml 回退 | **36 项断言**（2026-09-23 实测） |
 | `node scripts/verify-desktop-acceptance.mjs` | desktop 适配可执行验收：A 组结构性不变量（§4a index.js 无 desktop 特化 / §4b 宿主差异收口 / §6 goal 锚点；`--structural` 为 CI 硬闸门）+ B 组桌面环境断言（有 `~/.dsh/profiles/desktop` 才跑）；C 组活实例断言恒 SKIP，由端到端探针承担（证据 docs/probes/desktop-e2e-2026-10-03.json） | **9 ok / 0 FAIL / 3 SKIP**（2026-10-03 实测） |
 | `node scripts/verify-agents-md.mjs` | AGENTS.md 预算闸门：行数/字节/引用路径存在 + 踩坑编号连续性对账 | — |
 | `node scripts/verify-models.mjs` | 模型解析离线自检 / 在线探测可用性 / 目录漂移对比 | — |
 | `node scripts/verify-trae-model-catalog.mjs` | 目录提取器回归 | — |
 
-`npm run verify` = 在线模型探测（18 次真实请求，消耗额度）；离线快捷方式齐了 `verify:bridge` / `verify:core` / `verify:providers` / `verify:trae` / `verify:trae-provider` / `verify:qoder` / `verify:host-config`。
+`npm run verify` = 在线模型探测（18 次真实请求，消耗额度）；离线快捷方式齐了 `verify:bridge` / `verify:core` / `verify:providers` / `verify:trae` / `verify:trae-provider` / `verify:qoder` / `verify:host-config` / `verify:protocols` / `verify:rotation` / `verify:agents-md`。
 
 **断言纪律**：验证队列/代理行为必须断言"响应完成"（EOF），不是首字节；跨层测试先想清楚轮转游标在第几个请求上。
 
@@ -71,6 +72,7 @@ TraeWork CN / Qoder CN：各自区块的**区块头右侧勾选框**就是启用
 | `probe-qoder-live.mjs --login` / `--chat "文本"` | Qoder CN 真实设备流登录 / 真实对话（cosy 签名路径，证据落 docs/probes/） |
 | `probe-codebuddy-efforts.mjs [--catalog] [--models a,b] [--repeat N] [--summarize <证据.json>]` | CodeBuddy 思考强度现状探测 + 档位表决策表（证据落 docs/probes/codebuddy-efforts-*.json） |
 | `probe-codebuddy-tier-wiring.mjs` | 【真实上游】档位全链路联调：目录声明→档位表→镜像→桥出站注入（经本地捕获代理，临时 DSH_HOME 隔离） |
+| `probe-codebuddy-pairing.mjs` | 【真实凭据·只读】CodeBuddy 工具配对体检实测：孤儿 tool / 声明了 tool_call 却没结果 → HTTP 400 code=11148 复现（deepseek-v4-pro），同一坏体经真实修复件后 200；**`glm-5.3-flash` 对全部坏体静默 200（拒绝面按模型家族分裂）**。8 臂 × 2 模型、1500ms 间隔、单账号；证据 docs/probes/codebuddy-pairing-2026-10-18.json（16 臂） |
 | `probe-qoder-null-content.mjs [--models dmodel,kmodel] [--gw-local]` | content 可见性单变量差分（provider_error 真根因判别；--gw-local 用当前代码起临时网关做前后对比） |
 | `probe-qoder-pairing.mjs [--live] [--model dmodel]` | 宿主真实序列化器离线复现 tool 配对/可见性坏体 + 真实上游重放 |
 | `probe-qoder-matrix.mjs --suite flash\|tools\|reject\|repair` | Qoder 差分矩阵（逐变量隔离上游报错，证据 docs/probes/qoder-matrix-*.json） |

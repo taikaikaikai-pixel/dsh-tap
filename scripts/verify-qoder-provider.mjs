@@ -28,6 +28,7 @@ import { join, dirname } from 'node:path'
 import {
   createQoderOAuth, createPkce, createMachineId, normalizeExpiry, QODER_CLIENT_ID,
 } from '../providers/qoder/oauth.js'
+import { makeMockCtx, disposeAll } from './lib/mock-ctx.mjs'
 
 let pass = 0, fail = 0
 const ok = (cond, label, extra = '') => {
@@ -35,6 +36,22 @@ const ok = (cond, label, extra = '') => {
   else { fail++; console.log(`  FAIL ${label} ${extra}`) }
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * 原生 http 客户端：fetch 的 Host/Origin 都是 forbidden header，伪造不了——
+ * 门禁（Host 门 / Origin 门）测试专用。响应必须消费（踩坑 #29：paused 流
+ * 永不派发 'end'）。
+ */
+function rawGet(port, path, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ host: '127.0.0.1', port, path, method: 'GET', headers }, (res) => {
+      res.resume()
+      res.on('end', () => resolve({ status: res.statusCode }))
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
 
 // ── mock 上游 ──────────────────────────────────────────────────────────────
 const mock = {
@@ -310,13 +327,16 @@ console.log('\n[13] 真实 poll 响应形态回放')
   // 真机捕获键集：id, token, user_id, code_challenge, code_challenge_method, nonce,
   // expires_at, refresh_token_id, created_at, updated_at, refresh_token,
   // expires_in, refresh_token_expires_in, refresh_token_expires_at
+  // 时间字段一律相对当前时刻生成（踩坑 #38：fixture 禁绝对日期——写死的时间戳
+  // 一旦过期，本块会以「新鲜登录误报需重登」的形式必红）。
+  const now = Date.now()
   const real = {
     id: 'dt-abc', token: 'dt-realshape', user_id: '019efdac-1bf3-792a-a63d-1b94c1ea9fb0',
     code_challenge: 'x', code_challenge_method: 'S256', nonce: 'n-1',
-    expires_at: new Date(Date.now() + 36e5).toISOString(), refresh_token_id: 'rtr-1',
-    created_at: '2026-09-19T11:03:28.128Z', updated_at: '2026-09-19T11:03:28.128Z',
+    expires_at: new Date(now + 36e5).toISOString(), refresh_token_id: 'rtr-1',
+    created_at: new Date(now - 60e3).toISOString(), updated_at: new Date(now - 60e3).toISOString(),
     refresh_token: 'drt-realshape', expires_in: 86400,
-    refresh_token_expires_in: 2592000, refresh_token_expires_at: '2026-10-19T11:03:28.128Z',
+    refresh_token_expires_in: 2592000, refresh_token_expires_at: new Date(now + 2592000e3).toISOString(),
   }
   writeAuth({ machine: { machineId: 'f'.repeat(48) } })
   mock.pollHits = 0
@@ -464,16 +484,18 @@ console.log('\n[14] 翻译网关：COSY 信封 ↔ OpenAI 流式/非流式翻译
   ok(resp4.status === 401 && err401.error.code === 'qoder_401', '上游 401 透传')
   inferScript = 'normal'
 
-  // Host 门：非回环 Host 拒绝（fetch 会覆盖伪造 Host——必须原生客户端）
-  const resp5 = await new Promise((resolve, reject) => {
-    const r = httpRequest({ host: '127.0.0.1', port: runtime.port, path: '/v1/models', method: 'GET', headers: { Host: 'evil.example.com' } }, (rs) => {
-      rs.resume() // 消费响应（踩坑 #29：paused 流永不 close）
-      rs.on('end', () => resolve({ status: rs.statusCode }))
-    })
-    r.on('error', reject)
-    r.end()
-  })
-  ok(resp5.status === 403, 'Host 门拒绝非回环')
+  // Host 门 + Origin 门：两道门成对锁（踩坑 #61/#63——单侧覆盖即缺口）。
+  // Host 门拒绝非回环；Origin 门在 Host 回环的前提下拒绝跨站 Origin。
+  ok((await rawGet(runtime.port, '/v1/models', { Host: 'evil.example.com' })).status === 403,
+    'Host 门拒绝非回环')
+  ok((await rawGet(runtime.port, '/v1/models', {
+    Host: `127.0.0.1:${runtime.port}`, Origin: 'http://evil.example.com',
+  })).status === 403, 'Origin 门拒绝跨站 Origin（Host 回环）')
+  ok((await rawGet(runtime.port, '/v1/models', {
+    Host: `127.0.0.1:${runtime.port}`, Origin: `http://127.0.0.1:${runtime.port}`,
+  })).status === 200, 'Origin 门：Origin 与 Host 一致 → 放行')
+  ok((await rawGet(runtime.port, '/v1/models', { Host: `127.0.0.1:${runtime.port}` })).status === 200,
+    'Origin 门：无 Origin（本机/壳转发）→ 放行')
 
   // /v1/models 来自目录
   const resp6 = await fetch(`${gw}/v1/models`)
@@ -820,15 +842,14 @@ console.log('\n[17] qoderModelSetPrefs 全链路：apply() 起真组合根，moc
   })
 
   let routeHandler = null
-  let disposeFn = null
+  const effects = []
   const tap = await import('../index.js')
-  tap.apply({
-    inject: (services, cb) => {
-      if (services.includes('webServer')) cb({ webServer: { register: (route) => { routeHandler = route.handler } } })
-      // tools/settings 注入不回调：对应同步空转，不影响本块断言面
-    },
-    on: (event, cb) => { if (event === 'dispose') disposeFn = cb },
-  }, {
+  tap.apply(makeMockCtx({
+    effects,
+    // tools/settings 注入不回调：对应同步空转，不影响本块断言面
+    requireDeps: ['webServer'],
+    onRegister: (route) => { routeHandler = route.handler },
+  }), {
     bridgeEnabled: false,   // 不起 codebuddy 桥
     searchEnabled: false,   // 不注册 web 搜索/抓取 provider
     imageGenEnabled: false,
@@ -923,7 +944,7 @@ console.log('\n[17] qoderModelSetPrefs 全链路：apply() 起真组合根，moc
   r = await call('POST', { patch: { qoderModelSetPrefs: { id: 'qmodel_38max', prefs: { effort: 'medium', contextVariant: '1M' } } } })
   ok(r.status === 200 && readJson(FILE_LAYER).qoderModelPrefs.qmodel_38max.effort === 'medium', 'R3：改成目录声明档位正常（存量值不锁死）')
 
-  if (disposeFn) disposeFn()
+  await disposeAll(effects) // apply() 的 teardown：关掉本块起的 qoder 网关
   ui.close()
   cat.close()
 }

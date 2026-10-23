@@ -15,6 +15,8 @@
  * 与重构前模块全局一致。
  */
 
+import { hostnameIsLoopback } from '../../core/net-guards.js'
+
 const AUTH_PENDING_CODE = 11217 // ERROR_CODES[11217]：三态同码，勿当"未完成"以外含义用
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000
 const LOGIN_POLL_INTERVAL_MS = 1000
@@ -23,7 +25,6 @@ const LOGIN_POLL_INTERVAL_MS = 1000
 // （www.workbuddy.cn）同账户体系（docs/rules/gateway-facts.md）；codebuddy.cn
 // 依据 docs/probes/oauth-token-2026-08-19.jsonl 的账户 domain 证据一并放行。
 const LOGIN_SITE_SUFFIXES = ['tencent.com', 'workbuddy.cn', 'codebuddy.cn']
-const isLoopbackHost = (h) => h === '127.0.0.1' || h === 'localhost' || h === '[::1]'
 
 /**
  * 授权页出宿主前的门禁：authUrl 由上游响应原样给出，浏览器侧直送
@@ -39,7 +40,7 @@ function assertSafeAuthUrl(authUrl, baseURL) {
   try { parsed = new URL(String(authUrl)) } catch { throw new Error('authUrl 不是合法 URL') }
   let base
   try { base = new URL(baseURL) } catch { throw new Error('baseURL 不是合法 URL') }
-  const loopbackPair = isLoopbackHost(parsed.hostname) && isLoopbackHost(base.hostname)
+  const loopbackPair = hostnameIsLoopback(parsed.hostname) && hostnameIsLoopback(base.hostname)
   if (parsed.protocol !== 'https:' && !loopbackPair) {
     throw new Error(`authUrl 必须使用 https（收到 ${parsed.protocol}//）`)
   }

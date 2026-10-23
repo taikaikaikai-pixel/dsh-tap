@@ -1,0 +1,237 @@
+{
+  "probe": "codebuddy-pairing",
+  "base": "https://copilot.tencent.com",
+  "path": "/v2/chat/completions",
+  "startedAt": "2026-10-18T15:47:18.975Z",
+  "finishedAt": "2026-10-18T15:48:54.095Z",
+  "credential": {
+    "kind": "file:~/.dsh/.credentials.yaml",
+    "len": 59
+  },
+  "intervalMs": 1500,
+  "models": [
+    "deepseek-v4-pro",
+    "glm-5.3-flash"
+  ],
+  "expect": {
+    "P1": "A_baseline_empty（合法工具环、content 全 \"\"）→ HTTP 200 且无带内错误（对照臂必须绿，否则本探针的差分无意义）",
+    "P2": "B_orphan_tool（孤儿 tool）→ 复现外部自述的 11148 或任何配对类拒绝文案；若 200 → 当前网关对孤儿 tool 宽容，11148 属外部自述未复现",
+    "P3": "C_assistant_null / F_missing_key（assistant content 不可见）→ 与 B 同面：拒绝则证明 #41 主因在 CodeBuddy 同样成立，200 则不成立",
+    "P4": "D_tool_null（仅 tool 结果 content 不可见）→ 拒否面独立于 C（#41 记录 tool 自身 null 有另一条报错文案）",
+    "P5": "E_missing_result（tool_call 无结果）→ 拒否面独立于孤儿面（配对缺口的另一半）",
+    "P6": "外部自述码表里的 6004/402 不属本课题（冷却/计费面），本探针不为其背书；只记实测出现的码",
+    "P7": "G_repaired_orphan / H_repaired_missing（B/E 的坏体经真实 sanitizeToolPairing 处理后）→ 200：证明接入桥的修复件确实消除 11148，而不只是\"看着像能修\""
+  },
+  "arms": [
+    {
+      "model": "deepseek-v4-pro",
+      "arm": "A_baseline_empty",
+      "note": "对照臂 = 修复后形态（合法工具环，content 全 \"\"）",
+      "http": 200,
+      "code": null,
+      "msg": null,
+      "finish": "stop",
+      "contentChars": 39,
+      "chunks": 25,
+      "ms": 2254
+    },
+    {
+      "model": "deepseek-v4-pro",
+      "arm": "B_orphan_tool",
+      "note": "孤儿 tool（#39：宿主丢 assistant、留 toolResult）",
+      "http": 400,
+      "code": 11148,
+      "msg": "tool calls and tool results do not match, please start a new conversation and retry",
+      "ms": 1071
+    },
+    {
+      "model": "deepseek-v4-pro",
+      "arm": "C_assistant_null",
+      "note": "#41 主因：assistant content:null 载体",
+      "http": 200,
+      "code": null,
+      "msg": null,
+      "finish": "stop",
+      "contentChars": 40,
+      "chunks": 25,
+      "ms": 3176
+    },
+    {
+      "model": "deepseek-v4-pro",
+      "arm": "D_tool_null",
+      "note": "#41 载体形态：tool 结果 content:null",
+      "http": 200,
+      "code": null,
+      "msg": null,
+      "finish": "stop",
+      "contentChars": 41,
+      "chunks": 25,
+      "ms": 2700
+    },
+    {
+      "model": "deepseek-v4-pro",
+      "arm": "E_missing_result",
+      "note": "配对缺口：tool_call 无结果，紧接 user",
+      "http": 400,
+      "code": 11148,
+      "msg": "tool calls and tool results do not match, please start a new conversation and retry",
+      "ms": 898
+    },
+    {
+      "model": "deepseek-v4-pro",
+      "arm": "F_missing_key",
+      "note": "#41 缺键形态：assistant/tool 的 content 键缺失",
+      "http": 200,
+      "code": null,
+      "msg": null,
+      "finish": "length",
+      "contentChars": 30,
+      "chunks": 20,
+      "ms": 2603
+    },
+    {
+      "model": "deepseek-v4-pro",
+      "arm": "G_repaired_orphan",
+      "note": "正例臂：B 的坏体经真实 sanitizeToolPairing 修复",
+      "http": 200,
+      "code": null,
+      "msg": null,
+      "finish": "stop",
+      "contentChars": 14,
+      "chunks": 10,
+      "ms": 3634
+    },
+    {
+      "model": "deepseek-v4-pro",
+      "arm": "H_repaired_missing",
+      "note": "正例臂：E 的坏体经真实 sanitizeToolPairing 修复",
+      "http": 200,
+      "code": null,
+      "msg": null,
+      "finish": "length",
+      "contentChars": 58,
+      "chunks": 34,
+      "ms": 3246
+    },
+    {
+      "model": "glm-5.3-flash",
+      "arm": "A_baseline_empty",
+      "note": "对照臂 = 修复后形态（合法工具环，content 全 \"\"）",
+      "http": 200,
+      "code": null,
+      "msg": null,
+      "finish": "length",
+      "contentChars": 46,
+      "chunks": 30,
+      "ms": 5737
+    },
+    {
+      "model": "glm-5.3-flash",
+      "arm": "B_orphan_tool",
+      "note": "孤儿 tool（#39：宿主丢 assistant、留 toolResult）",
+      "http": 200,
+      "code": null,
+      "msg": null,
+      "finish": "stop",
+      "contentChars": 14,
+      "chunks": 15,
+      "ms": 5633
+    },
+    {
+      "model": "glm-5.3-flash",
+      "arm": "C_assistant_null",
+      "note": "#41 主因：assistant content:null 载体",
+      "http": 200,
+      "code": null,
+      "msg": null,
+      "finish": "tool_calls",
+      "contentChars": 0,
+      "chunks": 20,
+      "ms": 11878
+    },
+    {
+      "model": "glm-5.3-flash",
+      "arm": "D_tool_null",
+      "note": "#41 载体形态：tool 结果 content:null",
+      "http": 200,
+      "code": null,
+      "msg": null,
+      "finish": "length",
+      "contentChars": 52,
+      "chunks": 30,
+      "ms": 5728
+    },
+    {
+      "model": "glm-5.3-flash",
+      "arm": "E_missing_result",
+      "note": "配对缺口：tool_call 无结果，紧接 user",
+      "http": 200,
+      "code": null,
+      "msg": null,
+      "finish": "length",
+      "contentChars": 57,
+      "chunks": 31,
+      "ms": 5940
+    },
+    {
+      "model": "glm-5.3-flash",
+      "arm": "F_missing_key",
+      "note": "#41 缺键形态：assistant/tool 的 content 键缺失",
+      "http": 200,
+      "code": null,
+      "msg": null,
+      "finish": "tool_calls",
+      "contentChars": 0,
+      "chunks": 15,
+      "ms": 5291
+    },
+    {
+      "model": "glm-5.3-flash",
+      "arm": "G_repaired_orphan",
+      "note": "正例臂：B 的坏体经真实 sanitizeToolPairing 修复",
+      "http": 200,
+      "code": null,
+      "msg": null,
+      "finish": "stop",
+      "contentChars": 20,
+      "chunks": 13,
+      "ms": 5031
+    },
+    {
+      "model": "glm-5.3-flash",
+      "arm": "H_repaired_missing",
+      "note": "正例臂：E 的坏体经真实 sanitizeToolPairing 修复",
+      "http": 200,
+      "code": null,
+      "msg": null,
+      "finish": "length",
+      "contentChars": 51,
+      "chunks": 28,
+      "ms": 6149
+    }
+  ],
+  "verdict": {
+    "baselineOk": true,
+    "repairedControlOk": true,
+    "repairedControlArms": [
+      "G_repaired_orphan@deepseek-v4-pro: HTTP 200",
+      "G_repaired_orphan@glm-5.3-flash: HTTP 200",
+      "H_repaired_missing@deepseek-v4-pro: HTTP 200",
+      "H_repaired_missing@glm-5.3-flash: HTTP 200"
+    ],
+    "reproduced11148": true,
+    "reproduced11148Arms": [
+      "B_orphan_tool@deepseek-v4-pro",
+      "E_missing_result@deepseek-v4-pro"
+    ],
+    "pairingRejectedArms": [
+      "B_orphan_tool@deepseek-v4-pro",
+      "E_missing_result@deepseek-v4-pro"
+    ],
+    "otherErrorArms": [],
+    "conclusion": "复现 11148（2 臂）——CodeBuddy 上游确会以该码拒绝坏工具史；同一坏体经 sanitizeToolPairing 修复后 G/H 全 200 → 桥接入实测消除该拒绝"
+  },
+  "exit": {
+    "ok": true
+  }
+}

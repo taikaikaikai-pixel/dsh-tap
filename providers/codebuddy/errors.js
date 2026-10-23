@@ -19,9 +19,16 @@ export const ERROR_CODES = {
   11102: 'service info not found',
   /** chat 后端派发层兜底。docs/rules/routing.md */
   11103: 'backend dispatch failure',
-  /** 入口通道校验层拒绝（"Illegal API invocation from an unapproved channel"）：
-   *  字面量 role:"developer" 单列拒绝的当前拒绝面（2026-08-18 由 200/content_filter
-   *  变迁为 500/11128）。docs/rules/content-moderation.md */
+  /** 入口通道校验层拒绝（"Illegal API invocation from an unapproved channel"）。
+   *  同码 11128 有**两个拒绝面**，触发源与形态不同（docs/rules/content-moderation.md）：
+   *  - 旧面（2026-08-19 起）：字面量 `role:"developer"` 单列拒绝，HTTP 500，
+   *    JSON 信封无 displayMsg/displayTips。桥以 developer→system 出站重写规避。
+   *  - 新面（2026-10-21 起）：system 消息**内容指纹**校验，命中 DSH 内核固定
+   *    身份声明首句完整短语 `You are an AI agent powered by DeepSeek Harness.`
+   *    即拒，HTTP 400，响应体多出 displayMsg/displayTips/actions 字段，
+   *    displayTips 文案"可能不是官方客户端发出的"是误导（x-user-id 正常回显，
+   *    凭据有效）。桥以 agent→assistant 等价中和规避（语义不变，社区实测
+   *    400→200）。触发词是完整短语，单词 DeepSeek/Harness 单独不触发。 */
   11128: 'unapproved channel',
   /** 缺少必填参数（OAuth state 创建省略 platform 时观测）。docs/rules/oauth-handshake.md */
   10001: 'missing required parameter',
@@ -34,6 +41,18 @@ export const ERROR_CODES = {
    *  off/disabled/auto（11150），同一拼写在 glm-5.3-flash 上被静默接受——
    *  档位表只列实测/目录声明过的拼写。证据 docs/probes/codebuddy-efforts-*.json */
   11150: 'invalid_reasoning_effort',
+  /** 工具史配对失败：assistant.tool_calls 与 tool 结果对不上——孤儿 tool（无前置
+   *  tool_calls）或声明了 tool_call 却没结果。**2026-10-18 本仓库实测复现**：
+   *  坏体直连 /v2/chat/completions 在 deepseek-v4-pro 上 HTTP 400 + 本码，msg
+   *  逐字为 'tool calls and tool results do not match, please start a new
+   *  conversation and retry'；同一坏体经 providers/tool-pairing.js 修复后 200
+   *  （对照臂绿）。**glm-5.3-flash 对同一坏体静默 200**——拒绝面按模型家族分裂
+   *  （同 #41 教训 d："在容错家族上验证等于没验证"）。码名最初来自外部生态自述
+   *  （workbuddy2api-hub README"修 code 11148 坏历史"，
+   *  docs/research-eco-comparison.md §4 P0-1），现由本仓库证据落地（踩坑 #22：
+   *  外部自述不采信，以实测为准）。证据 docs/probes/codebuddy-pairing-2026-10-18.json，
+   *  可复跑 scripts/probe-codebuddy-pairing.mjs。 */
+  11148: 'tool calls and tool results do not match',
 }
 
 /**

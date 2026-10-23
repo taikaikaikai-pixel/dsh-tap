@@ -50,7 +50,7 @@
 - token 保活：每日 22:00 扫描，剩余寿命 <2h 自动 refresh。
 - 模型目录：`GET /v3/config` 取 `agents[cli].models`（**与我们同端点**），回落链"远端 → 桌面端缓存 → 窄端点 → 内置快照"；过滤档位别名与 `-sg`/`-x` 变体、同名只留 0.00 倍率档。
 - 双区域路由（CN `codebuddy.cn` / 国际 `www.workbuddy.ai`）+ 每账号独立代理槽；保留积分阈值（低于不再接单，避免上游发短信提醒）；每日 token 限额；429 时出站身份 WB/VSC/CLI 轮转（默认关）。
-- **工具史自愈**：自述"工具调用配对自愈（修 code 11148 坏历史）"——**本仓库未实测过的错误码**，但与我们 #39/#41 的 tool 配对问题同类（见 §4 改进 P0）。
+- **工具史自愈**：自述"工具调用配对自愈（修 code 11148 坏历史）"——**本仓库 2026-10-05 快照时尚未实测过该错误码**（当时只有其 README 自述，按 #22 不采信）；**2026-10-18 已实测复现**（含模型家族分裂，见 §4 P0-1），证据 `docs/probes/codebuddy-pairing-2026-10-18.json`。其与我们 #39/#41 的 tool 配对问题同类（见 §4 改进 P0）。
 - 其他：`derive_id` 设备指纹派生（UID+盐单向哈希，同账号稳定、跨账号阻断关联）；修正 `X-Product: SaaS`（自创 `X-Product: WorkBuddy` 是错的——与我们 headers.js "X-Product: SaaS 保留" 的判定一致）；`prompt_cache_key` 注入开关（默认关）；DSH 作为标准 OpenAI 客户端接入 + DeepSeek `reasoning_content` 双写 `reasoning` 字段。
 
 **codebuddy2api**：读本地桌面客户端凭据文件（`%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\*.info` 等）+ 可选管理端浏览器授权；多账号轮转/冷却/额度规避/每日签到（admin/pool.py）；兼容面最全（OpenAI chat + Codex `/v1/responses` + Anthropic `/v1/messages` + `/v1/models`）；FastAPI + Docker 一键脚本；**审核规避**：`--desensitize` 模式（压缩运行时提示词、剥工具描述、零宽字符脱敏高危词）+ 被拦后压缩模式重试。其桌面凭据读取路线已被上述 $wbEncrypted 事件判定过时。
@@ -118,18 +118,18 @@
 | 额度 | 结构化+后台刷新+低额停接 | 三上游各自只读余额面（60s memoize、永不 throw、采样纪律） | 持平；缺"低额→行为联动"（属账号池课题） |
 | 签到/成长任务 | 普遍自动化（panel 17/18 任务） | 无 | **建议不做**（§4 明确反对项） |
 | 审核处理 | 重试/换提示词/脱敏/指纹清洗 | developer→system 重写（实测定案）；无重试策略 | 差异点：我们改的是**协议正确性**，他们做的是**内容规避**。中性提示词重试可做（P2），零宽字符类不做 |
-| 兼容面 | OpenAI+Anthropic+Responses 三协议是头部标配 | 面向 dsh 宿主的 OpenAI 方言；trae/qoder 网关带 GET /v1/models | 刻意收窄（宿主插件定位）；非目标，理由见 §4 |
+| 兼容面 | OpenAI+Anthropic+Responses 三协议是头部标配 | 面向 dsh 宿主的 OpenAI 方言；trae/qoder 网关带 GET /v1/models；**2026-10-18 起 `POST /v1/messages`（Anthropic Messages）与 `POST /v1/responses`（OpenAI Responses）三通道齐备——CodeBuddy 桥 :3901 + Trae :3902 + Qoder :3903**（两面共享 `providers/protocols/` 的唯一装配 `createProtocolSurfaces`；桥侧经 `core/bridge.js` 新增的 **provider 无关通用接缝** `protocolSurfaces` / `chatPath` 在 `proxyUpstream` 之前分流，被拒即原路转发；未新起 HTTP 服务器；未做真实客户端联调、未实现项已如实列出） | 原为**刻意收窄**（宿主插件定位）；2026-10-18 以「不新起服务器」的收窄口径补上两面，并把挂载点从两条订阅网关扩到默认主通道 :3901（§4 不做清单已同步修订） |
 | 安全 | 回环+可选 key+日志脱敏 | Host+Origin 双门、令牌不出宿主、0600 原子写、脱敏视图 | **同构且更强**；缺网关可选共享密钥（P1） |
 | 部署/运维 | Docker/单二进制/管理台 | dsh 插件形态（无独立部署）；设置卡=管理台 | 定位不同，非欠账 |
 | 可观测 | request_id+耗时+网页日志台 | 取证日志（env 开关）+ usage-meter 分组视图 | 差距小；缺耗时/请求级视图（P2） |
 | 证据纪律 | 无可比（生态普遍 README 自述+代码） | docs/rules 每条带探针证据+预注册预测；诚实披露改派/INCONCLUSIVE | **独一档**，是本项目最不可替代的资产 |
-| 工具史体检 | hub 对 CodeBuddy 自述 11148 自愈；我们 Qoder/Trae 有 sanitizeToolPairing | **CodeBuddy 桥未接入**（STATE.md 2026-09-22 待办：网关宽容暂无症状） | **欠账被外部证据激活**（§4 P0） |
+| 工具史体检 | hub 对 CodeBuddy 自述 11148 自愈；我们 Qoder/Trae 有 sanitizeToolPairing | **三面齐备**：CodeBuddy 桥 2026-10-18 接入（`providers/codebuddy/index.js` 的 `transformChatPayload` 调 `providers/tool-pairing.js:50`），Qoder/Trae 更早已接 | **欠账已还**（§4 P0-1 已完成；11148 已实测复现，拒绝面按模型家族分裂） |
 
 ## 4. 改进建议（按优先级；每条给证据与落点）
 
 ### P0 — 直接可落地、有外部证据激活
 
-1. **把 `sanitizeToolPairing` 接入 CodeBuddy 透传桥**。证据链：workbuddy2api-hub 自述为 CodeBuddy 上游修 `11148` 工具史坏历史（来源：其 README，未验证）；本仓库 STATE.md 2026-09-22 会话已留待办"CodeBuddy 透传桥未接入该体检……若日后换严格上游需同样接入"；pitfalls **#63（同类防护跨子面成对审计）** 正是这一缺口的名字。行动：先按 #22 纪律用孤儿体实测 `copilot.tencent.com` 是否复现 11148（扩 `scripts/probe-*.mjs`），复现则接入体检并把 11148 收进 `providers/codebuddy/errors.js`（连同其自述码表 6004/402 的**考证**，不可直接抄）。
+1. **【已完成 2026-10-18】把 `sanitizeToolPairing` 接入 CodeBuddy 透传桥**。**历史证据链（当时的定性）**：workbuddy2api-hub 自述为 CodeBuddy 上游修 `11148` 工具史坏历史（来源：其 README，当时**未验证**，按 #22 不采信）；本仓库 STATE.md 2026-09-22 会话已留待办"CodeBuddy 透传桥未接入该体检……若日后换严格上游需同样接入"；pitfalls **#63（同类防护跨子面成对审计）** 正是这一缺口的名字。原定行动"先按 #22 纪律用孤儿体实测 `copilot.tencent.com` 是否复现 11148（扩 `scripts/probe-*.mjs`），复现则接入体检并把 11148 收进 `providers/codebuddy/errors.js`"已按序执行完毕：①**接入**——`providers/codebuddy/index.js` 的 `transformChatPayload` 已调用 `sanitizeToolPairing`（`providers/tool-pairing.js:50`），与 developer→system 重写、档位注入共存；②**收码**——`providers/codebuddy/errors.js` 收录 `11148 = tool calls and tool results do not match`；③**实测复现（2026-10-18）**——deepseek-v4-pro 上「孤儿 tool」与「声明了 tool_call 却没结果」→ HTTP 400 / code=11148，原文 `tool calls and tool results do not match, please start a new conversation and retry`，同一坏体经真实修复件后 200；**glm-5.3-flash 对全部坏体静默 200 ⇒ 拒绝面按模型家族分裂**；`content:null` / 缺键在本上游**未复现** #41 的不可见问题。证据 `docs/probes/codebuddy-pairing-2026-10-18.json`（16 臂）、探针 `scripts/probe-codebuddy-pairing.mjs`（8 臂 × 2 模型，1500ms 间隔，单账号）、断言 `scripts/verify-bridge.mjs` 新增 §18（8 条，套件共 **116 断言全绿**）。**边界如实标注**：探针只覆盖 2 个模型，其余 21 个未测；外部自述的 6004/402 仍未考证（#22 不采信）。
 2. **调研结论沉淀为风险登记**：把"读桌面凭据派已死（$wbEncrypted）"写进 `docs/rules/oauth-handshake.md` 的一句话背景（防止未来有人提议改回凭据文件读取）；把 Trae SG 域名、Qoder 国际版 `api3.qoder.sh` 记入对应 reverse 文档的"未验证情报"节。
 
 ### P1 — 小改动、明确收益
@@ -148,7 +148,7 @@
 
 - **签到/成长任务/抽奖自动化**：生态普遍做（panel 17/18 任务、Trae2api-cn 签到风控自愈），但那是"账号行为自动化 vs 风控"的猫鼠游戏（9074 换设备 ID、指纹伪造）；本仓库的"自持稳定设备身份 + 诚实披露 + 零真实写入采样纪律"恰是**风控友好**的长期存活形态，自毁优势。
 - **身份重置/硬件指纹伪造类**（qoder-free、qoder-creator 同类）：永不集成。
-- **独立多协议部署（Anthropic/Responses 面）**：与 dsh 宿主插件定位冲突，生态已有成熟专项（panel/hub/cli2api）；如真有需求，走多服务商 preset 指向这些网关即可，不重复造。
+- **独立多协议部署（Anthropic/Responses 面）**：与 dsh 宿主插件定位冲突，生态已有成熟专项（panel/hub/cli2api）；如真有需求，走多服务商 preset 指向这些网关即可，不重复造。**（2026-10-18 修订：本条仍禁"独立部署形态"；但两面已以收窄口径落地——长在既有回环网关上、不新起 HTTP 服务器、不引入独立部署，经主控确认；见 `providers/protocols/` 与 `scripts/verify-protocols.mjs`。同日补记：**两面已接上 CodeBuddy 桥 `:3901`（三通道齐备）**，桥侧接缝是 provider 无关的通用件，仍不构成独立部署。）**
 - **审核规避的深水区**（零宽字符脱敏、指纹清洗、prompt 整体替换）：只做"中性提示词重试"级别的透明策略（P2 再议），并如实披露。
 
 ### 观察清单（不动手，定期看）
@@ -159,7 +159,7 @@
 
 ## 5. 对比后的能力结论（一句话版）
 
-本项目在**证据纪律、认证路线韧性、目录真实性、诚实披露**四项上是生态最强档；在**账号池、网关鉴权、流式心跳、maxTokens 精度**四项上低于生态标配或存在被外部证据激活的已知欠账；签到自动化与独立多协议部署属刻意不做的定位选择，建议维持。
+本项目在**证据纪律、认证路线韧性、目录真实性、诚实披露**四项上是生态最强档；在**账号池、网关鉴权、流式心跳、maxTokens 精度**四项上低于生态标配或存在被外部证据激活的已知欠账（其中 CodeBuddy 工具史体检这条 P0 已于 2026-10-18 实测复现并接入，见 §4 P0-1）；签到自动化属刻意不做的定位选择，建议维持；独立多协议部署原属刻意不做，2026-10-18 以「长在既有回环网关、不新起服务器」的收窄口径落地两面，并同日接上 CodeBuddy 桥 `:3901`（三通道齐备；见 §4「不做」清单修订注）。
 
 ## 6. 来源清单
 

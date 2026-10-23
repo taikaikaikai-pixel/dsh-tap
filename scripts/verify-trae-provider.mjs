@@ -38,6 +38,8 @@ import { buildChatRequest, createTraeStreamParser, createTraeGateway, cumulative
 import { flattenQuery, buildRemoteCreateBody, createRemoteEventParser, createRemoteSession } from '../providers/trae/remote.js'
 import { normalizeTraeError, formatTraeErrorMessage } from '../providers/trae/errors.js'
 import { createTraeProvider } from '../providers/trae/index.js'
+import { createLoopbackGateway } from '../providers/loopback-gateway.js'
+import { makeMockCtx, disposeAll } from './lib/mock-ctx.mjs'
 
 let failures = 0
 let checks = 0
@@ -590,6 +592,65 @@ try {
   check('Host 门：非回环 Host → 403', evilHost.status === 403, `status=${evilHost.status}`)
   const ipv6Host = await rawRequest(gwPort, '/v1/models', { headers: { Host: '[::1]' } })
   check('Host 门：回环白名单 Host（[::1]）正常放行', ipv6Host.status === 200 && (() => { try { return JSON.parse(ipv6Host.body).object === 'list' } catch { return false } })())
+
+  // Origin 门回归锁（踩坑 #61/#63：与 Host 门成对，单侧覆盖即缺口）：
+  // 浏览器跨站请求（含免预检 sendBeacon）恒带 Origin，其 host:port 必须与 Host
+  // 一致；无 Origin 放行（本机 fetch/curl 与剥 Origin 的壳转发）。门在共用骨架
+  // providers/loopback-gateway.js，两条通道共用一份实现，两侧各锁一遍。
+  const crossOrigin = await rawRequest(gwPort, '/v1/models', {
+    headers: { Host: `127.0.0.1:${gwPort}`, Origin: 'http://evil.example.com' },
+  })
+  check('Origin 门：跨站 Origin（Host 回环）→ 403', crossOrigin.status === 403, `status=${crossOrigin.status}`)
+  const sameOrigin = await rawRequest(gwPort, '/v1/models', {
+    headers: { Host: `127.0.0.1:${gwPort}`, Origin: `http://127.0.0.1:${gwPort}` },
+  })
+  check('Origin 门：Origin 与 Host 一致 → 放行', sameOrigin.status === 200, `status=${sameOrigin.status}`)
+  const noOrigin = await rawRequest(gwPort, '/v1/models', { headers: { Host: `127.0.0.1:${gwPort}` } })
+  check('Origin 门：无 Origin（本机/壳转发）→ 放行', noOrigin.status === 200, `status=${noOrigin.status}`)
+
+  // 收体上限回归锁（与 core/bridge.js 同 32MiB 口径）：超限答真实 413 JSON 且
+  // Connection: close，不静默 reset（旧行为 req.destroy()：调用方只见连接被重置，
+  // 拿不到任何状态码）。实现是 providers/loopback-gateway.js（两条通道共用一份），
+  // 故直接对该模块注入小上限（bodyLimitBytes）——毫秒级、零 RST 风险地锁住分支，
+  // 不必真推 33MiB（那会在收尾窗口里偶发对端 RST）。
+  {
+    const probeRuntime = { running: false, port: null, lastError: null }
+    const seen = []
+    const { listen: listenProbe } = createLoopbackGateway({
+      runtime: probeRuntime,
+      logPrefix: '[dsh-tap/test-gw]',
+      unavailableNote: '（测试）',
+      listModelIds: () => ['m'],
+      bodyLimitBytes: 1024,
+      handleChat: async (_req, res, rawBody) => {
+        seen.push(rawBody)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true }))
+      },
+    })
+    const stopProbe = listenProbe(0)
+    await sleep(60)
+    const pPort = probeRuntime.port
+    const over = await fetch(`http://127.0.0.1:${pPort}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pad: 'x'.repeat(4096) }),
+    })
+    const overBody = await over.json().catch(() => null)
+    check('收体超上限 → 413 JSON（非静默 reset）',
+      over.status === 413 && /too large/.test(overBody?.error?.message ?? '') && seen.length === 0,
+      `HTTP ${over.status} ${JSON.stringify(overBody)}`)
+    check('413 响应带 Connection: close（未帧完的上传体不污染 keep-alive）',
+      (over.headers.get('connection') ?? '').toLowerCase() === 'close',
+      String(over.headers.get('connection')))
+    const under = await fetch(`http://127.0.0.1:${pPort}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pad: 'x'.repeat(16) }),
+    })
+    check('上限内正常交翻译层', under.status === 200 && seen.length === 1, `HTTP ${under.status} seen=${seen.length}`)
+    await stopProbe()
+  }
 
   // 流式
   const streamRes = await fetch(`http://127.0.0.1:${gwPort}/v1/chat/completions`, {
@@ -1337,14 +1398,13 @@ try {
       buildCatalogFixture(fixtureDb) // glm-5.3（声明 light/high）+ kimi-k3（无声明）+ BYOK + dead
 
       let routeHandler = null
-      let disposeRoot = null
+      const effects = []
       const tap = await import('../index.js')
-      tap.apply({
-        inject: (services, cb) => {
-          if (services.includes('webServer')) cb({ webServer: { register: (route) => { routeHandler = route.handler } } })
-        },
-        on: (event, cb) => { if (event === 'dispose') disposeRoot = cb },
-      }, {
+      tap.apply(makeMockCtx({
+        effects,
+        requireDeps: ['webServer'], // tools/settings 注入不回调：对应同步空转
+        onRegister: (route) => { routeHandler = route.handler },
+      }), {
         bridgeEnabled: false,
         searchEnabled: false,
         imageGenEnabled: false,
@@ -1426,7 +1486,7 @@ try {
 
       ui.close()
       deadEnd.close()
-      if (typeof disposeRoot === 'function') disposeRoot()
+      await disposeAll(effects) // apply() 的 teardown：关掉本块起的 trae 网关
     } finally {
       if (prevDshHome === undefined) delete process.env.DSH_HOME
       else process.env.DSH_HOME = prevDshHome

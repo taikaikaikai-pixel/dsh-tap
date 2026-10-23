@@ -28,6 +28,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { makeMockCtx, disposeAll } from './lib/mock-ctx.mjs'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const COOLDOWN_MS = 500
@@ -234,11 +235,8 @@ async function main() {
   behavior.clear()
   const modB = await import(`${pathToFileURL(join(ROOT, 'index.js')).href}?case=bridge`)
   const bridgePort = await freePort()
-  const ctx = {
-    inject: (_deps, cb) => cb({ webServer: { register() {} }, tools: { register: () => () => {} } }),
-    web: { registerSearchProvider: () => () => {}, registerFetchProvider: () => () => {} },
-    on: () => {},
-  }
+  const effects = []
+  const ctx = makeMockCtx({ effects, withTools: true })
   modB.apply(ctx, {
     baseURL,
     bridgePort,
@@ -298,6 +296,7 @@ async function main() {
       JSON.stringify(auths()) === JSON.stringify(['ck_charlie', 'ck_alpha']), JSON.stringify(auths()))
   }
 
+  await disposeAll(effects) // apply() 的 teardown：关掉本进程起的桥
   console.log(failures === 0 ? '\nall rotation checks passed' : `\n${failures} check(s) FAILED`)
   process.exit(failures === 0 ? 0 : 1)
 }

@@ -1,0 +1,66 @@
+{
+  "probe": "protocols",
+  "date": "2026-10-18",
+  "goal": "给回环网关新增 Anthropic Messages (/v1/messages) 与 OpenAI Responses (/v1/responses) 两个本机协议面",
+  "evidence_kind": "offline-stub",
+  "upstream": null,
+  "upstream_note": "本轮**没有**真实上游实例参与：断言全部跑在 createLoopbackGateway + 桩 handleChat 上（桩扮演本通道内部 OpenAI chat 面）。协议面本身不直连上游，因此离线桩覆盖的就是本层的全部新代码路径；真实上游端到端联调（Claude Code / OpenAI SDK 指向 127.0.0.1:3902|3903）**尚未做**，不做兼容性声明。",
+  "commands": [
+    {
+      "cmd": "node scripts/verify-protocols.mjs",
+      "result": "verify-protocols: 149 passed, 0 failed"
+    },
+    {
+      "cmd": "node scripts/verify-bridge.mjs",
+      "result": "all bridge checks passed (exit 0)"
+    },
+    {
+      "cmd": "node scripts/verify-core-generic.mjs",
+      "result": "core/ generality proven: second OpenAI-compatible upstream wired with zero core/ changes (core/ 未被本轮改动)"
+    },
+    {
+      "cmd": "node scripts/verify-trae-provider.mjs",
+      "result": "verify:trae-provider OK — 147 项断言全部通过（共享骨架消费者回归）"
+    },
+    {
+      "cmd": "node scripts/verify-qoder-provider.mjs",
+      "result": "verify-qoder-provider: 174 通过 / 0 失败（共享骨架消费者回归）"
+    }
+  ],
+  "routes_added": [
+    { "method": "POST", "path": "/v1/messages", "protocol": "Anthropic Messages", "stream": "SSE", "non_stream": "聚合为 Anthropic Message JSON" },
+    { "method": "POST", "path": "/v1/responses", "protocol": "OpenAI Responses", "stream": "SSE", "non_stream": "聚合为 Response JSON" }
+  ],
+  "reuse_inventory": {
+    "providers/loopback-gateway.js": "共享骨架（回环绑定 / Host+Origin 双门 / 收体上限 / 413 / listen 失败不崩宿主）；两个协议面接在同一份骨架上，未新起服务器",
+    "handleChat（trae|qoder 翻译层入口）": "上游流水线原样复用：凭据收口、SessionLimiter 并发闸、首字节护栏、tool 配对体检、usage 计量、取证日志、客户端断连取消上游",
+    "providers/tool-pairing.js": "经 handleChat 间接复用（出站配对/可见性归一仍在内部面内）",
+    "providers/trae/gateway.js + providers/qoder/gateway.js": "SSE 状态机/tool_calls 累积/首字节护栏逻辑**未复制**——协议面只消费它们产出的内部 OpenAI chunk",
+    "core/net-guards.js": "Host/Origin 判定唯一真源，协议面走同一条前置分支"
+  },
+  "new_shared_modules": [
+    "providers/protocols/chat-capture.js（捕获式 res + 驱动内部 chat 面，两个协议面共用）",
+    "providers/protocols/surface.js（生命周期驱动器：入站校验 / 恒流式驱动 / 提交纪律 / 错误映射 / 非流式聚合出口）"
+  ],
+  "coverage": {
+    "request_mapping": ["anthropic: system 串|text 块 / text|image|tool_use|tool_result 块 / tools[input_schema] / tool_choice auto|any|none|tool / max_tokens|temperature|top_p|stop_sequences|metadata.user_id", "responses: instructions / input 串|items(message|function_call|function_call_output) / 扁平 function 工具 / tool_choice / max_output_tokens|temperature|top_p|parallel_tool_calls|reasoning.effort|text.format"],
+    "sse_sequence": ["anthropic: message_start → content_block_start → content_block_delta(text_delta|input_json_delta) → content_block_stop → message_delta → message_stop", "responses: response.created → in_progress → output_item.added → content_part.added → output_text.delta → output_text.done → content_part.done → output_item.done → completed（函数调用走 function_call_arguments.delta/.done）"],
+    "non_stream": ["上游仅流式（11101），非流式由同一 translator 的 result() 聚合，未另写聚合器"],
+    "tool_roundtrip": ["tool_use/tool_result ↔ assistant.tool_calls/role:tool", "function_call/function_call_output ↔ 同上", "参数增量按 index 累积拼接"],
+    "errors": ["未提交用户可见内容 → 协议化 JSON 错误（Anthropic {type:error,error:{type,message}} / Responses {error:{message,type,param,code}}），状态码与原因均保留", "已提交 → 协议内错误事件（event: error）"],
+    "gates": ["非回环 Host 403", "跨站 Origin 403", "同源/无 Origin 放行", "超限 413", "既有 /v1/chat/completions 与 GET /v1/models 零回归"]
+  },
+  "not_implemented": [
+    "Anthropic 扩展思考：reasoning_content 增量丢弃（thinking 块需服务端 signature_delta，客户端无法伪造）",
+    "Anthropic 请求侧 thinking/top_k/container/mcp_servers/service_tier/context_management 忽略；document/search_result/未知内容块忽略；tool_result 内 image 丢弃；Anthropic 托管工具（web_search_* 等）不透传；cache_control 断点不透传；/v1/messages/count_tokens 未实现",
+    "Responses 有状态面：store/previous_response_id/include/background/truncation/metadata/prompt 不支持（previous_response_id 明确 400 报错，不静默丢历史）",
+    "Responses 推理摘要事件（response.reasoning_summary_text.delta）不发；非 function 工具（web_search/file_search/computer_use/code_interpreter/mcp）不透传；input_image 之外的多模态项忽略",
+    "Responses 事件面不完整：response.queued / annotation.added / refusal.delta 等中间态事件不发；response 对象只填核心字段（max_output_tokens/instructions/tools 等回显字段置 null/空）",
+    "CodeBuddy 桥 :3901 未接这两个协议面（core/ 须保持 provider 无关，接缝需另设计，本轮明确不做）"
+  ],
+  "boundaries": [
+    "协议面挂在两条订阅通道翻译网关（Trae :3902 / Qoder :3903）共用的回环骨架上——因此它们同时出现在两个端口；CodeBuddy 桥 :3901 无此两面",
+    "未做真实客户端端到端联调（Claude Code / OpenAI SDK 真机指向回环端口），协议兼容性按「未实现项」如实标注，不声明完全兼容",
+    "Anthropic 流中途出错时不再补 content_block_stop/message_delta/message_stop（以 error 事件终结，Anthropic 客户端语义即终结）"
+  ]
+}
