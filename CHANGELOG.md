@@ -34,7 +34,7 @@
   - **Anthropic 工具块整块下发（并行调用交错不再产生非法序列）**：原 translator 边收边开块，开第二槽即关闭第一槽；并行 `tool_calls` 的参数增量可跨索引交错，晚到的增量会发给**已关闭**的 content block（`content_block_delta` 落在 `content_block_stop` 之后）。改为参数按槽缓存、`finish()` 按槽顺序整块 `start → delta → stop`（text 增量仍实时流式）；`message_delta.usage` 补 `input_tokens`（上游 usage 恒在末帧，`message_start` 只能给 0）。回归：`verify-protocols` 新增 `tools-interleaved` 场景 + 块内连续性体检。
   - **Responses 截断终态与错误码类型**：`finish_reason=length` 时终态事件由 `response.completed` 改为 `response.incomplete`（与 `status: incomplete` 一致）；流内 `error` 事件的 `code` 复用 `surface.js` 的 `normalizeCode`（CodeBuddy 数字码 → 字符串）。回归：新增 `length` / `error-after-text-numeric` 场景。
   - **Qoder 测试 fixture 去绝对日期（踩坑 #38）**：`refresh_token_expires_at` 写死 `2026-10-19`，过期后「新鲜登录不误报需重登」必红；改为相对 `Date.now()` 生成（`verify-qoder-provider` 174 全绿）。
-  - **断言口径**：`verify-protocols` 153 → **166**（166 passed / 0 failed）；`verify-bridge` 146、`verify-trae-provider` 147、`verify-qoder-provider` 174 均全绿。
+  - **断言口径**：`verify-protocols` 153 → **166**（166 passed / 0 failed）；`verify-bridge` **151**（含 §18–§20，实测 151 ok / 0 FAIL）、`verify-trae-provider` 147、`verify-qoder-provider` 174 均全绿。
 
 - **逆向分析流水线纪律落仓（docs/skill 级，无代码变更）**：新增项目 skill `.agents/skills/dsh-re-pipeline/`——沉淀 2026-10-10/11 harness.dll / ai_agent.dll 巨型二进制实战（REA 固定窗口禁令与适用面、导入先落库三步流水线、跨 shell 层传参与 pkill 纪律、needle 形态矩阵、Save succeeded + `ANALYSIS_TIMEOUT=false` 验收双条件、已落库 Ghidra 工程清单）；AGENTS.md 加「逆向分析」指针段。前置逆向成果已随 `50e433f` 落库（`docs/reverse/trae-cloud-api.md` §2 函数级复核 + 证据 `docs/probes/trae-*-2026-10-11.*` + 踩坑 #69–#72）。
 
