@@ -38,7 +38,7 @@ git -c credential.helper= `
 ```
 
 - 校验：`gh api repos/taikaikaikai-pixel/dsh-tap/commits/main --jq .sha` 必须等于本地 `git rev-parse HEAD`；`gh api repos/taikaikaikai-pixel/dsh-tap/git/ref/tags/vX.Y.Z` 的 `object.type` 必须是 `tag`（annotated）。
-- 首用实录（0.21.0）：main `8cdd31e..feb6849` + `v0.21.0` 推送成功，远端 SHA 与本地一致。
+- 首用实录（0.21.0）：main `8cdd31e..feb6849` + `v0.21.0` 推送成功，远端 SHA 与本地一致。（2026-10-23 去署名改写：`13eb5d6/feb6849/682b068` 三提交剥离 Claude Co-Authored-By 尾注后变为 `6502cb7/393fc3b/9cde70b`，`v0.21.0` 随之重指 `393fc3b` 并 force push——本文旧 SHA 引用以此为准。）
 
 ## 生态调研：CodeBuddy/Trae/Qoder 同类实现对比（2026-10-05 完成，docs/research-eco-comparison.md）
 
