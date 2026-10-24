@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.21.1 (2026-10-24)
+
+- **CodeBuddy 通道全线 400/11128 修复：网关第二道门（system 内容指纹）→ 桥等价中和**：2026-10-21 起所有 CodeBuddy 请求成功率归零，报错 `HTTP 400 / code 11128 / "Illegal API invocation from an unapproved channel"`，附 `displayTips`「这次调用没通过渠道校验，可能不是官方客户端发出的」。**该文案是误导**——`x-user-id` 正常回显，凭据有效；与账号、额度、网络、UA 均无关（社区已逐变量排除）。
+  - **根因**：网关在通道校验层新增 system 消息**内容指纹**校验——扫描每条 system 消息，命中 DSH 内核固定身份声明首句完整短语 `You are an AI agent powered by DeepSeek Harness.` 即拒。该句来自 `@deepseek-ai/dsh-system-prompt` 的 `includeHarnessIdentity`（默认 `true`，order −1000 的 `harness:identity` 段落），每请求必带 ⇒ 必然命中。**与 0.20 时代那条 developer 角色门同码同文案，但是两道独立的门**（新面多出 displayMsg/displayTips/actions，HTTP 400；旧面是 HTTP 500）。
+  - **精确边界**（社区逐词收敛实测）：单词 `DeepSeek` / `Harness`、片段 `powered by DeepSeek Harness` 均 **200**；仅**完整短语**才 **400**。等价改写 `agent`→`assistant`（`You are an AI assistant powered by DeepSeek Harness.`）即 **200**，语义等价。
+  - **修法**：`providers/codebuddy/index.js` 新增模块级纯函数 `neutralizeHarnessIdentity()`，在 `transformChatPayload` 出站前对命中的 system 内容做**精确短语替换**（`agent`→`assistant`）。只匹配完整短语、不做子串/正则，未命中的请求体**逐字节不变**（不误伤正常提示词）。与既有 developer→system 重写、tool 配对体检、档位注入共存。
+  - **回归**：`scripts/verify-bridge.mjs` 新增 **§20（5 条断言）**——命中替换 / 嵌在长文本内只换短语其余不变 / 不含短语逐字节 no-op / 与 developer→system 同请求都生效；套件 **151 ok / 0 FAIL**（exit 0）。`verify-core-generic` 全绿（core 层仍零上游特化；R6 断言 developer 角色在通用上游原样透传，证明重写归适配器所有）。
+  - **规则与证据**：`docs/rules/content-moderation.md` 新增 **§R-M4**（第二拒绝面：精确边界、新旧两面区别、桥的规避方式、社区来源）；`providers/codebuddy/errors.js` 的 11128 注释同步区分两个拒绝面。社区实测来源：[Issue #560](https://github.com/Ebony-Vinyl/dsh-our-free-model/issues/560)（curl 复现 + 二分定位）、[Issue #87](https://github.com/dingminhua/dsh-connect-workbuddy/issues/87)（#87/#88/#89/#90 同一问题四份报告）。
+  - **生效方式**：`providers/codebuddy/` 属启动期加载 ⇒ **完全退出并重启 dsh 桌面应用**（宿主会缓存插件旧代码，只刷新页面不够）。升级到 0.21.1 并重启后，CodeBuddy 通道恢复。**若仍复现**：说明网关指纹清单又加了新词条——把新的 `requestId` 与 system 内容贴回 issue，需再扩一条匹配规则。
+
 ## 0.21.0 (2026-10-23)
 
 - **CodeBuddy 桥工具配对体检收口（生态调研 P0-1，`11148` 实测复现）+ 回环网关上新增两个协议面（Anthropic Messages / OpenAI Responses）**：两件事同日落地，证据与断言如下。
@@ -27,8 +37,6 @@
   - **顺带修 `verify-desktop-acceptance` §4b 误报**：该静态锁要求 `index.js` 零 desktop 引用，而上面 `ctx.effect` 那条注释写了 "desktop shell"——改述为「host shell」（锁本身不动，属真实 CI 闸门）。
   - **回归**：verify-bridge / verify-rotation / verify-core-generic（5 模块）/ verify-providers / verify-trae-provider（147）/ verify-qoder-provider（174）/ verify-host-config / verify-agents-md / verify-desktop-acceptance --structural（7 ok / 0 FAIL / 5 SKIP）全绿。`verify-models`（活探针）2 项为上游侧现状，非本轮引入：deepseek-v3 / deepseek-r1 回 11134「provider temporarily unavailable」、glm-5.1 / glm-5.0-turbo 回 11150「reasoning effort value is not supported」——探针体**不带** `reasoning_effort`，是网关为这两个模型自带默认档所致（stash 复核确认改动前同形）。`probe-codebuddy-tier-wiring` 活探针「目录条目带完整声明」一项亦为改动前既有失败：上游目录现给 `glm-5.3-flash` 的 `canDisableThinking:false`，与探针断言（true）不符，属上游目录漂移，未改断言（待单独定论）。
   - **生效方式**：`core/` 与组合根属启动期加载 ⇒ **重启 dsh / 退出并重启桌面应用**；测试脚本改动随下次跑套件生效。
-
-- **CodeBuddy 网关第二道 11128 门（system 内容指纹）→ 桥等价中和（2026-10-21）**：通道校验层新增 system **内容指纹**校验——命中 DSH 内核固定身份首句完整短语 `You are an AI agent powered by DeepSeek Harness.` 即 `HTTP 400 / 11128`；与旧的 developer 角色门同码同文案但形态不同（多出 displayMsg/displayTips/actions，凭据有效）。触发词是完整短语（单词 `DeepSeek`/`Harness` 单独不触发，社区逐词收敛，Issue #560 / #87）。桥在 `transformChatPayload` 出站前做等价中和（`agent`→`assistant`）：只精确匹配完整短语，未命中逐字节不变；`verify-bridge` §20 五条断言（命中替换 / 长文内仅换短语 / 不误伤 / 与 developer→system 同请求生效）。规则与证据见 `docs/rules/content-moderation.md` §R-M4。
 
 - **协议面审查修正（Anthropic 并行工具调用 / Responses 截断终态 / 测试 fixture）**：审查轮修掉三处协议保真问题，断言同步。
   - **Anthropic 工具块整块下发（并行调用交错不再产生非法序列）**：原 translator 边收边开块，开第二槽即关闭第一槽；并行 `tool_calls` 的参数增量可跨索引交错，晚到的增量会发给**已关闭**的 content block（`content_block_delta` 落在 `content_block_stop` 之后）。改为参数按槽缓存、`finish()` 按槽顺序整块 `start → delta → stop`（text 增量仍实时流式）；`message_delta.usage` 补 `input_tokens`（上游 usage 恒在末帧，`message_start` 只能给 0）。回归：`verify-protocols` 新增 `tools-interleaved` 场景 + 块内连续性体检。
